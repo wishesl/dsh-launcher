@@ -1,0 +1,291 @@
+import { useEffect, useRef, useState } from 'react';
+import { api, errMsg } from '../api';
+import type { DSHVersion, Instance, RegistryInfo } from '../types';
+
+interface Props {
+  registry: RegistryInfo | null;
+  editing: Instance | null; // null => creating a new instance
+  onClose: () => void;
+  onSaved: (list: Instance[]) => void;
+}
+
+const DEFAULT_INSTANCE = (): Instance => ({
+  id: '',
+  name: '',
+  directory: '',
+  version: 'latest',
+  localVersion: '',
+  extraArgs: '',
+  autoStart: false,
+  createdAt: null,
+  pid: 0,
+  status: 'stopped',
+});
+
+const CUSTOM_OPTION = '__custom__';
+
+export default function InstanceForm({ registry, editing, onClose, onSaved }: Props) {
+  const [form, setForm] = useState<Instance>(() =>
+    editing ? { ...DEFAULT_INSTANCE(), ...editing } : DEFAULT_INSTANCE()
+  );
+  const [versionMode, setVersionMode] = useState<'latest' | 'spec'>(
+    !editing || editing.version === 'latest' ? 'latest' : 'spec'
+  );
+  // Local copy of the version list so the dropdown works even if the
+  // App-level registry query failed or hasn't finished yet.
+  const [versionList, setVersionList] = useState<DSHVersion[]>(registry?.versions ?? []);
+  const [versionListLoading, setVersionListLoading] = useState(false);
+  const [customMode, setCustomMode] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const dirInputRef = useRef<HTMLInputElement>(null);
+
+  const set = (patch: Partial<Instance>) => setForm((f) => ({ ...f, ...patch }));
+
+  // Keep local list in sync when the App-level registry updates.
+  useEffect(() => {
+    if (registry && registry.versions.length > 0) {
+      setVersionList(registry.versions);
+    }
+  }, [registry]);
+
+  // Auto-fetch the version list when switching to "指定版本" and we have none.
+  useEffect(() => {
+    if (versionMode === 'spec' && versionList.length === 0) {
+      refreshVersionList();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [versionMode]);
+
+  const refreshVersionList = async () => {
+    setVersionListLoading(true);
+    try {
+      const info = await api.queryRegistry();
+      if (info.versions.length > 0) setVersionList(info.versions);
+      if (versionMode === 'spec') {
+        setForm((f) => {
+          if (f.version === 'latest' || f.version === '') {
+            return { ...f, version: info.latest };
+          }
+          return f;
+        });
+      }
+    } catch (e) {
+      setError('获取版本列表失败: ' + errMsg(e));
+    } finally {
+      setVersionListLoading(false);
+    }
+  };
+
+  const pickDir = async () => {
+    try {
+      const dir = await api.selectDirectory();
+      if (!dir) return;
+      set({ directory: dir });
+      if (!form.name || form.name === form.directory) {
+        set({ name: dir.split(/[\\/]/).pop() || dir });
+      }
+      setChecking(true);
+      const local = await api.detectLocalVersion(dir);
+      set({ localVersion: local });
+      setChecking(false);
+    } catch (e) {
+      setChecking(false);
+      setError(errMsg(e));
+    }
+  };
+
+  const detectLocal = async () => {
+    if (!form.directory) return;
+    setChecking(true);
+    try {
+      const local = await api.detectLocalVersion(form.directory);
+      set({ localVersion: local });
+    } catch (e) {
+      setError(errMsg(e));
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  useEffect(() => {
+    if (dirInputRef.current) dirInputRef.current.focus();
+  }, []);
+
+  const selectVersion = (value: string) => {
+    if (value === CUSTOM_OPTION) {
+      setCustomMode(true);
+      return;
+    }
+    setCustomMode(false);
+    set({ version: value });
+  };
+
+  const save = async () => {
+    if (!form.directory.trim()) {
+      setError('请选择启动目录');
+      return;
+    }
+    setError(null);
+    setSaving(true);
+    try {
+      const finalVersion = versionMode === 'latest' ? 'latest' : (form.version.trim() || 'latest');
+      const list = await api.saveInstance({ ...form, version: finalVersion });
+      onSaved(list);
+      onClose();
+    } catch (e) {
+      setError(errMsg(e));
+      setSaving(false);
+    }
+  };
+
+  const showCustom = customMode || (form.version !== '' && form.version !== 'latest' && !versionList.some((v) => v.version === form.version));
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <h2>{editing ? '编辑实例' : '添加实例'}</h2>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+        </div>
+
+        <div className="form-body">
+          <label className="field">
+            <span className="field-label">名称</span>
+            <input
+              ref={dirInputRef}
+              value={form.name}
+              onChange={(e) => set({ name: e.target.value })}
+              placeholder="实例名称（默认取目录名）"
+            />
+          </label>
+
+          <label className="field">
+            <span className="field-label">启动目录</span>
+            <div className="row">
+              <input
+                value={form.directory}
+                onChange={(e) => set({ directory: e.target.value })}
+                placeholder="选择/输入 DSH 启动目录，如 D:\Users\Tony\Desktop"
+              />
+              <button type="button" className="btn btn-ghost" onClick={pickDir}>浏览…</button>
+            </div>
+            <div className="field-hint">
+              {checking ? (
+                <span>检测本地副本中…</span>
+              ) : form.localVersion ? (
+                <span>
+                  本地已安装 DSH <b>{form.localVersion}</b>
+                  <button type="button" className="link-btn" onClick={detectLocal}>重新检测</button>
+                </span>
+              ) : form.directory ? (
+                <span>
+                  该目录没有本地 DSH 副本（启动时将按版本从 npm 拉取）
+                  <button type="button" className="link-btn" onClick={detectLocal}>检测</button>
+                </span>
+              ) : null}
+            </div>
+          </label>
+
+          <div className="field">
+            <span className="field-label">DSH 版本</span>
+            <div className="radio-row">
+              <label className={`radio-card ${versionMode === 'latest' ? 'selected' : ''}`}>
+                <input
+                  type="radio"
+                  name="vmode"
+                  checked={versionMode === 'latest'}
+                  onChange={() => setVersionMode('latest')}
+                />
+                <span className="radio-title">最新版</span>
+                <span className="radio-sub">{registry ? registry.latest : '…'}</span>
+              </label>
+              <label className={`radio-card ${versionMode === 'spec' ? 'selected' : ''}`}>
+                <input
+                  type="radio"
+                  name="vmode"
+                  checked={versionMode === 'spec'}
+                  onChange={() => setVersionMode('spec')}
+                />
+                <span className="radio-title">指定版本</span>
+                <span className="radio-sub">从列表选择</span>
+              </label>
+            </div>
+
+            {versionMode === 'spec' && (
+              <div className="spec-version">
+                {showCustom ? (
+                  <div className="row">
+                    <input
+                      value={form.version}
+                      onChange={(e) => set({ version: e.target.value })}
+                      placeholder="输入任意版本号，如 0.1.0-rc.6"
+                    />
+                    <button type="button" className="btn btn-ghost" onClick={() => { setCustomMode(false); set({ version: versionList[0]?.version ?? 'latest' }); }}>
+                      取消
+                    </button>
+                  </div>
+                ) : (
+                  <div className="row">
+                    <select
+                      className="version-select"
+                      value={form.version}
+                      onChange={(e) => selectVersion(e.target.value)}
+                      disabled={versionListLoading}
+                    >
+                      <option value="latest">latest — 最新版{registry?.latest ? `（${registry.latest}）` : ''}</option>
+                      {versionList.map((v) => (
+                        <option key={v.version} value={v.version}>
+                          {v.version}{v.isLatest ? '（latest）' : ''}
+                        </option>
+                      ))}
+                      <option value={CUSTOM_OPTION}>✏️ 自定义版本号…</option>
+                    </select>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={refreshVersionList}
+                      title="刷新版本列表"
+                    >
+                      {versionListLoading ? '…' : '刷新'}
+                    </button>
+                  </div>
+                )}
+                <div className="field-hint">
+                  {versionListLoading
+                    ? '正在从 npm registry 获取版本列表…'
+                    : versionList.length > 0
+                    ? `共 ${versionList.length} 个版本，最新 ${versionList[0].version}（${versionList[0].published ? new Date(versionList[0].published).toLocaleDateString() : ''} 发布）`
+                    : '未获取到版本列表，点击「刷新」重试'}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <label className="field">
+            <span className="field-label">附加参数 <span className="muted">（可选）</span></span>
+            <input
+              value={form.extraArgs}
+              onChange={(e) => set({ extraArgs: e.target.value })}
+              placeholder="如 --port 3081（将追加到 dsh web 之后）"
+            />
+            <div className="field-hint">
+              最终命令示例：
+              <code className="mono">npx -y @deepseek-ai/dsh@{versionMode === 'latest' ? 'latest' : (form.version || '…')} web{form.extraArgs ? ' ' + form.extraArgs : ''}</code>
+            </div>
+          </label>
+
+          {error && <div className="form-error">{error}</div>}
+        </div>
+
+        <div className="modal-foot">
+          <button className="btn btn-ghost" onClick={onClose}>取消</button>
+          <button className="btn btn-primary" onClick={save} disabled={saving}>
+            {saving ? '保存中…' : editing ? '保存修改' : '添加并保存'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

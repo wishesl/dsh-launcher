@@ -1,0 +1,16 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+# Node
+node_modules/
+
+# Build artifacts (launcher has its own nested .gitignore for build/bin & frontend/dist)
+dsh-launcher/build/bin/
+dsh-launcher/frontend/dist/
+
+# Temp
+*.tmp
