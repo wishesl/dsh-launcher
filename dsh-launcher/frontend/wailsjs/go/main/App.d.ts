@@ -10,6 +10,8 @@ export function GetAppDataPath():Promise<string>;
 
 export function GetInstances():Promise<Array<main.Instance>>;
 
+export function InstallToDirectory(arg1:string):Promise<Array<main.Instance>>;
+
 export function LaunchInstance(arg1:string):Promise<void>;
 
 export function QueryLatestVersion():Promise<string>;

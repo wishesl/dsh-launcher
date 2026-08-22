@@ -112,6 +112,20 @@ export default function App() {
     }
   };
 
+  const install = async (id: string) => {
+    setBusyId(id);
+    setActiveLogId(id);
+    try {
+      const list = await api.installToDirectory(id);
+      setInstances(list);
+      showToast('安装完成，本地副本已生成');
+    } catch (e) {
+      setError('安装失败: ' + errMsg(e));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const toggleLog = (id: string) => {
     setActiveLogId((cur) => (cur === id ? null : id));
     if (logViewRef.current) {
@@ -148,6 +162,7 @@ export default function App() {
             onAdd={() => setModal({ mode: 'new' })}
             onStart={start}
             onStop={stop}
+            onInstall={install}
             onEdit={(inst) => setModal({ mode: 'edit', instance: inst })}
             onDelete={remove}
             onToggleLog={toggleLog}

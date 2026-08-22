@@ -9,6 +9,7 @@ interface Props {
   onAdd: () => void;
   onStart: (id: string) => void;
   onStop: (id: string) => void;
+  onInstall: (id: string) => void;
   onEdit: (inst: Instance) => void;
   onDelete: (id: string) => void;
   onToggleLog: (id: string) => void;
@@ -22,6 +23,7 @@ export default function InstanceList({
   onAdd,
   onStart,
   onStop,
+  onInstall,
   onEdit,
   onDelete,
   onToggleLog,
@@ -50,6 +52,7 @@ export default function InstanceList({
             activeLog={activeLogId === inst.id}
             onStart={onStart}
             onStop={onStop}
+            onInstall={onInstall}
             onEdit={onEdit}
             onDelete={onDelete}
             onToggleLog={onToggleLog}

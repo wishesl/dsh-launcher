@@ -138,6 +138,8 @@ html, body, #root {
 .btn-danger:hover:not(:disabled) { background: #c52222; }
 .btn-ghost { border-color: var(--border); background: var(--panel-2); }
 .btn-ghost:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.btn-accent { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.btn-accent:hover:not(:disabled) { background: var(--accent); color: #fff; }
 .danger-text { color: var(--red); }
 .danger-text:hover:not(:disabled) { border-color: var(--red) !important; color: var(--red) !important; }
 
@@ -184,6 +186,7 @@ html, body, #root {
 }
 .instance-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; }
 .meta-item { font-size: 12px; color: var(--muted); }
+.meta-warn { color: var(--amber); font-weight: 600; }
 .meta-item b { color: var(--text); font-family: var(--mono); font-weight: 600; }
 .tag-warn {
   margin-left: 6px; font-size: 11px; color: var(--amber);
@@ -319,6 +322,7 @@ html, body, #root {
 .field-hint b { color: var(--text); }
 
 .radio-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.radio-row-3 { grid-template-columns: 1fr 1fr 1fr; }
 .radio-card {
   display: flex; flex-direction: column; gap: 3px;
   border: 1px solid var(--border);

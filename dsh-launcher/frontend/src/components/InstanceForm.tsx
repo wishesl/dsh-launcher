@@ -265,17 +265,27 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
           </div>
 
           <div className="field">
-            <span className="field-label">包管理器</span>
-            <div className="radio-row">
-              <label className={`radio-card ${form.pkgMgr !== 'npx' ? 'selected' : ''}`}>
+            <span className="field-label">启动方式</span>
+            <div className="radio-row radio-row-3">
+              <label className={`radio-card ${form.pkgMgr === 'pnpm' ? 'selected' : ''}`}>
                 <input
                   type="radio"
                   name="pkgmgr"
-                  checked={form.pkgMgr !== 'npx'}
+                  checked={form.pkgMgr === 'pnpm'}
                   onChange={() => set({ pkgMgr: 'pnpm' })}
                 />
                 <span className="radio-title">pnpm dlx <span className="tag-warn">推荐</span></span>
-                <span className="radio-sub">本机可靠，首次安装不卡</span>
+                <span className="radio-sub">从 pnpm 缓存拉取，不占目录</span>
+              </label>
+              <label className={`radio-card ${form.pkgMgr === 'local' ? 'selected' : ''}`}>
+                <input
+                  type="radio"
+                  name="pkgmgr"
+                  checked={form.pkgMgr === 'local'}
+                  onChange={() => set({ pkgMgr: 'local' })}
+                />
+                <span className="radio-title">本地副本</span>
+                <span className="radio-sub">官方设计：目录内真实源码可读</span>
               </label>
               <label className={`radio-card ${form.pkgMgr === 'npx' ? 'selected' : ''}`}>
                 <input
@@ -289,7 +299,11 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
               </label>
             </div>
             <div className="field-hint">
-              首次启动会下载 DSH（180+ 子包），可能需 1-2 分钟，之后走缓存秒启。
+              {form.pkgMgr === 'local'
+                ? '用目录内 node_modules 的 DSH 源码启动（agent 可读码开发插件）。选它后可点实例卡片的「安装到目录」把版本装进来。'
+                : form.pkgMgr === 'npx'
+                ? 'npx -y 从 registry 拉取。'
+                : '首次启动会下载 DSH（180+ 子包），约 1-2 分钟，之后走缓存秒启。'}
             </div>
           </div>
 
@@ -302,7 +316,7 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
             />
             <div className="field-hint">
               最终命令示例：
-              <code className="mono">{form.pkgMgr === 'npx' ? 'npx -y' : 'pnpm dlx'} @deepseek-ai/dsh@{versionMode === 'latest' ? 'latest' : (form.version || '…')} web{form.extraArgs ? ' ' + form.extraArgs : ''}</code>
+              <code className="mono">{form.pkgMgr === 'local' ? 'npx @deepseek-ai/dsh' : (form.pkgMgr === 'npx' ? 'npx -y' : 'pnpm dlx')} {form.pkgMgr === 'local' ? '' : '@deepseek-ai/dsh@' + (versionMode === 'latest' ? 'latest' : (form.version || '…'))} web{form.extraArgs ? ' ' + form.extraArgs : ''}</code>
             </div>
           </label>
 

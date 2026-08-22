@@ -70,6 +70,9 @@ func (a *App) LaunchInstance(id string) error {
 
 	a.emitStatus(snapshot.ID, "starting", 0)
 	a.systemLog(snapshot.ID, 0, fmt.Sprintf("正在启动 DSH %s (目录: %s)", versionLabel(snapshot.Version), snapshot.Directory))
+	if snapshot.PkgMgr == "local" && snapshot.LocalVersion == "" {
+		a.systemLog(snapshot.ID, 0, "提示: 目录内未检测到本地副本，npx 可能回退到 registry 下载。建议先「安装到目录」。")
+	}
 
 	cmdStr := buildCommand(snapshot.Version, snapshot.ExtraArgs, snapshot.PkgMgr)
 	cmd := exec.Command("cmd", "/c", cmdStr)
@@ -221,22 +224,36 @@ func (a *App) systemLog(id string, pid int, line string) {
 //
 //	pnpm dlx @deepseek-ai/dsh@0.1.1-rc.2 web --port 3081   (pkgMgr = "pnpm", default)
 //	npx -y @deepseek-ai/dsh@0.1.1-rc.2 web                 (pkgMgr = "npx")
+//	npx @deepseek-ai/dsh web --port 3081                   (pkgMgr = "local" — use the
+//	                                                         directory's node_modules copy,
+//	                                                         the "official design" where the
+//	                                                         workspace holds readable DSH source)
 func buildCommand(version, extraArgs, pkgMgr string) string {
-	v := strings.TrimSpace(version)
-	if v == "" {
-		v = "latest"
-	}
-	if pkgMgr == "npx" {
+	extra := strings.TrimSpace(extraArgs)
+	switch pkgMgr {
+	case "local":
+		parts := []string{"npx", "@deepseek-ai/dsh", "web"}
+		if extra != "" {
+			parts = append(parts, extra)
+		}
+		return strings.Join(parts, " ")
+	case "npx":
+		v := strings.TrimSpace(version)
+		if v == "" {
+			v = "latest"
+		}
 		parts := []string{"npx", "-y", "@deepseek-ai/dsh@" + v, "web"}
-		extra := strings.TrimSpace(extraArgs)
 		if extra != "" {
 			parts = append(parts, extra)
 		}
 		return strings.Join(parts, " ")
 	}
 	// default: pnpm dlx (reliable on machines where npm install hangs)
+	v := strings.TrimSpace(version)
+	if v == "" {
+		v = "latest"
+	}
 	parts := []string{"pnpm", "dlx", "@deepseek-ai/dsh@" + v, "web"}
-	extra := strings.TrimSpace(extraArgs)
 	if extra != "" {
 		parts = append(parts, extra)
 	}

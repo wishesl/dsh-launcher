@@ -30,6 +30,7 @@ func TestBuildCommand(t *testing.T) {
 		{"", "", "pnpm", "pnpm dlx @deepseek-ai/dsh@latest web"},
 		{"0.1.1-rc.2", "", "npx", "npx -y @deepseek-ai/dsh@0.1.1-rc.2 web"},
 		{"0.1.0-rc.6", "--port 3081", "npx", "npx -y @deepseek-ai/dsh@0.1.0-rc.6 web --port 3081"},
+		{"0.1.1-rc.2", "--port 3081", "local", "npx @deepseek-ai/dsh web --port 3081"},
 		{" latest ", " --profile web ", "", "pnpm dlx @deepseek-ai/dsh@latest web --profile web"},
 	}
 	for _, c := range cases {

@@ -18,6 +18,10 @@ export function GetInstances() {
   return window['go']['main']['App']['GetInstances']();
 }
 
+export function InstallToDirectory(arg1) {
+  return window['go']['main']['App']['InstallToDirectory'](arg1);
+}
+
 export function LaunchInstance(arg1) {
   return window['go']['main']['App']['LaunchInstance'](arg1);
 }
