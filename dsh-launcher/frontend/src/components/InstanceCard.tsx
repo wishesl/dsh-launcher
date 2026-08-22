@@ -44,6 +44,7 @@ export default function InstanceCard({
         <span className={`pill pill-version ${instance.version === 'latest' ? 'pill-accent' : ''}`}>
           {instance.version === 'latest' ? 'latest' : instance.version}
         </span>
+        <span className="pill" title="包管理器">{instance.pkgMgr === 'npx' ? 'npx' : 'pnpm'}</span>
         <span className="instance-state">{st.label}</span>
       </div>
 

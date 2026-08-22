@@ -88,6 +88,11 @@ func (a *App) SaveInstance(inst Instance) ([]Instance, error) {
 	if inst.Version == "" {
 		inst.Version = "latest"
 	}
+	if inst.PkgMgr == "" {
+		// pnpm dlx is the reliable launcher on this machine (npm install of
+		// @deepseek-ai/dsh hangs in dependency resolution, see the guide).
+		inst.PkgMgr = "pnpm"
+	}
 	if inst.CreatedAt.IsZero() {
 		inst.CreatedAt = time.Now()
 	}
@@ -103,6 +108,7 @@ func (a *App) SaveInstance(inst Instance) ([]Instance, error) {
 		existing.Version = inst.Version
 		existing.LocalVersion = inst.LocalVersion
 		existing.ExtraArgs = inst.ExtraArgs
+		existing.PkgMgr = inst.PkgMgr
 		a.store.saveAll()
 		return a.store.list(), nil
 	}

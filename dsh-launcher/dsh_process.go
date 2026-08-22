@@ -71,13 +71,16 @@ func (a *App) LaunchInstance(id string) error {
 	a.emitStatus(snapshot.ID, "starting", 0)
 	a.systemLog(snapshot.ID, 0, fmt.Sprintf("正在启动 DSH %s (目录: %s)", versionLabel(snapshot.Version), snapshot.Directory))
 
-	cmdStr := buildCommand(snapshot.Version, snapshot.ExtraArgs)
+	cmdStr := buildCommand(snapshot.Version, snapshot.ExtraArgs, snapshot.PkgMgr)
 	cmd := exec.Command("cmd", "/c", cmdStr)
 	cmd.Dir = snapshot.Directory
 	if cmd.Dir == "" {
 		cmd.Dir = "."
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	// Auto-answer prompts (e.g. pnpm asking whether to build native modules
+	// like node-pty/koffi: "a" = select all, then "y" = confirm).
+	cmd.Stdin = strings.NewReader("a\na\ny\ny\n")
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -214,13 +217,25 @@ func (a *App) systemLog(id string, pid int, line string) {
 }
 
 // buildCommand returns the shell command that launches DSH for a version.
-// Example: npx -y @deepseek-ai/dsh@0.1.1-rc.2 web
-func buildCommand(version, extraArgs string) string {
+// Examples:
+//
+//	pnpm dlx @deepseek-ai/dsh@0.1.1-rc.2 web --port 3081   (pkgMgr = "pnpm", default)
+//	npx -y @deepseek-ai/dsh@0.1.1-rc.2 web                 (pkgMgr = "npx")
+func buildCommand(version, extraArgs, pkgMgr string) string {
 	v := strings.TrimSpace(version)
 	if v == "" {
 		v = "latest"
 	}
-	parts := []string{"npx", "-y", "@deepseek-ai/dsh@" + v, "web"}
+	if pkgMgr == "npx" {
+		parts := []string{"npx", "-y", "@deepseek-ai/dsh@" + v, "web"}
+		extra := strings.TrimSpace(extraArgs)
+		if extra != "" {
+			parts = append(parts, extra)
+		}
+		return strings.Join(parts, " ")
+	}
+	// default: pnpm dlx (reliable on machines where npm install hangs)
+	parts := []string{"pnpm", "dlx", "@deepseek-ai/dsh@" + v, "web"}
 	extra := strings.TrimSpace(extraArgs)
 	if extra != "" {
 		parts = append(parts, extra)

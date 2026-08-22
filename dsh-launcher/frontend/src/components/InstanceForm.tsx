@@ -16,6 +16,7 @@ const DEFAULT_INSTANCE = (): Instance => ({
   version: 'latest',
   localVersion: '',
   extraArgs: '',
+  pkgMgr: 'pnpm', // pnpm dlx 在这台机器上更可靠（npm 直装会卡死）
   autoStart: false,
   createdAt: null,
   pid: 0,
@@ -263,6 +264,35 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
             )}
           </div>
 
+          <div className="field">
+            <span className="field-label">包管理器</span>
+            <div className="radio-row">
+              <label className={`radio-card ${form.pkgMgr !== 'npx' ? 'selected' : ''}`}>
+                <input
+                  type="radio"
+                  name="pkgmgr"
+                  checked={form.pkgMgr !== 'npx'}
+                  onChange={() => set({ pkgMgr: 'pnpm' })}
+                />
+                <span className="radio-title">pnpm dlx <span className="tag-warn">推荐</span></span>
+                <span className="radio-sub">本机可靠，首次安装不卡</span>
+              </label>
+              <label className={`radio-card ${form.pkgMgr === 'npx' ? 'selected' : ''}`}>
+                <input
+                  type="radio"
+                  name="pkgmgr"
+                  checked={form.pkgMgr === 'npx'}
+                  onChange={() => set({ pkgMgr: 'npx' })}
+                />
+                <span className="radio-title">npx</span>
+                <span className="radio-sub">标准方式（本机 npm 安装可能卡住）</span>
+              </label>
+            </div>
+            <div className="field-hint">
+              首次启动会下载 DSH（180+ 子包），可能需 1-2 分钟，之后走缓存秒启。
+            </div>
+          </div>
+
           <label className="field">
             <span className="field-label">附加参数 <span className="muted">（可选）</span></span>
             <input
@@ -272,7 +302,7 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
             />
             <div className="field-hint">
               最终命令示例：
-              <code className="mono">npx -y @deepseek-ai/dsh@{versionMode === 'latest' ? 'latest' : (form.version || '…')} web{form.extraArgs ? ' ' + form.extraArgs : ''}</code>
+              <code className="mono">{form.pkgMgr === 'npx' ? 'npx -y' : 'pnpm dlx'} @deepseek-ai/dsh@{versionMode === 'latest' ? 'latest' : (form.version || '…')} web{form.extraArgs ? ' ' + form.extraArgs : ''}</code>
             </div>
           </label>
 

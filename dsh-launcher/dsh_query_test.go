@@ -22,18 +22,20 @@ func TestParseVersion(t *testing.T) {
 
 func TestBuildCommand(t *testing.T) {
 	cases := []struct {
-		version, extra, want string
+		version, extra, pkgMgr, want string
 	}{
-		{"latest", "", "npx -y @deepseek-ai/dsh@latest web"},
-		{"0.1.1-rc.2", "", "npx -y @deepseek-ai/dsh@0.1.1-rc.2 web"},
-		{"0.1.0-rc.6", "--port 3081", "npx -y @deepseek-ai/dsh@0.1.0-rc.6 web --port 3081"},
-		{"", "", "npx -y @deepseek-ai/dsh@latest web"},
-		{" latest ", " --profile web ", "npx -y @deepseek-ai/dsh@latest web --profile web"},
+		{"latest", "", "pnpm", "pnpm dlx @deepseek-ai/dsh@latest web"},
+		{"0.1.1-rc.2", "", "pnpm", "pnpm dlx @deepseek-ai/dsh@0.1.1-rc.2 web"},
+		{"0.1.0-rc.6", "--port 3081", "pnpm", "pnpm dlx @deepseek-ai/dsh@0.1.0-rc.6 web --port 3081"},
+		{"", "", "pnpm", "pnpm dlx @deepseek-ai/dsh@latest web"},
+		{"0.1.1-rc.2", "", "npx", "npx -y @deepseek-ai/dsh@0.1.1-rc.2 web"},
+		{"0.1.0-rc.6", "--port 3081", "npx", "npx -y @deepseek-ai/dsh@0.1.0-rc.6 web --port 3081"},
+		{" latest ", " --profile web ", "", "pnpm dlx @deepseek-ai/dsh@latest web --profile web"},
 	}
 	for _, c := range cases {
-		got := buildCommand(c.version, c.extra)
+		got := buildCommand(c.version, c.extra, c.pkgMgr)
 		if got != c.want {
-			t.Errorf("buildCommand(%q, %q) = %q, want %q", c.version, c.extra, got, c.want)
+			t.Errorf("buildCommand(%q, %q, %q) = %q, want %q", c.version, c.extra, c.pkgMgr, got, c.want)
 		}
 	}
 }

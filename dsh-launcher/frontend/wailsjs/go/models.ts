@@ -23,6 +23,7 @@ export namespace main {
 	    version: string;
 	    localVersion: string;
 	    extraArgs: string;
+	    pkgMgr: string;
 	    autoStart: boolean;
 	    // Go type: time
 	    createdAt: any;
@@ -41,6 +42,7 @@ export namespace main {
 	        this.version = source["version"];
 	        this.localVersion = source["localVersion"];
 	        this.extraArgs = source["extraArgs"];
+	        this.pkgMgr = source["pkgMgr"];
 	        this.autoStart = source["autoStart"];
 	        this.createdAt = this.convertValues(source["createdAt"], null);
 	        this.pid = source["pid"];

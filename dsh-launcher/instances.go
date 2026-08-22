@@ -18,6 +18,7 @@ type Instance struct {
 	Version      string    `json:"version"`     // "latest" or an exact version
 	LocalVersion string    `json:"localVersion"` // detected in dir, informational
 	ExtraArgs    string    `json:"extraArgs"`    // optional extra CLI args after "web"
+	PkgMgr       string    `json:"pkgMgr"`       // "pnpm" (recommended) or "npx"
 	AutoStart    bool      `json:"autoStart"`
 	CreatedAt    time.Time `json:"createdAt"`
 
