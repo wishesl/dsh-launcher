@@ -29,6 +29,14 @@ func main() {
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
 		OnBeforeClose:    app.onBeforeClose,
+		SingleInstanceLock: &options.SingleInstanceLock{
+			// A second launch of the exe (or `wails dev`) exits immediately and
+			// asks the running instance to bring its window back to the front.
+			UniqueId: "dsh-launcher",
+			OnSecondInstanceLaunch: func(_ options.SecondInstanceData) {
+				app.showWindow()
+			},
+		},
 		Bind: []interface{}{
 			app,
 		},
