@@ -15,6 +15,7 @@ export default function App() {
   const [registry, setRegistry] = useState<RegistryInfo | null>(null);
   const [registryLoading, setRegistryLoading] = useState(false);
   const [appDataPath, setAppDataPath] = useState('');
+  const [closeToTray, setCloseToTray] = useState(true);
   const [logs, setLogs] = useState<Record<string, LogEvent[]>>({});
   const [activeLogId, setActiveLogId] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalState>(null);
@@ -56,6 +57,7 @@ export default function App() {
     refresh();
     refreshRegistry();
     api.getAppDataPath().then(setAppDataPath).catch(() => undefined);
+    api.getCloseToTray().then(setCloseToTray).catch(() => undefined);
   }, [refresh, refreshRegistry]);
 
   // Wire Go -> frontend events.
@@ -135,6 +137,24 @@ export default function App() {
     }
   };
 
+  const hideToTray = async () => {
+    try {
+      await api.hideToTray();
+    } catch (e) {
+      setError('隐藏失败: ' + errMsg(e));
+    }
+  };
+
+  const toggleCloseToTray = async (v: boolean) => {
+    setCloseToTray(v);
+    try {
+      await api.setCloseToTray(v);
+      showToast(v ? '已开启：关闭窗口时隐藏到托盘' : '已关闭：点 X 将直接退出');
+    } catch (e) {
+      setError(errMsg(e));
+    }
+  };
+
   const copyUrl = (url: string) => {
     try {
       navigator.clipboard.writeText(url);
@@ -160,7 +180,10 @@ export default function App() {
         registry={registry}
         registryLoading={registryLoading}
         appDataPath={appDataPath}
+        closeToTray={closeToTray}
         onRefreshRegistry={refreshRegistry}
+        onToggleCloseToTray={toggleCloseToTray}
+        onHideToTray={hideToTray}
       />
 
       {error && (

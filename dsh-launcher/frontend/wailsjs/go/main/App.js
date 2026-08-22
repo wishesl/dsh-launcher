@@ -14,8 +14,16 @@ export function GetAppDataPath() {
   return window['go']['main']['App']['GetAppDataPath']();
 }
 
+export function GetCloseToTray() {
+  return window['go']['main']['App']['GetCloseToTray']();
+}
+
 export function GetInstances() {
   return window['go']['main']['App']['GetInstances']();
+}
+
+export function HideToTray() {
+  return window['go']['main']['App']['HideToTray']();
 }
 
 export function InstallToDirectory(arg1) {
@@ -44,6 +52,10 @@ export function SaveInstance(arg1) {
 
 export function SelectDirectory() {
   return window['go']['main']['App']['SelectDirectory']();
+}
+
+export function SetCloseToTray(arg1) {
+  return window['go']['main']['App']['SetCloseToTray'](arg1);
 }
 
 export function SortInstances() {

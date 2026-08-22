@@ -1,7 +1,9 @@
 import {
   DetectLocalVersion,
   GetAppDataPath,
+  GetCloseToTray,
   GetInstances,
+  HideToTray,
   InstallToDirectory,
   LaunchInstance,
   QueryLatestVersion,
@@ -9,6 +11,7 @@ import {
   RemoveInstance,
   SaveInstance,
   SelectDirectory,
+  SetCloseToTray,
   StopInstance,
 } from '../wailsjs/go/main/App';
 import { EventsOn } from '../wailsjs/runtime/runtime';
@@ -29,6 +32,9 @@ export const api = {
   queryRegistry: (): Promise<RegistryInfo> => QueryRegistry(),
   queryLatestVersion: (): Promise<string> => QueryLatestVersion(),
   getAppDataPath: (): Promise<string> => GetAppDataPath(),
+  hideToTray: (): Promise<void> => HideToTray(),
+  getCloseToTray: (): Promise<boolean> => GetCloseToTray(),
+  setCloseToTray: (v: boolean): Promise<void> => SetCloseToTray(v),
 
   onLog(cb: (e: LogEvent) => void): void {
     EventsOn('dsh:log', cb);

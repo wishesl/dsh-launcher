@@ -8,7 +8,11 @@ export function EnsureConfigDir():Promise<void>;
 
 export function GetAppDataPath():Promise<string>;
 
+export function GetCloseToTray():Promise<boolean>;
+
 export function GetInstances():Promise<Array<main.Instance>>;
+
+export function HideToTray():Promise<void>;
 
 export function InstallToDirectory(arg1:string):Promise<Array<main.Instance>>;
 
@@ -23,6 +27,8 @@ export function RemoveInstance(arg1:string):Promise<Array<main.Instance>>;
 export function SaveInstance(arg1:main.Instance):Promise<Array<main.Instance>>;
 
 export function SelectDirectory():Promise<string>;
+
+export function SetCloseToTray(arg1:boolean):Promise<void>;
 
 export function SortInstances():Promise<void>;
 

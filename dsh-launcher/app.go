@@ -16,16 +16,19 @@ import (
 type App struct {
 	ctx context.Context
 
-	store *instanceStore
+	store    *instanceStore
+	settings *settingsStore
 
 	mu        sync.Mutex
 	processes map[string]*managedProcess // instanceID -> running process
+	quitting  bool                       // set when the user quits from the tray
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{
 		store:     newInstanceStore(),
+		settings:  newSettingsStore(),
 		processes: make(map[string]*managedProcess),
 	}
 }
@@ -42,9 +45,12 @@ func (a *App) startup(ctx context.Context) {
 		inst.PID = 0
 	}
 	a.mu.Unlock()
+	// Install the system tray icon + menu.
+	a.startTray()
 }
 
-// shutdown stops every managed process so no orphan DSH keeps running.
+// shutdown stops every managed process so no orphan DSH keeps running, then
+// removes the tray icon.
 func (a *App) shutdown(ctx context.Context) {
 	a.mu.Lock()
 	procs := make([]*managedProcess, 0, len(a.processes))
@@ -56,6 +62,24 @@ func (a *App) shutdown(ctx context.Context) {
 	for _, p := range procs {
 		p.stop()
 	}
+	systrayQuit()
+}
+
+// onBeforeClose intercepts the window close request. When "close to tray" is
+// enabled (and the user is not explicitly quitting), the window is hidden
+// instead of the app exiting.
+func (a *App) onBeforeClose(ctx context.Context) bool {
+	a.mu.Lock()
+	quitting := a.quitting
+	a.mu.Unlock()
+	if quitting {
+		return false // allow the app to close
+	}
+	if !a.settings.get().CloseToTray {
+		return false // tray mode off: close as usual
+	}
+	runtime.WindowHide(ctx)
+	return true // prevent close, keep running in the tray
 }
 
 // emit sends an event to the frontend (guarded against nil context during tests).
@@ -184,4 +208,25 @@ func (a *App) EnsureConfigDir() error {
 		return err
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Tray
+// ---------------------------------------------------------------------------
+
+// HideToTray hides the main window to the system tray (called from the header
+// button). The app keeps running.
+func (a *App) HideToTray() {
+	a.hideWindow()
+}
+
+// GetCloseToTray returns whether clicking the window close (X) hides to tray
+// instead of quitting.
+func (a *App) GetCloseToTray() bool {
+	return a.settings.get().CloseToTray
+}
+
+// SetCloseToTray enables/disables hide-to-tray on close and persists the choice.
+func (a *App) SetCloseToTray(enabled bool) {
+	a.settings.setCloseToTray(enabled)
 }

@@ -4,10 +4,21 @@ interface Props {
   registry: RegistryInfo | null;
   registryLoading: boolean;
   appDataPath: string;
+  closeToTray: boolean;
   onRefreshRegistry: () => void;
+  onToggleCloseToTray: (v: boolean) => void;
+  onHideToTray: () => void;
 }
 
-export default function Header({ registry, registryLoading, appDataPath, onRefreshRegistry }: Props) {
+export default function Header({
+  registry,
+  registryLoading,
+  appDataPath,
+  closeToTray,
+  onRefreshRegistry,
+  onToggleCloseToTray,
+  onHideToTray,
+}: Props) {
   return (
     <header className="app-header">
       <div className="brand">
@@ -41,6 +52,19 @@ export default function Header({ registry, registryLoading, appDataPath, onRefre
         <button className="btn btn-ghost" onClick={onRefreshRegistry} disabled={registryLoading} title="刷新最新版本">
           {registryLoading ? '刷新中…' : '刷新版本'}
         </button>
+
+        <label className="tray-toggle" title="关闭窗口时隐藏到系统托盘，而不是退出">
+          <input
+            type="checkbox"
+            checked={closeToTray}
+            onChange={(e) => onToggleCloseToTray(e.target.checked)}
+          />
+          关闭时最小化到托盘
+        </label>
+        <button className="btn btn-ghost" onClick={onHideToTray} title="隐藏到系统托盘，进程继续运行">
+          最小化到托盘
+        </button>
+
         <span className="appdata" title="配置文件位置">{appDataPath}</span>
       </div>
     </header>
