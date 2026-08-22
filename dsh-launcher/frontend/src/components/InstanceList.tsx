@@ -10,6 +10,8 @@ interface Props {
   onStart: (id: string) => void;
   onStop: (id: string) => void;
   onInstall: (id: string) => void;
+  onOpen: (url: string) => void;
+  onCopyUrl: (url: string) => void;
   onEdit: (inst: Instance) => void;
   onDelete: (id: string) => void;
   onToggleLog: (id: string) => void;
@@ -24,6 +26,8 @@ export default function InstanceList({
   onStart,
   onStop,
   onInstall,
+  onOpen,
+  onCopyUrl,
   onEdit,
   onDelete,
   onToggleLog,
@@ -53,6 +57,8 @@ export default function InstanceList({
             onStart={onStart}
             onStop={onStop}
             onInstall={onInstall}
+            onOpen={onOpen}
+            onCopyUrl={onCopyUrl}
             onEdit={onEdit}
             onDelete={onDelete}
             onToggleLog={onToggleLog}

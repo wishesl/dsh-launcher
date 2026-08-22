@@ -1,4 +1,5 @@
 import type { Instance, RegistryInfo } from '../types';
+import { getWebUrl } from '../util';
 
 interface Props {
   instance: Instance;
@@ -8,6 +9,8 @@ interface Props {
   onStart: (id: string) => void;
   onStop: (id: string) => void;
   onInstall: (id: string) => void;
+  onOpen: (url: string) => void;
+  onCopyUrl: (url: string) => void;
   onEdit: (inst: Instance) => void;
   onDelete: (id: string) => void;
   onToggleLog: (id: string) => void;
@@ -34,6 +37,8 @@ export default function InstanceCard({
   onStart,
   onStop,
   onInstall,
+  onOpen,
+  onCopyUrl,
   onEdit,
   onDelete,
   onToggleLog,
@@ -45,6 +50,7 @@ export default function InstanceCard({
 
   const outdated = instance.localVersion && registry && registry.latest && instance.localVersion !== registry.latest;
   const needsInstall = pkgMgr === 'local' && !instance.localVersion;
+  const webUrl = getWebUrl(instance);
 
   return (
     <div className={`instance-card ${activeLog ? 'active' : ''}`}>
@@ -59,6 +65,19 @@ export default function InstanceCard({
       </div>
 
       <div className="instance-dir" title={instance.directory}>{instance.directory}</div>
+
+      <div className="instance-url-row">
+        <span className="meta-item">web:</span>
+        <code className="mono url-text" title="DSH web 地址（点击复制）" onClick={() => onCopyUrl(webUrl.url)}>{webUrl.url}</code>
+        <button
+          className="btn btn-primary btn-sm"
+          onClick={() => onOpen(webUrl.url)}
+          disabled={!isRunning || webUrl.autoPort}
+          title={webUrl.autoPort ? '--port 0 自动选端口，无法预知地址' : '在浏览器打开 DSH web'}
+        >
+          打开
+        </button>
+      </div>
 
       <div className="instance-meta">
         {instance.localVersion ? (

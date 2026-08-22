@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, errMsg } from './api';
+import { BrowserOpenURL } from '../wailsjs/runtime/runtime';
 import type { Instance, LogEvent, RegistryInfo } from './types';
 import Header from './components/Header';
 import InstanceList from './components/InstanceList';
@@ -126,6 +127,23 @@ export default function App() {
     }
   };
 
+  const openWeb = (url: string) => {
+    try {
+      BrowserOpenURL(url);
+    } catch (e) {
+      setError('打开浏览器失败: ' + errMsg(e));
+    }
+  };
+
+  const copyUrl = (url: string) => {
+    try {
+      navigator.clipboard.writeText(url);
+      showToast('地址已复制');
+    } catch (e) {
+      setError('复制失败: ' + errMsg(e));
+    }
+  };
+
   const toggleLog = (id: string) => {
     setActiveLogId((cur) => (cur === id ? null : id));
     if (logViewRef.current) {
@@ -163,6 +181,8 @@ export default function App() {
             onStart={start}
             onStop={stop}
             onInstall={install}
+            onOpen={openWeb}
+            onCopyUrl={copyUrl}
             onEdit={(inst) => setModal({ mode: 'edit', instance: inst })}
             onDelete={remove}
             onToggleLog={toggleLog}
