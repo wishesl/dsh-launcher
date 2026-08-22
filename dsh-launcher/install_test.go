@@ -28,7 +28,7 @@ func TestInstallToDirectoryLive(t *testing.T) {
 		Name:      "poc",
 		Directory: poc,
 		Version:   "0.1.1-rc.2",
-		PkgMgr:    "pnpm",
+		PkgMgr:    "local", // recommended mode: install a local copy to the dir
 	})
 
 	list, err := app.InstallToDirectory("t1")

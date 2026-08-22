@@ -16,7 +16,7 @@ const DEFAULT_INSTANCE = (): Instance => ({
   version: 'latest',
   localVersion: '',
   extraArgs: '',
-  pkgMgr: 'pnpm', // pnpm dlx 在这台机器上更可靠（npm 直装会卡死）
+  pkgMgr: 'local', // 推荐：目录内本地副本（官方设计，agent 可读真实源码）
   autoStart: false,
   createdAt: null,
   pid: 0,
@@ -267,16 +267,6 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
           <div className="field">
             <span className="field-label">启动方式</span>
             <div className="radio-row radio-row-3">
-              <label className={`radio-card ${form.pkgMgr === 'pnpm' ? 'selected' : ''}`}>
-                <input
-                  type="radio"
-                  name="pkgmgr"
-                  checked={form.pkgMgr === 'pnpm'}
-                  onChange={() => set({ pkgMgr: 'pnpm' })}
-                />
-                <span className="radio-title">pnpm dlx <span className="tag-warn">推荐</span></span>
-                <span className="radio-sub">从 pnpm 缓存拉取，不占目录</span>
-              </label>
               <label className={`radio-card ${form.pkgMgr === 'local' ? 'selected' : ''}`}>
                 <input
                   type="radio"
@@ -284,8 +274,18 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
                   checked={form.pkgMgr === 'local'}
                   onChange={() => set({ pkgMgr: 'local' })}
                 />
-                <span className="radio-title">本地副本</span>
+                <span className="radio-title">本地副本 <span className="tag-warn">推荐</span></span>
                 <span className="radio-sub">官方设计：目录内真实源码可读</span>
+              </label>
+              <label className={`radio-card ${form.pkgMgr === 'pnpm' ? 'selected' : ''}`}>
+                <input
+                  type="radio"
+                  name="pkgmgr"
+                  checked={form.pkgMgr === 'pnpm'}
+                  onChange={() => set({ pkgMgr: 'pnpm' })}
+                />
+                <span className="radio-title">pnpm dlx</span>
+                <span className="radio-sub">从 pnpm 缓存拉取，不占目录</span>
               </label>
               <label className={`radio-card ${form.pkgMgr === 'npx' ? 'selected' : ''}`}>
                 <input

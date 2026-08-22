@@ -113,9 +113,10 @@ func (a *App) SaveInstance(inst Instance) ([]Instance, error) {
 		inst.Version = "latest"
 	}
 	if inst.PkgMgr == "" {
-		// pnpm dlx is the reliable launcher on this machine (npm install of
-		// @deepseek-ai/dsh hangs in dependency resolution, see the guide).
-		inst.PkgMgr = "pnpm"
+		// 本地副本 is the officially recommended launch mode: it runs the
+		// DSH source installed in the instance directory (readable by the
+		// agent), instead of pulling from a registry cache.
+		inst.PkgMgr = "local"
 	}
 	if inst.CreatedAt.IsZero() {
 		inst.CreatedAt = time.Now()

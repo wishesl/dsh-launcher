@@ -222,10 +222,10 @@ func (a *App) systemLog(id string, pid int, line string) {
 // buildCommand returns the shell command that launches DSH for a version.
 // Examples:
 //
-//	pnpm dlx @deepseek-ai/dsh@0.1.1-rc.2 web --port 3081   (pkgMgr = "pnpm", default)
+//	pnpm dlx @deepseek-ai/dsh@0.1.1-rc.2 web --port 3081   (pkgMgr = "pnpm")
 //	npx -y @deepseek-ai/dsh@0.1.1-rc.2 web                 (pkgMgr = "npx")
-//	npx @deepseek-ai/dsh web --port 3081                   (pkgMgr = "local" — use the
-//	                                                         directory's node_modules copy,
+//	npx @deepseek-ai/dsh web --port 3081                   (pkgMgr = "local" — default & recommended:
+//	                                                         uses the directory's node_modules copy,
 //	                                                         the "official design" where the
 //	                                                         workspace holds readable DSH source)
 func buildCommand(version, extraArgs, pkgMgr string) string {

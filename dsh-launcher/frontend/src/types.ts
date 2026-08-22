@@ -9,7 +9,7 @@ export interface Instance {
   version: string;      // "latest" or an exact version
   localVersion: string; // detected in dir, informational
   extraArgs: string;    // optional extra CLI args after "web"
-  pkgMgr: string;       // "pnpm" (recommended) | "npx"
+  pkgMgr: string;       // "local" (recommended) | "pnpm" | "npx"
   autoStart: boolean;
   createdAt: any;       // RFC3339 string
   pid: number;

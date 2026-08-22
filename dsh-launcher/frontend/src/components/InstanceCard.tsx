@@ -24,9 +24,9 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
 };
 
 const PKGMGR_LABEL: Record<string, string> = {
+  local: '本地',
   pnpm: 'pnpm',
   npx: 'npx',
-  local: '本地',
 };
 
 export default function InstanceCard({
@@ -46,7 +46,7 @@ export default function InstanceCard({
   const st = STATUS_META[instance.status] ?? STATUS_META.stopped;
   const isRunning = instance.status === 'running' || instance.status === 'starting';
   const isBusy = busy || instance.status === 'starting' || instance.status === 'stopping';
-  const pkgMgr = instance.pkgMgr || 'pnpm';
+  const pkgMgr = instance.pkgMgr || 'local';
 
   const outdated = instance.localVersion && registry && registry.latest && instance.localVersion !== registry.latest;
   const needsInstall = pkgMgr === 'local' && !instance.localVersion;
