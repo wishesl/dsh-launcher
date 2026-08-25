@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, errMsg } from './api';
 import { BrowserOpenURL } from '../wailsjs/runtime/runtime';
-import type { Instance, LogEvent, RegistryInfo } from './types';
+import type { ExitChoice, Instance, LogEvent, RegistryInfo } from './types';
 import Header from './components/Header';
 import InstanceList from './components/InstanceList';
 import InstanceForm from './components/InstanceForm';
 import VersionPanel from './components/VersionPanel';
 import LogPanel from './components/LogPanel';
+import ExitDialog from './components/ExitDialog';
+import SettingsModal from './components/SettingsModal';
 
 type ModalState = { mode: 'new' } | { mode: 'edit'; instance: Instance } | null;
 type Toast = { msg: string; kind: 'ok' | 'error' } | null;
@@ -16,16 +18,21 @@ export default function App() {
   const [registry, setRegistry] = useState<RegistryInfo | null>(null);
   const [registryLoading, setRegistryLoading] = useState(false);
   const [appDataPath, setAppDataPath] = useState('');
-  const [closeToTray, setCloseToTray] = useState(true);
   const [logs, setLogs] = useState<Record<string, LogEvent[]>>({});
   const [activeLogId, setActiveLogId] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalState>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  // Window ✕ pressed and the user wants to be asked (no remembered choice).
+  const [exitAsk, setExitAsk] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast>(null);
 
   const logsRef = useRef<Record<string, LogEvent[]>>({});
   const logViewRef = useRef<HTMLDivElement>(null);
   const toastTimer = useRef<number | undefined>(undefined);
+  // "本次启动不再提示": remembered exit choice for THIS app run only —
+  // deliberately not persisted, the chooser asks again on next launch.
+  const exitChoiceRef = useRef<ExitChoice | null>(null);
 
   // Unified feedback channel: success (default) and error toasts replace the
   // old split of "error banner (manual close)" + "success toast (3s)".
@@ -62,7 +69,6 @@ export default function App() {
     refresh();
     refreshRegistry();
     api.getAppDataPath().then(setAppDataPath).catch(() => undefined);
-    api.getCloseToTray().then(setCloseToTray).catch(() => undefined);
   }, [refresh, refreshRegistry]);
 
   // Wire Go -> frontend events. Return cleanup so StrictMode's double-mount
@@ -94,6 +100,18 @@ export default function App() {
       );
     });
     api.onNotice((n) => showToast(n.msg));
+    // Window close is decided in the frontend: show the exit chooser, or run
+    // the choice remembered via "本次启动不再提示" straight away.
+    api.onCloseRequest(() => {
+      const remembered = exitChoiceRef.current;
+      if (remembered === 'tray') {
+        api.hideToTray().catch(() => undefined);
+      } else if (remembered === 'quit') {
+        api.quitApp().catch(() => undefined);
+      } else {
+        setExitAsk(true);
+      }
+    });
     // Auto-start must run only AFTER the listeners above are registered —
     // Wails events emitted before subscription are dropped, which is why
     // auto-started instances used to show an empty log panel. The returned
@@ -107,6 +125,7 @@ export default function App() {
       api.offLog();
       api.offStatus();
       api.offNotice();
+      api.offCloseRequest();
     };
   }, [showToast]);
 
@@ -176,15 +195,28 @@ export default function App() {
       .catch(() => showToast('复制失败: ' + url, 'error'));
   };
 
-  const toggleCloseToTray = (v: boolean) => {
-    setCloseToTray(v);
-    api.setCloseToTray(v)
-      .then(() => showToast(v ? '已开启：关闭窗口时隐藏到托盘' : '已关闭：点 X 将直接退出'))
-      .catch((e) => showToast(errMsg(e), 'error'));
-  };
-
   const hideToTray = () => {
     api.hideToTray().catch((e) => showToast('隐藏失败: ' + errMsg(e), 'error'));
+  };
+
+  // Exit-chooser answer. `remember` = "本次启动不再提示" was ticked: keep the
+  // choice for this app run so later ✕ presses skip the dialog.
+  const chooseExit = (action: ExitChoice, remember: boolean) => {
+    if (remember) exitChoiceRef.current = action;
+    setExitAsk(false);
+    if (action === 'tray') {
+      hideToTray();
+    } else {
+      api.quitApp().catch((e) => showToast('退出失败: ' + errMsg(e), 'error'));
+    }
+  };
+
+  const toggleAutoStart = async (id: string, v: boolean) => {
+    try {
+      setInstances(await api.setAutoStart(id, v));
+    } catch (e) {
+      showToast('修改自动启动失败: ' + errMsg(e), 'error');
+    }
   };
 
   const toggleLog = (id: string) => {
@@ -203,9 +235,8 @@ export default function App() {
         registry={registry}
         registryLoading={registryLoading}
         appDataPath={appDataPath}
-        closeToTray={closeToTray}
         onRefreshRegistry={refreshRegistry}
-        onToggleCloseToTray={toggleCloseToTray}
+        onOpenSettings={() => setShowSettings(true)}
         onHideToTray={hideToTray}
       />
 
@@ -225,6 +256,7 @@ export default function App() {
             onEdit={(inst) => setModal({ mode: 'edit', instance: inst })}
             onDelete={remove}
             onToggleLog={toggleLog}
+            onToggleAutoStart={toggleAutoStart}
           />
           <LogPanel
             instance={activeInstance}
@@ -257,6 +289,12 @@ export default function App() {
           }}
         />
       )}
+
+      {showSettings && (
+        <SettingsModal onClose={() => setShowSettings(false)} showToast={showToast} />
+      )}
+
+      {exitAsk && <ExitDialog onClose={() => setExitAsk(false)} onChoose={chooseExit} />}
 
       {toast && (
         <div className={`toast ${toast.kind === 'error' ? 'toast-error' : ''}`}>{toast.msg}</div>

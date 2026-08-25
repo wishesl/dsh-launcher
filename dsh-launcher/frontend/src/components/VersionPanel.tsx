@@ -18,9 +18,8 @@ export default function VersionPanel({ registry, loading }: Props) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
 
-  const npxCmd = registry
-    ? `npx -y @deepseek-ai/dsh@${registry.latest} web`
-    : 'npx -y @deepseek-ai/dsh@latest web';
+  // Official recommended way to run DSH (no version pin, no flags).
+  const npxCmd = 'npx @deepseek-ai/dsh web';
 
   const copyCmd = async () => {
     try {

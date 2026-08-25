@@ -1,22 +1,32 @@
 import {
+  CheckEnvironment,
   DetectLocalVersion,
   DirectoryExists,
   GetAppDataPath,
-  GetCloseToTray,
   GetInstances,
   HideToTray,
+  InstallPnpm,
   InstallToDirectory,
   LaunchInstance,
   QueryRegistry,
+  QuitApp,
   RemoveInstance,
   RunAutoStartInstances,
   SaveInstance,
   SelectDirectory,
-  SetCloseToTray,
+  SetAutoStart,
   StopInstance,
 } from '../wailsjs/go/main/App';
 import { EventsOff, EventsOn } from '../wailsjs/runtime/runtime';
-import type { Instance, LogEvent, NoticeEvent, RegistryInfo, StatusEvent } from './types';
+import type {
+  EnvLogEvent,
+  EnvReport,
+  Instance,
+  LogEvent,
+  NoticeEvent,
+  RegistryInfo,
+  StatusEvent,
+} from './types';
 
 // Typed wrappers around the Wails-generated bindings, plus event wiring.
 // The generated bindings type the models as classes (with helper methods);
@@ -28,15 +38,21 @@ export const api = {
   launchInstance: (id: string): Promise<void> => LaunchInstance(id),
   stopInstance: (id: string): Promise<void> => StopInstance(id),
   installToDirectory: (id: string): Promise<Instance[]> => InstallToDirectory(id),
+  setAutoStart: (id: string, enabled: boolean): Promise<Instance[]> => SetAutoStart(id, enabled),
   selectDirectory: (): Promise<string> => SelectDirectory(),
   detectLocalVersion: (dir: string): Promise<string> => DetectLocalVersion(dir),
   directoryExists: (dir: string): Promise<boolean> => DirectoryExists(dir),
   queryRegistry: (): Promise<RegistryInfo> => QueryRegistry(),
   runAutoStartInstances: (): Promise<string[]> => RunAutoStartInstances(),
   getAppDataPath: (): Promise<string> => GetAppDataPath(),
+
+  // window close / tray
   hideToTray: (): Promise<void> => HideToTray(),
-  getCloseToTray: (): Promise<boolean> => GetCloseToTray(),
-  setCloseToTray: (v: boolean): Promise<void> => SetCloseToTray(v),
+  quitApp: (): Promise<void> => QuitApp(),
+
+  // prerequisite environment (Settings)
+  checkEnvironment: (): Promise<EnvReport> => CheckEnvironment(),
+  installPnpm: (): Promise<void> => InstallPnpm(),
 
   onLog(cb: (e: LogEvent) => void): void {
     EventsOn('dsh:log', cb);
@@ -55,6 +71,18 @@ export const api = {
   },
   offNotice(): void {
     EventsOff('dsh:notice');
+  },
+  onCloseRequest(cb: () => void): void {
+    EventsOn('dsh:close-requested', cb);
+  },
+  offCloseRequest(): void {
+    EventsOff('dsh:close-requested');
+  },
+  onEnvLog(cb: (e: EnvLogEvent) => void): void {
+    EventsOn('dsh:env-log', cb);
+  },
+  offEnvLog(): void {
+    EventsOff('dsh:env-log');
   },
 };
 

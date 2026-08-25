@@ -176,10 +176,12 @@ func (a *App) saveWindowGeometry() {
 	a.settings.setWindowGeometry(x, y, w, h)
 }
 
-// onBeforeClose intercepts the window close request. When "close to tray" is
-// enabled (and the user is not explicitly quitting), the window is hidden
-// instead of the app exiting. On the very first hide a short notice is shown
-// so users learn the app keeps running in the tray.
+// onBeforeClose intercepts the window close request (titlebar ✕, Alt+F4).
+// The actual decision is made in the frontend: it shows the "minimize to
+// tray or quit?" chooser — unless the user ticked "don't ask again this
+// launch" and a choice is already remembered. Blocking here keeps the app
+// alive until the frontend answers. Explicit quits (tray menu / chooser's
+// 直接退出) set a.quitting first and fall through.
 func (a *App) onBeforeClose(ctx context.Context) bool {
 	a.mu.Lock()
 	quitting := a.quitting
@@ -187,11 +189,8 @@ func (a *App) onBeforeClose(ctx context.Context) bool {
 	if quitting {
 		return false // allow the app to close
 	}
-	if !a.settings.get().CloseToTray {
-		return false // tray mode off: close as usual
-	}
-	a.hideToTrayTip(ctx)
-	return true // prevent close, keep running in the tray
+	a.emit("dsh:close-requested", nil)
+	return true // block native close; the frontend decides what to do
 }
 
 // hideToTrayTip hides the window; on the very first hide it shows a short
@@ -374,13 +373,27 @@ func (a *App) HideToTray() {
 	a.hideToTrayTip(a.ctx)
 }
 
-// GetCloseToTray returns whether clicking the window close (X) hides to tray
-// instead of quitting.
-func (a *App) GetCloseToTray() bool {
-	return a.settings.get().CloseToTray
+// QuitApp fully exits the launcher (bound to the frontend exit chooser).
+// It reuses the tray quit path: the quitting flag is set first so
+// OnBeforeClose lets the app close instead of asking again / hiding.
+func (a *App) QuitApp() {
+	a.requestQuit()
 }
 
-// SetCloseToTray enables/disables hide-to-tray on close and persists the choice.
-func (a *App) SetCloseToTray(enabled bool) {
-	a.settings.setCloseToTray(enabled)
+// SetAutoStart toggles an instance's "随启动器自动启动" flag straight from
+// its card on the main page, without opening the edit form. Returns the
+// updated instance list; the tray submenu is refreshed to stay in sync.
+func (a *App) SetAutoStart(id string, enabled bool) ([]Instance, error) {
+	a.mu.Lock()
+	inst := a.store.find(id)
+	if inst == nil {
+		a.mu.Unlock()
+		return nil, fmt.Errorf("实例不存在: %s", id)
+	}
+	inst.AutoStart = enabled
+	a.store.saveAll()
+	list := a.store.list()
+	a.mu.Unlock()
+	go a.refreshTrayInstances()
+	return list, nil
 }

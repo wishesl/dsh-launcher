@@ -73,7 +73,7 @@ func (a *App) startTray() {
 				case <-mHide.ClickedCh:
 					a.hideWindow()
 				case <-mQuit.ClickedCh:
-					a.quitFromTray()
+					a.requestQuit()
 				}
 			}
 		}()
@@ -206,10 +206,11 @@ func (a *App) hideWindow() {
 	wruntime.WindowHide(a.ctx)
 }
 
-// quitFromTray is the sanctioned way to fully exit while tray mode is on.
-// It sets a flag first so OnBeforeClose lets the app close instead of hiding
-// the window again.
-func (a *App) quitFromTray() {
+// requestQuit is the sanctioned way to fully exit. It sets the quitting flag
+// first so OnBeforeClose lets the app close instead of forwarding another
+// close-request to the frontend chooser. Used by both the tray menu and the
+// frontend QuitApp binding.
+func (a *App) requestQuit() {
 	a.mu.Lock()
 	a.quitting = true
 	a.mu.Unlock()

@@ -58,3 +58,22 @@ export interface StatusEvent {
 export interface NoticeEvent {
   msg: string;
 }
+
+// --- prerequisite environment (Settings panel) ---
+export interface ToolStatus {
+  name: string;
+  found: boolean;
+  version: string; // "" when not found
+}
+
+export interface EnvReport {
+  npm: ToolStatus;
+  pnpm: ToolStatus;
+}
+
+export interface EnvLogEvent {
+  line: string;
+}
+
+// What the user picked in the exit chooser on window close.
+export type ExitChoice = 'tray' | 'quit';

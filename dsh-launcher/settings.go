@@ -9,9 +9,6 @@ import (
 
 // settings holds user preferences persisted to %APPDATA%\DSHLauncher\settings.json.
 type settings struct {
-	// CloseToTray hides the window into the system tray instead of quitting
-	// when the user clicks the window close (X) button.
-	CloseToTray bool `json:"closeToTray"`
 	// TrayTipShown remembers whether the "still running in tray" notice was
 	// already shown once, so it only appears on the very first hide.
 	TrayTipShown bool `json:"trayTipShown"`
@@ -35,7 +32,6 @@ func newSettingsStore() *settingsStore {
 		dir = "."
 	}
 	s := &settingsStore{path: filepath.Join(dir, "DSHLauncher", "settings.json")}
-	s.data.CloseToTray = true // default: hide to tray on close
 	s.load()
 	return s
 }
@@ -70,13 +66,6 @@ func (s *settingsStore) get() settings {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.data
-}
-
-func (s *settingsStore) setCloseToTray(v bool) {
-	s.mu.Lock()
-	s.data.CloseToTray = v
-	s.saveLocked()
-	s.mu.Unlock()
 }
 
 // setTrayTipShown marks the one-time "hidden to tray" notice as shown.

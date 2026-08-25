@@ -14,6 +14,7 @@ interface Props {
   onEdit: (inst: Instance) => void;
   onDelete: (id: string) => void;
   onToggleLog: (id: string) => void;
+  onToggleAutoStart: (id: string, v: boolean) => void;
 }
 
 const STATUS_META: Record<string, { label: string; cls: string }> = {
@@ -44,6 +45,7 @@ export default function InstanceCard({
   onEdit,
   onDelete,
   onToggleLog,
+  onToggleAutoStart,
 }: Props) {
   const st = STATUS_META[instance.status] ?? STATUS_META.stopped;
   const isRunning =
@@ -77,6 +79,17 @@ export default function InstanceCard({
         </span>
         <span className="pill" title="启动方式">{PKGMGR_LABEL[pkgMgr] ?? pkgMgr}</span>
         <span className="instance-state">{st.label}</span>
+        <label
+          className="autostart-toggle"
+          title="随启动器自动启动此实例：打开 DSH Launcher 时自动拉起（无需打开编辑表单）"
+        >
+          <input
+            type="checkbox"
+            checked={instance.autoStart}
+            onChange={(e) => onToggleAutoStart(instance.id, e.target.checked)}
+          />
+          自启
+        </label>
       </div>
 
       <div className="instance-dir" title={instance.directory}>{instance.directory}</div>

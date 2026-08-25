@@ -4,9 +4,8 @@ interface Props {
   registry: RegistryInfo | null;
   registryLoading: boolean;
   appDataPath: string;
-  closeToTray: boolean;
   onRefreshRegistry: () => void;
-  onToggleCloseToTray: (v: boolean) => void;
+  onOpenSettings: () => void;
   onHideToTray: () => void;
 }
 
@@ -14,9 +13,8 @@ export default function Header({
   registry,
   registryLoading,
   appDataPath,
-  closeToTray,
   onRefreshRegistry,
-  onToggleCloseToTray,
+  onOpenSettings,
   onHideToTray,
 }: Props) {
   return (
@@ -53,16 +51,11 @@ export default function Header({
           {registryLoading ? '刷新中…' : '刷新版本'}
         </button>
 
-        <label className="tray-toggle" title="关闭窗口时隐藏到系统托盘，而不是退出">
-          <input
-            type="checkbox"
-            checked={closeToTray}
-            onChange={(e) => onToggleCloseToTray(e.target.checked)}
-          />
-          关闭时最小化到托盘
-        </label>
         <button className="btn btn-ghost" onClick={onHideToTray} title="隐藏到系统托盘，进程继续运行">
           最小化到托盘
+        </button>
+        <button className="btn btn-ghost" onClick={onOpenSettings} title="前置环境检查 / 安装 pnpm">
+          ⚙ 设置
         </button>
 
         <span className="appdata" title="配置文件位置">{appDataPath}</span>

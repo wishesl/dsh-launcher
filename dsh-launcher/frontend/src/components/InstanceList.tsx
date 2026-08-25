@@ -15,6 +15,7 @@ interface Props {
   onEdit: (inst: Instance) => void;
   onDelete: (id: string) => void;
   onToggleLog: (id: string) => void;
+  onToggleAutoStart: (id: string, v: boolean) => void;
 }
 
 export default function InstanceList({
@@ -31,9 +32,10 @@ export default function InstanceList({
   onEdit,
   onDelete,
   onToggleLog,
+  onToggleAutoStart,
 }: Props) {
   return (
-    <section className="panel">
+    <section className="panel instances-panel">
       <div className="panel-head">
         <h2>实例列表</h2>
         <span className="count-badge">{instances.length}</span>
@@ -62,6 +64,7 @@ export default function InstanceList({
             onEdit={onEdit}
             onDelete={onDelete}
             onToggleLog={onToggleLog}
+            onToggleAutoStart={onToggleAutoStart}
           />
         ))}
       </div>
