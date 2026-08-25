@@ -14,7 +14,7 @@ import {
   SetCloseToTray,
   StopInstance,
 } from '../wailsjs/go/main/App';
-import { EventsOn } from '../wailsjs/runtime/runtime';
+import { EventsOff, EventsOn } from '../wailsjs/runtime/runtime';
 import type { Instance, LogEvent, RegistryInfo, StatusEvent } from './types';
 
 // Typed wrappers around the Wails-generated bindings, plus event wiring.
@@ -39,8 +39,14 @@ export const api = {
   onLog(cb: (e: LogEvent) => void): void {
     EventsOn('dsh:log', cb);
   },
+  offLog(): void {
+    EventsOff('dsh:log');
+  },
   onStatus(cb: (e: StatusEvent) => void): void {
     EventsOn('dsh:status', cb);
+  },
+  offStatus(): void {
+    EventsOff('dsh:status');
   },
 };
 

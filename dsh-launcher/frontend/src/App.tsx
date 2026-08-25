@@ -60,14 +60,18 @@ export default function App() {
     api.getCloseToTray().then(setCloseToTray).catch(() => undefined);
   }, [refresh, refreshRegistry]);
 
-  // Wire Go -> frontend events.
+  // Wire Go -> frontend events. Return cleanup so StrictMode's double-mount
+  // (and hot reloads) don't stack duplicate dsh:log/dsh:status listeners.
   useEffect(() => {
     api.onLog((e: LogEvent) => {
-      const map = { ...logsRef.current };
-      const arr = map[e.instanceId] ?? [];
-      arr.push(e);
+      // Immutable update: always create a NEW array. Mutating the previous
+      // array in place keeps its reference unchanged, so LogPanel's
+      // useMemo([instance, logs]) never invalidates and log lines stop
+      // refreshing in real time (only the line-count badge updates).
+      const prev = logsRef.current[e.instanceId] ?? [];
+      const arr = [...prev, e];
       if (arr.length > 3000) arr.splice(0, arr.length - 3000);
-      map[e.instanceId] = arr;
+      const map = { ...logsRef.current, [e.instanceId]: arr };
       logsRef.current = map;
       setLogs(map);
     });
@@ -76,6 +80,10 @@ export default function App() {
         prev.map((i) => (i.id === e.instanceId ? { ...i, status: e.status as Instance['status'], pid: e.pid } : i))
       );
     });
+    return () => {
+      api.offLog();
+      api.offStatus();
+    };
   }, []);
 
   const start = async (id: string) => {
