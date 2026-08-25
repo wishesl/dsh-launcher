@@ -43,6 +43,11 @@ func effectiveVersion(version string) string {
 //  3. pnpm install                          (runs native-module build scripts)
 //  4. refresh the detected local version
 func (a *App) InstallToDirectory(id string) ([]Instance, error) {
+	// In-flight protection: a running install spawns pnpm children that must
+	// not outlive the app if the user quits mid-install.
+	a.inFlight.Add(1)
+	defer a.inFlight.Done()
+
 	a.mu.Lock()
 	inst := a.store.find(id)
 	if inst == nil {

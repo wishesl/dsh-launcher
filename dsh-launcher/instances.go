@@ -15,7 +15,7 @@ type Instance struct {
 	ID           string    `json:"id"`
 	Name         string    `json:"name"`
 	Directory    string    `json:"directory"`
-	Version      string    `json:"version"`     // "latest" or an exact version
+	Version      string    `json:"version"`      // "latest" or an exact version
 	LocalVersion string    `json:"localVersion"` // detected in dir, informational
 	ExtraArgs    string    `json:"extraArgs"`    // optional extra CLI args after "web"
 	PkgMgr       string    `json:"pkgMgr"`       // "local" (recommended), "pnpm" or "npx"

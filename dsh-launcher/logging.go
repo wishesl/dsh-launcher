@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -101,6 +102,26 @@ func (l *logStore) closeAll() {
 		_ = f.Close()
 		delete(l.files, id)
 	}
+}
+
+// note appends an app-level diagnostic line to <dir>\app.log (best effort).
+// Used to audit lifecycle events such as shutdown reaping, so a future
+// "orphan process" report can be traced to the exact code path.
+func (l *logStore) note(line string) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err := os.MkdirAll(l.dir, 0o755); err != nil {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(l.dir, "app.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	_, _ = f.WriteString(time.Now().Format(time.RFC3339) + "\t" + line + "\n")
+	_ = f.Close()
 }
 
 // logEvent is the single funnel for every log line shown in the UI: it emits

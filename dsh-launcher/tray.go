@@ -25,8 +25,8 @@ type trayState struct {
 	ready chan struct{} // closed once systray.Run finished initializing
 
 	mu      sync.Mutex
-	parent  *systray.MenuItem       // the "实例" submenu
-	entries map[string]*trayEntry    // instanceID -> menu entry
+	parent  *systray.MenuItem     // the "实例" submenu
+	entries map[string]*trayEntry // instanceID -> menu entry
 }
 
 type trayEntry struct {

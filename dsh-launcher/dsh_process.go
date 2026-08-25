@@ -59,6 +59,7 @@ type managedProcess struct {
 	instanceID string
 	pid        int
 	cmd        *exec.Cmd
+	job        *winJob // KILL_ON_JOB_CLOSE: kernel kills the tree even on hard app death
 
 	done       chan struct{}
 	once       sync.Once
@@ -97,8 +98,12 @@ func (p *managedProcess) stop() {
 	}
 	p.requestStop()
 	p.once.Do(func() { close(p.done) })
+	// Kernel-level kill first: closing the job handle terminates the whole
+	// tree (KILL_ON_JOB_CLOSE). Works even if taskkill is unavailable.
+	p.job.close()
 	if p.cmd != nil && p.cmd.Process != nil {
-		// taskkill /T kills the whole npx -> node process tree on Windows.
+		// taskkill /T kills the whole npx -> node process tree on Windows;
+		// kept as the fallback when the job object could not be created.
 		_ = exec.Command("taskkill", "/PID", strconv.Itoa(p.pid), "/T", "/F").Run()
 		_ = p.cmd.Process.Kill()
 	}
@@ -126,6 +131,11 @@ func validateVersion(pkgMgr, version string) error {
 // process advertises a web address and that port accepts TCP connections, a
 // "ready" status (with the working URL) is emitted.
 func (a *App) LaunchInstance(id string) error {
+	// Mark this attempt in-flight so shutdown() waits for it (and kills the
+	// child once registered) instead of exiting mid-spawn.
+	a.inFlight.Add(1)
+	defer a.inFlight.Done()
+
 	a.mu.Lock()
 	inst := a.store.find(id)
 	if inst == nil {
@@ -153,7 +163,9 @@ func (a *App) LaunchInstance(id string) error {
 		a.systemLog(snapshot.ID, 0, "提示: 目录内未检测到本地副本，npx 可能回退到 registry 下载。建议先「安装到目录」。")
 	}
 
-	cmdStr := buildCommand(snapshot.Version, snapshot.ExtraArgs, snapshot.PkgMgr)
+	// buildCommandFn is a var (not a direct call) so tests can substitute the
+	// command without spawning real npx.
+	cmdStr := buildCommandFn(snapshot.Version, snapshot.ExtraArgs, snapshot.PkgMgr)
 	cmd := exec.Command("cmd", "/c", cmdStr)
 	cmd.Dir = snapshot.Directory
 	if cmd.Dir == "" {
@@ -188,6 +200,16 @@ func (a *App) LaunchInstance(id string) error {
 		pid:        cmd.Process.Pid,
 		cmd:        cmd,
 		done:       make(chan struct{}),
+	}
+	// Assign the child to a KILL_ON_JOB_CLOSE job: if the launcher dies hard
+	// (crash / Task Manager / power loss), the kernel reaps the whole tree.
+	mp.job = newKillOnCloseJob()
+	if h, err := openProcessForJob(cmd.Process.Pid); err == nil {
+		if jerr := mp.job.assign(h); jerr != nil {
+			a.systemLog(snapshot.ID, mp.pid, "提示: 进程未纳入 Job 托管（将依赖 taskkill 兜底）")
+		}
+	} else {
+		a.systemLog(snapshot.ID, mp.pid, "提示: 进程未纳入 Job 托管（将依赖 taskkill 兜底）")
 	}
 
 	a.mu.Lock()
@@ -389,6 +411,10 @@ func (a *App) systemLog(id string, pid int, line string) {
 		Time:       time.Now().Format(time.RFC3339),
 	})
 }
+
+// buildCommandFn indirection: tests override this to launch a harmless
+// long-lived process instead of real npx.
+var buildCommandFn = buildCommand
 
 // buildCommand returns the shell command that launches DSH for a version.
 // Examples:

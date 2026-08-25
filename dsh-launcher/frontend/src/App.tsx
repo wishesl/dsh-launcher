@@ -94,6 +94,15 @@ export default function App() {
       );
     });
     api.onNotice((n) => showToast(n.msg));
+    // Auto-start must run only AFTER the listeners above are registered —
+    // Wails events emitted before subscription are dropped, which is why
+    // auto-started instances used to show an empty log panel. The returned
+    // IDs let us open the log panel for the first auto-started instance.
+    api.runAutoStartInstances()
+      .then((ids) => {
+        if (ids && ids.length > 0) setActiveLogId((cur) => cur ?? ids[0]);
+      })
+      .catch(() => undefined);
     return () => {
       api.offLog();
       api.offStatus();

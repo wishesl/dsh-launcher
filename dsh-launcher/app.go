@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -25,6 +27,15 @@ type App struct {
 	processes map[string]*managedProcess // instanceID -> running process
 	quitting  bool                       // set when the user quits from the tray
 	tray      *trayState                 // system tray state (instance submenu)
+
+	// inFlight tracks launch/install attempts that have not yet registered
+	// their process in a.processes (including the auto-start stagger sleep).
+	// shutdown waits for them so a process can never outlive the app by
+	// being spawned *after* the final reap.
+	inFlight sync.WaitGroup
+
+	autoStartIDs     atomic.Value // []string — instances to launch when the frontend is ready
+	autoStartStarted atomic.Bool  // guards one-shot launch per app run
 }
 
 // NewApp creates a new App application struct
@@ -55,6 +66,7 @@ func (a *App) startup(ctx context.Context) {
 		}
 	}
 	a.mu.Unlock()
+	a.autoStartIDs.Store(autoStart)
 
 	// Restore last window geometry (defaults remain when unset).
 	if st := a.settings.get(); st.WinW > 200 && st.WinH > 150 {
@@ -69,23 +81,71 @@ func (a *App) startup(ctx context.Context) {
 	// Install the system tray icon + menu.
 	a.startTray()
 
-	// Auto-launch instances flagged with AutoStart (staggered so several npx
-	// downloads don't stampede at once).
-	for i, id := range autoStart {
-		go func(idx int, instanceID string) {
-			time.Sleep(time.Duration(800*idx) * time.Millisecond)
-			a.systemLog(instanceID, 0, "自动启动（随启动器）...")
-			if err := a.LaunchInstance(instanceID); err != nil {
-				a.systemLog(instanceID, 0, "自动启动失败: "+err.Error())
-			}
-		}(i, id)
+	// NOTE: auto-start is NOT launched here. Wails events are fire-and-forget:
+	// anything emitted before the frontend registers its EventsOn listeners is
+	// silently dropped (that is why auto-started instances showed no logs).
+	// Instead the frontend calls RunAutoStartInstances() once its listeners
+	// are wired up — see that method.
+}
+
+// RunAutoStartInstances launches every instance flagged "随启动器自动启动".
+// Called by the frontend AFTER its dsh:log/dsh:status listeners are registered,
+// guaranteeing no startup events are lost. Idempotent per app run: repeated
+// calls return the same IDs but never launch twice.
+func (a *App) RunAutoStartInstances() []string {
+	ids, ok := a.autoStartIDs.Load().([]string)
+	if !ok || len(ids) == 0 {
+		return nil
 	}
+	if a.autoStartStarted.CompareAndSwap(false, true) {
+		// Stagger so several npx downloads don't stampede at once.
+		for i, id := range ids {
+			a.protectedDelayedLaunch(id, time.Duration(800*i)*time.Millisecond)
+		}
+	}
+	return ids
+}
+
+// protectedDelayedLaunch launches an instance after a delay, keeping the
+// in-flight counter raised for the WHOLE delay+spawn window so shutdown can
+// never exit between "scheduled" and "spawned" (the orphan-DSH race).
+func (a *App) protectedDelayedLaunch(id string, delay time.Duration) {
+	a.inFlight.Add(1)
+	go func() {
+		defer a.inFlight.Done()
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		a.systemLog(id, 0, "自动启动（随启动器）...")
+		if err := a.LaunchInstance(id); err != nil {
+			a.systemLog(id, 0, "自动启动失败: "+err.Error())
+		}
+	}()
 }
 
 // shutdown stops every managed process so no orphan DSH keeps running, then
 // removes the tray icon.
 func (a *App) shutdown(ctx context.Context) {
 	a.saveWindowGeometry()
+	a.logs.note("shutdown begin")
+
+	// Wait (bounded) for in-flight launch attempts: an auto-start goroutine
+	// may still be inside its stagger sleep or mid-spawn. Without this, the
+	// app could exit *before* the child was spawned, leaving an orphan that
+	// nothing would ever kill.
+	drained := make(chan struct{})
+	go func() {
+		a.inFlight.Wait()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+		a.logs.note("shutdown: in-flight launches drained")
+	case <-time.After(5 * time.Second):
+		// a wedged launch must not block exit forever; best effort
+		a.logs.note("shutdown: TIMEOUT waiting in-flight launches")
+	}
+
 	a.mu.Lock()
 	procs := make([]*managedProcess, 0, len(a.processes))
 	for _, p := range a.processes {
@@ -93,11 +153,14 @@ func (a *App) shutdown(ctx context.Context) {
 	}
 	a.processes = map[string]*managedProcess{}
 	a.mu.Unlock()
+	a.logs.note(fmt.Sprintf("shutdown: reaping %d managed process(es)", len(procs)))
 	for _, p := range procs {
 		p.stop()
 	}
 	a.logs.closeAll()
-	systrayQuit()
+	if a.tray != nil {
+		systrayQuit()
+	}
 }
 
 // saveWindowGeometry persists the current window rectangle to settings.

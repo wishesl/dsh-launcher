@@ -26,6 +26,8 @@ export function QueryRegistry():Promise<main.RegistryInfo>;
 
 export function RemoveInstance(arg1:string):Promise<Array<main.Instance>>;
 
+export function RunAutoStartInstances():Promise<Array<string>>;
+
 export function SaveInstance(arg1:main.Instance):Promise<Array<main.Instance>>;
 
 export function SelectDirectory():Promise<string>;

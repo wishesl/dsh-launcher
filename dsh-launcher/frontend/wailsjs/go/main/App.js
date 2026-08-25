@@ -50,6 +50,10 @@ export function RemoveInstance(arg1) {
   return window['go']['main']['App']['RemoveInstance'](arg1);
 }
 
+export function RunAutoStartInstances() {
+  return window['go']['main']['App']['RunAutoStartInstances']();
+}
+
 export function SaveInstance(arg1) {
   return window['go']['main']['App']['SaveInstance'](arg1);
 }
