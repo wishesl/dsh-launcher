@@ -56,6 +56,10 @@ func (a *App) InstallToDirectory(id string) ([]Instance, error) {
 	snapshot := *inst
 	a.mu.Unlock()
 
+	if err := validateVersion(snapshot.PkgMgr, snapshot.Version); err != nil {
+		return nil, err
+	}
+
 	a.systemLog(snapshot.ID, 0, fmt.Sprintf("开始安装 DSH %s 到目录: %s", versionLabel(snapshot.Version), snapshot.Directory))
 	if err := os.MkdirAll(snapshot.Directory, 0o755); err != nil {
 		return nil, err
@@ -118,7 +122,7 @@ func (a *App) runStreamed(snapshot Instance, cmdStr string) error {
 			if line == "" {
 				continue
 			}
-			a.emit("dsh:log", LogEvent{
+			a.logEvent(LogEvent{
 				InstanceID: snapshot.ID,
 				PID:        cmd.Process.Pid,
 				Line:       line,

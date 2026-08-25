@@ -4,6 +4,8 @@ import {main} from '../models';
 
 export function DetectLocalVersion(arg1:string):Promise<string>;
 
+export function DirectoryExists(arg1:string):Promise<boolean>;
+
 export function EnsureConfigDir():Promise<void>;
 
 export function GetAppDataPath():Promise<string>;

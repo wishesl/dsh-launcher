@@ -9,6 +9,7 @@ import VersionPanel from './components/VersionPanel';
 import LogPanel from './components/LogPanel';
 
 type ModalState = { mode: 'new' } | { mode: 'edit'; instance: Instance } | null;
+type Toast = { msg: string; kind: 'ok' | 'error' } | null;
 
 export default function App() {
   const [instances, setInstances] = useState<Instance[]>([]);
@@ -20,26 +21,30 @@ export default function App() {
   const [activeLogId, setActiveLogId] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalState>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<Toast>(null);
 
   const logsRef = useRef<Record<string, LogEvent[]>>({});
   const logViewRef = useRef<HTMLDivElement>(null);
   const toastTimer = useRef<number | undefined>(undefined);
 
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
+  // Unified feedback channel: success (default) and error toasts replace the
+  // old split of "error banner (manual close)" + "success toast (3s)".
+  const showToast = useCallback((msg: string, kind: 'ok' | 'error' = 'ok') => {
+    setToast({ msg, kind });
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), 3000);
+    toastTimer.current = window.setTimeout(
+      () => setToast(null),
+      kind === 'error' ? 6500 : 3000
+    );
   }, []);
 
   const refresh = useCallback(async () => {
     try {
       setInstances(await api.getInstances());
     } catch (e) {
-      setError(errMsg(e));
+      showToast('加载实例失败: ' + errMsg(e), 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const refreshRegistry = useCallback(async () => {
     setRegistryLoading(true);
@@ -47,11 +52,11 @@ export default function App() {
       const info = await api.queryRegistry();
       setRegistry(info);
     } catch (e) {
-      setError('获取最新版本失败: ' + errMsg(e));
+      showToast('获取最新版本失败: ' + errMsg(e), 'error');
     } finally {
       setRegistryLoading(false);
     }
-  }, []);
+  }, [showToast]);
 
   useEffect(() => {
     refresh();
@@ -61,13 +66,11 @@ export default function App() {
   }, [refresh, refreshRegistry]);
 
   // Wire Go -> frontend events. Return cleanup so StrictMode's double-mount
-  // (and hot reloads) don't stack duplicate dsh:log/dsh:status listeners.
+  // (and hot reloads) don't stack duplicate listeners.
   useEffect(() => {
     api.onLog((e: LogEvent) => {
-      // Immutable update: always create a NEW array. Mutating the previous
-      // array in place keeps its reference unchanged, so LogPanel's
-      // useMemo([instance, logs]) never invalidates and log lines stop
-      // refreshing in real time (only the line-count badge updates).
+      // Immutable update: always create a NEW array so LogPanel's
+      // useMemo([instance, logs]) invalidates and log lines render live.
       const prev = logsRef.current[e.instanceId] ?? [];
       const arr = [...prev, e];
       if (arr.length > 3000) arr.splice(0, arr.length - 3000);
@@ -77,14 +80,26 @@ export default function App() {
     });
     api.onStatus((e) => {
       setInstances((prev) =>
-        prev.map((i) => (i.id === e.instanceId ? { ...i, status: e.status as Instance['status'], pid: e.pid } : i))
+        prev.map((i) => {
+          if (i.id !== e.instanceId) return i;
+          const next: Instance = {
+            ...i,
+            status: e.status as Instance['status'],
+            pid: e.pid,
+          };
+          if (e.status === 'ready' && e.webUrl) next.webUrl = e.webUrl;
+          else next.webUrl = null; // stale URL once not running/ready
+          return next;
+        })
       );
     });
+    api.onNotice((n) => showToast(n.msg));
     return () => {
       api.offLog();
       api.offStatus();
+      api.offNotice();
     };
-  }, []);
+  }, [showToast]);
 
   const start = async (id: string) => {
     setBusyId(id);
@@ -93,7 +108,7 @@ export default function App() {
       setActiveLogId(id);
       showToast('已发起启动，日志见下方');
     } catch (e) {
-      setError(errMsg(e));
+      showToast(errMsg(e), 'error');
     } finally {
       setBusyId(null);
     }
@@ -105,7 +120,7 @@ export default function App() {
       await api.stopInstance(id);
       showToast('已停止');
     } catch (e) {
-      setError(errMsg(e));
+      showToast(errMsg(e), 'error');
     } finally {
       setBusyId(null);
     }
@@ -119,7 +134,7 @@ export default function App() {
       if (activeLogId === id) setActiveLogId(null);
       showToast('已删除');
     } catch (e) {
-      setError(errMsg(e));
+      showToast(errMsg(e), 'error');
     }
   };
 
@@ -131,7 +146,7 @@ export default function App() {
       setInstances(list);
       showToast('安装完成，本地副本已生成');
     } catch (e) {
-      setError('安装失败: ' + errMsg(e));
+      showToast('安装失败: ' + errMsg(e), 'error');
     } finally {
       setBusyId(null);
     }
@@ -141,35 +156,26 @@ export default function App() {
     try {
       BrowserOpenURL(url);
     } catch (e) {
-      setError('打开浏览器失败: ' + errMsg(e));
-    }
-  };
-
-  const hideToTray = async () => {
-    try {
-      await api.hideToTray();
-    } catch (e) {
-      setError('隐藏失败: ' + errMsg(e));
-    }
-  };
-
-  const toggleCloseToTray = async (v: boolean) => {
-    setCloseToTray(v);
-    try {
-      await api.setCloseToTray(v);
-      showToast(v ? '已开启：关闭窗口时隐藏到托盘' : '已关闭：点 X 将直接退出');
-    } catch (e) {
-      setError(errMsg(e));
+      showToast('打开浏览器失败: ' + errMsg(e), 'error');
     }
   };
 
   const copyUrl = (url: string) => {
-    try {
-      navigator.clipboard.writeText(url);
-      showToast('地址已复制');
-    } catch (e) {
-      setError('复制失败: ' + errMsg(e));
-    }
+    navigator.clipboard
+      .writeText(url)
+      .then(() => showToast('地址已复制'))
+      .catch(() => showToast('复制失败: ' + url, 'error'));
+  };
+
+  const toggleCloseToTray = (v: boolean) => {
+    setCloseToTray(v);
+    api.setCloseToTray(v)
+      .then(() => showToast(v ? '已开启：关闭窗口时隐藏到托盘' : '已关闭：点 X 将直接退出'))
+      .catch((e) => showToast(errMsg(e), 'error'));
+  };
+
+  const hideToTray = () => {
+    api.hideToTray().catch((e) => showToast('隐藏失败: ' + errMsg(e), 'error'));
   };
 
   const toggleLog = (id: string) => {
@@ -193,13 +199,6 @@ export default function App() {
         onToggleCloseToTray={toggleCloseToTray}
         onHideToTray={hideToTray}
       />
-
-      {error && (
-        <div className="error-banner">
-          <span>{error}</span>
-          <button className="link-btn" onClick={() => setError(null)}>关闭</button>
-        </div>
-      )}
 
       <main className="layout">
         <div className="col-left">
@@ -243,11 +242,16 @@ export default function App() {
           registry={registry}
           editing={modal.mode === 'edit' ? modal.instance : null}
           onClose={() => setModal(null)}
-          onSaved={(list) => setInstances(list)}
+          onSaved={(list, note) => {
+            setInstances(list);
+            if (note) showToast(note);
+          }}
         />
       )}
 
-      {toast && <div className="toast">{toast}</div>}
+      {toast && (
+        <div className={`toast ${toast.kind === 'error' ? 'toast-error' : ''}`}>{toast.msg}</div>
+      )}
     </div>
   );
 }

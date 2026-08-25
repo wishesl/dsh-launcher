@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, errMsg } from '../api';
 import type { DSHVersion, Instance, RegistryInfo } from '../types';
+import { isValidVersion } from '../util';
 
 interface Props {
   registry: RegistryInfo | null;
   editing: Instance | null; // null => creating a new instance
   onClose: () => void;
-  onSaved: (list: Instance[]) => void;
+  onSaved: (list: Instance[], note?: string) => void;
 }
 
 const DEFAULT_INSTANCE = (): Instance => ({
@@ -41,6 +42,38 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const dirInputRef = useRef<HTMLInputElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  // #9: directory existence probe (debounced) — warn about typos early.
+  const [dirExists, setDirExists] = useState<boolean | null>(null);
+  const dirProbeSeq = useRef(0);
+
+  useEffect(() => {
+    const dir = form.directory.trim();
+    if (!dir) {
+      setDirExists(null);
+      return;
+    }
+    const seq = ++dirProbeSeq.current;
+    const t = window.setTimeout(async () => {
+      try {
+        const ok = await api.directoryExists(dir);
+        if (dirProbeSeq.current === seq) setDirExists(ok);
+      } catch {
+        if (dirProbeSeq.current === seq) setDirExists(null);
+      }
+    }, 350);
+    return () => window.clearTimeout(t);
+  }, [form.directory]);
+
+  // #8: Esc closes the dialog; Enter submits.
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   const set = (patch: Partial<Instance>) => setForm((f) => ({ ...f, ...patch }));
 
@@ -123,9 +156,20 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
     set({ version: value });
   };
 
+  // #9: custom version must be a clean semver before it may be saved.
+  const versionInvalid =
+    versionMode === 'spec' &&
+    form.version.trim() !== '' &&
+    form.version !== 'latest' &&
+    !isValidVersion(form.version);
+
   const save = async () => {
     if (!form.directory.trim()) {
       setError('请选择启动目录');
+      return;
+    }
+    if (versionInvalid) {
+      setError('版本号格式不正确：应为 x.y.z 或 x.y.z-预发布（如 0.1.1-rc.2）');
       return;
     }
     setError(null);
@@ -133,7 +177,10 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
     try {
       const finalVersion = versionMode === 'latest' ? 'latest' : (form.version.trim() || 'latest');
       const list = await api.saveInstance({ ...form, version: finalVersion });
-      onSaved(list);
+      // #13: editing a live instance only takes effect on next start.
+      const wasLive =
+        editing && (editing.status === 'running' || editing.status === 'starting' || editing.status === 'ready');
+      onSaved(list, wasLive ? '已保存。该实例正在运行，修改将在下次启动时生效。' : undefined);
       onClose();
     } catch (e) {
       setError(errMsg(e));
@@ -144,18 +191,25 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
   const showCustom = customMode || (form.version !== '' && form.version !== 'latest' && !versionList.some((v) => v.version === form.version));
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop" ref={modalRef}>
+      {/* backdrop click intentionally does NOT close (#8): half-filled forms
+          must not be lost to a stray click; use ✕ / 取消 / Esc */}
+      <form
+        className="modal"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save();
+        }}
+      >
         <div className="modal-head">
           <h2>{editing ? '编辑实例' : '添加实例'}</h2>
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
         </div>
 
         <div className="form-body">
           <label className="field">
             <span className="field-label">名称</span>
             <input
-              ref={dirInputRef}
               value={form.name}
               onChange={(e) => set({ name: e.target.value })}
               placeholder="实例名称（默认取目录名）"
@@ -166,6 +220,7 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
             <span className="field-label">启动目录</span>
             <div className="row">
               <input
+                ref={dirInputRef}
                 value={form.directory}
                 onChange={(e) => set({ directory: e.target.value })}
                 placeholder="选择/输入 DSH 启动目录，如 D:\Users\Tony\Desktop"
@@ -187,6 +242,12 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
                 </span>
               ) : null}
             </div>
+            {/* #9: existence warning */}
+            {form.directory.trim() && dirExists === false && (
+              <div className="field-warn">
+                ⚠ 目录当前不存在：直接「启动」会失败；「安装到目录」会自动创建它。请确认路径没有手误。
+              </div>
+            )}
           </label>
 
           <div className="field">
@@ -219,6 +280,7 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
                 {showCustom ? (
                   <div className="row">
                     <input
+                      className={versionInvalid ? 'input-invalid' : ''}
                       value={form.version}
                       onChange={(e) => set({ version: e.target.value })}
                       placeholder="输入任意版本号，如 0.1.0-rc.6"
@@ -251,6 +313,11 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
                     >
                       {versionListLoading ? '…' : '刷新'}
                     </button>
+                  </div>
+                )}
+                {versionInvalid && (
+                  <div className="field-warn">
+                    版本号应为 x.y.z 或 x.y.z-预发布（如 0.1.1-rc.2），否则无法保存。
                   </div>
                 )}
                 <div className="field-hint">
@@ -307,7 +374,7 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
             </div>
           </div>
 
-          <label className="field">
+          <div className="field">
             <span className="field-label">附加参数 <span className="muted">（可选）</span></span>
             <input
               value={form.extraArgs}
@@ -318,18 +385,28 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
               最终命令示例：
               <code className="mono">{form.pkgMgr === 'local' ? 'npx @deepseek-ai/dsh' : (form.pkgMgr === 'npx' ? 'npx -y' : 'pnpm dlx')} {form.pkgMgr === 'local' ? '' : '@deepseek-ai/dsh@' + (versionMode === 'latest' ? 'latest' : (form.version || '…'))} web{form.extraArgs ? ' ' + form.extraArgs : ''}</code>
             </div>
+          </div>
+
+          <label className="field field-check">
+            <input
+              type="checkbox"
+              checked={form.autoStart}
+              onChange={(e) => set({ autoStart: e.target.checked })}
+            />
+            随启动器自动启动此实例
+            <span className="muted">（打开 DSH Launcher 时自动拉起）</span>
           </label>
 
           {error && <div className="form-error">{error}</div>}
         </div>
 
         <div className="modal-foot">
-          <button className="btn btn-ghost" onClick={onClose}>取消</button>
-          <button className="btn btn-primary" onClick={save} disabled={saving}>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>取消</button>
+          <button type="submit" className="btn btn-primary" disabled={saving || versionInvalid}>
             {saving ? '保存中…' : editing ? '保存修改' : '添加并保存'}
           </button>
         </div>
-      </div>
+      </form>
     </div>
   );
 }

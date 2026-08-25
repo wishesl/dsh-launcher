@@ -176,6 +176,10 @@ html, body, #root {
 .status-starting { background: var(--amber); animation: pulse 1s infinite; }
 .status-stopping { background: var(--amber); }
 .status-stopped { background: #a7aebe; }
+/* web confirmed reachable */
+.status-ready { background: var(--green); box-shadow: 0 0 11px rgba(22, 163, 74, .95); }
+/* process exited on its own with non-zero code */
+.status-crashed { background: var(--red); box-shadow: 0 0 7px rgba(220, 38, 38, .55); animation: pulse 1.2s infinite; }
 
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
 
@@ -280,6 +284,64 @@ html, body, #root {
 .log-stdout .log-tag { color: var(--muted); }
 .log-stderr .log-tag { color: var(--red); }
 .log-text { color: #232b3c; white-space: pre-wrap; word-break: break-all; }
+
+/* log toolbar: stream filter + text search (#12) */
+.log-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex: none; }
+.log-filter {
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--text);
+}
+.log-search {
+  flex: 1;
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--text);
+}
+.log-search:focus, .log-filter:focus { outline: none; border-color: var(--accent); }
+
+/* status hint bars above the log view (#10) */
+.log-hint {
+  flex: none;
+  background: var(--accent-soft, rgba(37, 99, 235, .07));
+  border: 1px dashed var(--accent);
+  color: var(--accent);
+  padding: 7px 11px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  margin-bottom: 8px;
+}
+.log-hint-ok {
+  border-style: solid;
+  color: var(--green);
+  border-color: var(--green);
+  background: rgba(22, 163, 74, .07);
+}
+.log-hint-err {
+  border-style: solid;
+  color: #b91c1c;
+  border-color: var(--red);
+  background: rgba(220, 38, 38, .06);
+}
+
+/* runtime-captured web URL (from live process output) */
+.url-runtime { color: var(--accent); }
+
+/* form validation states (#9) */
+.field-warn {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: #b45309;
+}
+.input-invalid { border-color: var(--red) !important; }
+.field-check { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.field-check input { width: auto; }
 .log-empty { color: var(--muted); padding: 18px; text-align: center; }
 
 /* ---------- Modal ---------- */
@@ -401,6 +463,12 @@ html, body, #root {
   font-size: 13px;
   box-shadow: 0 8px 30px rgba(15, 23, 42, .18);
   z-index: 200;
+  max-width: min(720px, 90vw);
+}
+.toast-error {
+  background: #fef2f2;
+  border-color: var(--red);
+  color: #b91c1c;
 }
 
 ::-webkit-scrollbar { width: 9px; height: 9px; }

@@ -2,11 +2,15 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"net"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -21,10 +25,33 @@ type LogEvent struct {
 }
 
 // StatusEvent is streamed to the frontend on "dsh:status".
+// Status: "starting" | "running" | "ready" | "stopping" | "stopped" | "crashed".
+// WebUrl is set (only) when Status == "ready": the URL captured from the
+// process output and confirmed reachable via TCP probe.
+// ExitCode is set (only) when Status == "crashed".
 type StatusEvent struct {
 	InstanceID string `json:"instanceId"`
 	Status     string `json:"status"`
 	PID        int    `json:"pid"`
+	WebUrl     string `json:"webUrl,omitempty"`
+	ExitCode   int    `json:"exitCode,omitempty"`
+}
+
+// webURLRe matches the local web address DSH prints once it starts listening.
+var webURLRe = regexp.MustCompile(`https?://(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(?::(\d{2,5}))?`)
+
+// extractWebURL returns a normalized http://127.0.0.1:<port> URL from an
+// output line, or "" if the line does not advertise one.
+func extractWebURL(line string) string {
+	m := webURLRe.FindStringSubmatch(line)
+	if m == nil {
+		return ""
+	}
+	port := m[1]
+	if port == "" {
+		return "" // scheme mention without a port is not usable
+	}
+	return "http://127.0.0.1:" + port
 }
 
 // managedProcess wraps a running DSH process for one instance.
@@ -33,14 +60,42 @@ type managedProcess struct {
 	pid        int
 	cmd        *exec.Cmd
 
-	done chan struct{}
-	once sync.Once
+	done       chan struct{}
+	once       sync.Once
+	stopReq    atomic.Bool
+	urlMu      sync.Mutex
+	candidates []string // web URLs advertised by the process output, in order
+}
+
+func (p *managedProcess) requestStop() { p.stopReq.Store(true) }
+
+func (p *managedProcess) stopRequested() bool { return p.stopReq.Load() }
+
+func (p *managedProcess) addWebCandidate(u string) {
+	p.urlMu.Lock()
+	defer p.urlMu.Unlock()
+	for _, c := range p.candidates {
+		if c == u {
+			return
+		}
+	}
+	p.candidates = append(p.candidates, u)
+}
+
+// takeWebCandidates drains the candidate list.
+func (p *managedProcess) takeWebCandidates() []string {
+	p.urlMu.Lock()
+	defer p.urlMu.Unlock()
+	out := p.candidates
+	p.candidates = nil
+	return out
 }
 
 func (p *managedProcess) stop() {
 	if p == nil {
 		return
 	}
+	p.requestStop()
 	p.once.Do(func() { close(p.done) })
 	if p.cmd != nil && p.cmd.Process != nil {
 		// taskkill /T kills the whole npx -> node process tree on Windows.
@@ -49,8 +104,27 @@ func (p *managedProcess) stop() {
 	}
 }
 
+// validateVersion rejects version strings that would be interpolated into the
+// shell command unless they are a clean semver (or the literal "latest").
+// The "local" mode never interpolates the version, so it skips validation.
+func validateVersion(pkgMgr, version string) error {
+	if pkgMgr == "local" {
+		return nil
+	}
+	v := strings.TrimSpace(version)
+	if v == "" || v == "latest" {
+		return nil
+	}
+	if _, err := parseVersion(v); err != nil {
+		return fmt.Errorf("版本号不合法: %q（应为 x.y.z 或 x.y.z-预发布，如 0.1.1-rc.2）", v)
+	}
+	return nil
+}
+
 // LaunchInstance starts DSH in the instance's directory with its chosen
-// version. Output is streamed to the frontend via the dsh:log event.
+// version. Output is streamed to the frontend via the dsh:log event; once the
+// process advertises a web address and that port accepts TCP connections, a
+// "ready" status (with the working URL) is emitted.
 func (a *App) LaunchInstance(id string) error {
 	a.mu.Lock()
 	inst := a.store.find(id)
@@ -61,6 +135,11 @@ func (a *App) LaunchInstance(id string) error {
 	if _, running := a.processes[id]; running {
 		a.mu.Unlock()
 		return fmt.Errorf("实例已在运行: %s", inst.Name)
+	}
+
+	if err := validateVersion(inst.PkgMgr, inst.Version); err != nil {
+		a.mu.Unlock()
+		return err
 	}
 
 	inst.Status = "starting"
@@ -123,14 +202,17 @@ func (a *App) LaunchInstance(id string) error {
 	a.systemLog(snapshot.ID, mp.pid, fmt.Sprintf("进程已启动 PID=%d，命令: %s", mp.pid, cmdStr))
 	a.emitStatus(snapshot.ID, "running", mp.pid)
 
-	// Stream output lines to the frontend.
+	// Stream output lines to the frontend; capture advertised web URLs.
 	stream := func(r *bufio.Scanner, tag string) {
 		for r.Scan() {
 			line := r.Text()
 			if line == "" {
 				continue
 			}
-			a.emit("dsh:log", LogEvent{
+			if u := extractWebURL(line); u != "" {
+				mp.addWebCandidate(u)
+			}
+			a.logEvent(LogEvent{
 				InstanceID: snapshot.ID,
 				PID:        mp.pid,
 				Line:       line,
@@ -142,21 +224,110 @@ func (a *App) LaunchInstance(id string) error {
 	go stream(bufio.NewScanner(stdout), "stdout")
 	go stream(bufio.NewScanner(stderr), "stderr")
 
+	// Probe advertised URLs until one accepts TCP connections, then flip the
+	// instance to "ready". Exits early when the process dies.
+	go a.probeReady(mp)
+
 	// Wait for exit in the background, then reconcile state.
 	go func() {
-		_ = cmd.Wait()
-		a.systemLog(snapshot.ID, mp.pid, "进程已退出")
+		waitErr := cmd.Wait()
+		code, codeText := exitCodeOf(waitErr)
+		crashed := waitErr != nil && !mp.stopRequested()
+		if crashed {
+			a.systemLog(snapshot.ID, mp.pid, "进程异常退出 "+codeText+"（非用户停止）")
+		} else {
+			a.systemLog(snapshot.ID, mp.pid, "进程已退出 "+codeText)
+		}
+		status := "stopped"
+		if crashed {
+			status = "crashed"
+		}
 		a.mu.Lock()
 		if cur := a.store.find(id); cur != nil {
 			cur.PID = 0
-			cur.Status = "stopped"
+			cur.Status = status
 		}
 		delete(a.processes, id)
 		a.mu.Unlock()
-		a.emitStatus(snapshot.ID, "stopped", 0)
+		switch {
+		case crashed:
+			// unexpected self-exit (bad args, port conflict, broken install...)
+			a.emit("dsh:status", StatusEvent{InstanceID: snapshot.ID, Status: "crashed", PID: 0, ExitCode: code})
+		case !mp.stopRequested():
+			// clean self-exit: nothing else announced "stopped" for us
+			a.emitStatus(snapshot.ID, "stopped", 0)
+		default:
+			// user-initiated stop: StopInstance already announced stopped
+		}
 	}()
 
 	return nil
+}
+
+// exitCodeOf maps a cmd.Wait error to an exit code and readable text.
+func exitCodeOf(err error) (int, string) {
+	if err == nil {
+		return 0, "(exit 0)"
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		c := ee.ExitCode()
+		return c, fmt.Sprintf("(exit %d)", c)
+	}
+	return -1, "(exit ?): " + err.Error()
+}
+
+// probeReady watches the process's advertised web URLs and dials them until
+// one accepts TCP connections, then emits status "ready" with the URL.
+func (a *App) probeReady(mp *managedProcess) {
+	deadline := time.Now().Add(3 * time.Minute)
+	tried := map[string]bool{}
+	for time.Now().Before(deadline) {
+		select {
+		case <-mp.done:
+			return
+		default:
+		}
+		for _, u := range mp.takeWebCandidates() {
+			tried[u] = false
+		}
+		for u, reached := range tried {
+			if reached {
+				continue
+			}
+			if dialLocalWeb(u, 700*time.Millisecond) {
+				tried[u] = true
+				a.mu.Lock()
+				if cur := a.store.find(mp.instanceID); cur != nil {
+					cur.Status = "ready"
+				}
+				a.mu.Unlock()
+				a.emit("dsh:status", StatusEvent{
+					InstanceID: mp.instanceID,
+					Status:     "ready",
+					PID:        mp.pid,
+					WebUrl:     u,
+				})
+				a.systemLog(mp.instanceID, mp.pid, "web 已就绪: "+u)
+				return
+			}
+		}
+		time.Sleep(400 * time.Millisecond)
+	}
+}
+
+// dialLocalWeb checks that the host:port of u accepts TCP connections.
+func dialLocalWeb(u string, timeout time.Duration) bool {
+	idx := strings.LastIndex(u, ":")
+	if idx < 0 {
+		return false
+	}
+	conn, err := net.DialTimeout("tcp", "127.0.0.1"+u[idx:], timeout)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 // StopInstance stops a running instance (kills the process tree).
@@ -169,7 +340,7 @@ func (a *App) StopInstance(id string) error {
 		return fmt.Errorf("实例不存在: %s", id)
 	}
 	if mp == nil {
-		if inst.Status != "stopped" {
+		if inst.Status != "stopped" && inst.Status != "crashed" {
 			inst.Status = "stopped"
 			inst.PID = 0
 		}
@@ -210,7 +381,7 @@ func (a *App) emitStatus(id, status string, pid int) {
 }
 
 func (a *App) systemLog(id string, pid int, line string) {
-	a.emit("dsh:log", LogEvent{
+	a.logEvent(LogEvent{
 		InstanceID: id,
 		PID:        pid,
 		Line:       line,

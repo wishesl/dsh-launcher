@@ -19,8 +19,10 @@ interface Props {
 const STATUS_META: Record<string, { label: string; cls: string }> = {
   running: { label: '运行中', cls: 'status-running' },
   starting: { label: '启动中…', cls: 'status-starting' },
+  ready: { label: '已就绪', cls: 'status-ready' },
   stopping: { label: '停止中…', cls: 'status-stopping' },
   stopped: { label: '已停止', cls: 'status-stopped' },
+  crashed: { label: '异常退出', cls: 'status-crashed' },
 };
 
 const PKGMGR_LABEL: Record<string, string> = {
@@ -44,13 +46,26 @@ export default function InstanceCard({
   onToggleLog,
 }: Props) {
   const st = STATUS_META[instance.status] ?? STATUS_META.stopped;
-  const isRunning = instance.status === 'running' || instance.status === 'starting';
+  const isRunning =
+    instance.status === 'running' ||
+    instance.status === 'starting' ||
+    instance.status === 'ready';
   const isBusy = busy || instance.status === 'starting' || instance.status === 'stopping';
   const pkgMgr = instance.pkgMgr || 'local';
 
   const outdated = instance.localVersion && registry && registry.latest && instance.localVersion !== registry.latest;
   const needsInstall = pkgMgr === 'local' && !instance.localVersion;
   const webUrl = getWebUrl(instance);
+  // The web address is only clickable once it actually answers (runtime
+  // capture) or when a static port was configured and the process is alive.
+  const canOpen = !!instance.webUrl || (isRunning && !webUrl.autoPort);
+  const openTitle = instance.webUrl
+    ? '在浏览器打开 DSH web'
+    : webUrl.autoPort
+      ? '--port 0 自动选端口，等待进程输出实际地址后可点击'
+      : isRunning
+        ? '在浏览器打开 DSH web（若尚未就绪可能打不开）'
+        : '实例未运行';
 
   return (
     <div className={`instance-card ${activeLog ? 'active' : ''}`}>
@@ -68,12 +83,18 @@ export default function InstanceCard({
 
       <div className="instance-url-row">
         <span className="meta-item">web:</span>
-        <code className="mono url-text" title="DSH web 地址（点击复制）" onClick={() => onCopyUrl(webUrl.url)}>{webUrl.url}</code>
+        <code
+          className={`mono url-text ${webUrl.runtime ? 'url-runtime' : ''}`}
+          title={webUrl.runtime ? '从运行中进程捕获的真实地址（点击复制）' : 'DSH web 地址（点击复制）'}
+          onClick={() => onCopyUrl(webUrl.url)}
+        >
+          {webUrl.url}
+        </code>
         <button
           className="btn btn-primary btn-sm"
           onClick={() => onOpen(webUrl.url)}
-          disabled={!isRunning || webUrl.autoPort}
-          title={webUrl.autoPort ? '--port 0 自动选端口，无法预知地址' : '在浏览器打开 DSH web'}
+          disabled={!canOpen}
+          title={openTitle}
         >
           打开
         </button>

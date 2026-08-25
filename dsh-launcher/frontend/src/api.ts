@@ -1,12 +1,12 @@
 import {
   DetectLocalVersion,
+  DirectoryExists,
   GetAppDataPath,
   GetCloseToTray,
   GetInstances,
   HideToTray,
   InstallToDirectory,
   LaunchInstance,
-  QueryLatestVersion,
   QueryRegistry,
   RemoveInstance,
   SaveInstance,
@@ -15,7 +15,7 @@ import {
   StopInstance,
 } from '../wailsjs/go/main/App';
 import { EventsOff, EventsOn } from '../wailsjs/runtime/runtime';
-import type { Instance, LogEvent, RegistryInfo, StatusEvent } from './types';
+import type { Instance, LogEvent, NoticeEvent, RegistryInfo, StatusEvent } from './types';
 
 // Typed wrappers around the Wails-generated bindings, plus event wiring.
 // The generated bindings type the models as classes (with helper methods);
@@ -29,8 +29,8 @@ export const api = {
   installToDirectory: (id: string): Promise<Instance[]> => InstallToDirectory(id),
   selectDirectory: (): Promise<string> => SelectDirectory(),
   detectLocalVersion: (dir: string): Promise<string> => DetectLocalVersion(dir),
+  directoryExists: (dir: string): Promise<boolean> => DirectoryExists(dir),
   queryRegistry: (): Promise<RegistryInfo> => QueryRegistry(),
-  queryLatestVersion: (): Promise<string> => QueryLatestVersion(),
   getAppDataPath: (): Promise<string> => GetAppDataPath(),
   hideToTray: (): Promise<void> => HideToTray(),
   getCloseToTray: (): Promise<boolean> => GetCloseToTray(),
@@ -47,6 +47,12 @@ export const api = {
   },
   offStatus(): void {
     EventsOff('dsh:status');
+  },
+  onNotice(cb: (e: NoticeEvent) => void): void {
+    EventsOn('dsh:notice', cb);
+  },
+  offNotice(): void {
+    EventsOff('dsh:notice');
   },
 };
 

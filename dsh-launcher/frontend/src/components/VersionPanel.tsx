@@ -16,6 +16,7 @@ function fmtDate(s: string): string {
 export default function VersionPanel({ registry, loading }: Props) {
   const [showAll, setShowAll] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
 
   const npxCmd = registry
     ? `npx -y @deepseek-ai/dsh@${registry.latest} web`
@@ -27,7 +28,9 @@ export default function VersionPanel({ registry, loading }: Props) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      /* clipboard unavailable in some WebView2 contexts */
+      /* clipboard unavailable in some WebView2 contexts — tell the user */
+      setCopyFailed(true);
+      setTimeout(() => setCopyFailed(false), 1500);
     }
   };
 
@@ -69,7 +72,7 @@ export default function VersionPanel({ registry, loading }: Props) {
       <div className="cmd-box">
         <code className="mono">{npxCmd}</code>
         <button className="btn btn-ghost btn-sm" onClick={copyCmd}>
-          {copied ? '已复制 ✓' : '复制命令'}
+          {copied ? '已复制 ✓' : copyFailed ? '复制失败 ✕' : '复制命令'}
         </button>
       </div>
 
@@ -100,7 +103,7 @@ export default function VersionPanel({ registry, loading }: Props) {
       </div>
 
       <p className="panel-note">
-        提示：`npx` 会优先使用启动目录内 node_modules 的本地副本。若目录内版本较旧，即使 npm 有新版本也会运行旧版 — 这也是本启动器在表单中检测「本地副本」的原因。
+        提示：npx 会优先使用启动目录内 node_modules 的本地副本。若目录内版本较旧，即使 npm 有新版本也会运行旧版 — 这也是本启动器在表单中检测「本地副本」的原因。
       </p>
     </section>
   );

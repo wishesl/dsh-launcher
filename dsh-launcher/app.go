@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,10 +19,12 @@ type App struct {
 
 	store    *instanceStore
 	settings *settingsStore
+	logs     *logStore
 
 	mu        sync.Mutex
 	processes map[string]*managedProcess // instanceID -> running process
 	quitting  bool                       // set when the user quits from the tray
+	tray      *trayState                 // system tray state (instance submenu)
 }
 
 // NewApp creates a new App application struct
@@ -29,6 +32,7 @@ func NewApp() *App {
 	return &App{
 		store:     newInstanceStore(),
 		settings:  newSettingsStore(),
+		logs:      newLogStore(),
 		processes: make(map[string]*managedProcess),
 	}
 }
@@ -44,14 +48,44 @@ func (a *App) startup(ctx context.Context) {
 		inst.Status = "stopped"
 		inst.PID = 0
 	}
+	autoStart := make([]string, 0)
+	for _, inst := range a.store.list() {
+		if inst.AutoStart {
+			autoStart = append(autoStart, inst.ID)
+		}
+	}
 	a.mu.Unlock()
+
+	// Restore last window geometry (defaults remain when unset).
+	if st := a.settings.get(); st.WinW > 200 && st.WinH > 150 {
+		runtime.WindowSetSize(ctx, st.WinW, st.WinH)
+	}
+	if st := a.settings.get(); st.WinX != 0 || st.WinY != 0 {
+		if x, y := st.WinX, st.WinY; x > -30000 && y > -30000 {
+			runtime.WindowSetPosition(ctx, x, y)
+		}
+	}
+
 	// Install the system tray icon + menu.
 	a.startTray()
+
+	// Auto-launch instances flagged with AutoStart (staggered so several npx
+	// downloads don't stampede at once).
+	for i, id := range autoStart {
+		go func(idx int, instanceID string) {
+			time.Sleep(time.Duration(800*idx) * time.Millisecond)
+			a.systemLog(instanceID, 0, "自动启动（随启动器）...")
+			if err := a.LaunchInstance(instanceID); err != nil {
+				a.systemLog(instanceID, 0, "自动启动失败: "+err.Error())
+			}
+		}(i, id)
+	}
 }
 
 // shutdown stops every managed process so no orphan DSH keeps running, then
 // removes the tray icon.
 func (a *App) shutdown(ctx context.Context) {
+	a.saveWindowGeometry()
 	a.mu.Lock()
 	procs := make([]*managedProcess, 0, len(a.processes))
 	for _, p := range a.processes {
@@ -62,12 +96,27 @@ func (a *App) shutdown(ctx context.Context) {
 	for _, p := range procs {
 		p.stop()
 	}
+	a.logs.closeAll()
 	systrayQuit()
+}
+
+// saveWindowGeometry persists the current window rectangle to settings.
+func (a *App) saveWindowGeometry() {
+	if a.ctx == nil {
+		return
+	}
+	x, y := runtime.WindowGetPosition(a.ctx)
+	w, h := runtime.WindowGetSize(a.ctx)
+	if w <= 0 || h <= 0 {
+		return
+	}
+	a.settings.setWindowGeometry(x, y, w, h)
 }
 
 // onBeforeClose intercepts the window close request. When "close to tray" is
 // enabled (and the user is not explicitly quitting), the window is hidden
-// instead of the app exiting.
+// instead of the app exiting. On the very first hide a short notice is shown
+// so users learn the app keeps running in the tray.
 func (a *App) onBeforeClose(ctx context.Context) bool {
 	a.mu.Lock()
 	quitting := a.quitting
@@ -78,14 +127,38 @@ func (a *App) onBeforeClose(ctx context.Context) bool {
 	if !a.settings.get().CloseToTray {
 		return false // tray mode off: close as usual
 	}
-	runtime.WindowHide(ctx)
+	a.hideToTrayTip(ctx)
 	return true // prevent close, keep running in the tray
 }
 
+// hideToTrayTip hides the window; on the very first hide it shows a short
+// notice first so users learn the app keeps running in the tray.
+func (a *App) hideToTrayTip(ctx context.Context) {
+	if !a.settings.get().TrayTipShown {
+		a.settings.setTrayTipShown(true)
+		a.emit("dsh:notice", map[string]string{
+			"msg": "已最小化到托盘，DSH 实例仍在后台运行。可从托盘图标唤起。",
+		})
+		time.AfterFunc(1500*time.Millisecond, func() {
+			a.saveWindowGeometry()
+			if a.ctx != nil {
+				runtime.WindowHide(a.ctx)
+			}
+		})
+		return
+	}
+	a.saveWindowGeometry()
+	runtime.WindowHide(ctx)
+}
+
 // emit sends an event to the frontend (guarded against nil context during tests).
+// Status events also refresh the tray instance submenu.
 func (a *App) emit(event string, payload interface{}) {
 	if a.ctx != nil {
 		runtime.EventsEmit(a.ctx, event, payload)
+	}
+	if event == "dsh:status" {
+		go a.refreshTrayInstances()
 	}
 }
 
@@ -134,7 +207,9 @@ func (a *App) SaveInstance(inst Instance) ([]Instance, error) {
 		existing.LocalVersion = inst.LocalVersion
 		existing.ExtraArgs = inst.ExtraArgs
 		existing.PkgMgr = inst.PkgMgr
+		existing.AutoStart = inst.AutoStart
 		a.store.saveAll()
+		go a.refreshTrayInstances()
 		return a.store.list(), nil
 	}
 
@@ -143,6 +218,7 @@ func (a *App) SaveInstance(inst Instance) ([]Instance, error) {
 	inst.PID = 0
 	a.store.add(inst)
 	a.store.saveAll()
+	go a.refreshTrayInstances()
 	return a.store.list(), nil
 }
 
@@ -161,6 +237,7 @@ func (a *App) RemoveInstance(id string) ([]Instance, error) {
 
 	a.store.remove(id)
 	a.store.saveAll()
+	go a.refreshTrayInstances()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.store.list(), nil
@@ -186,6 +263,16 @@ func (a *App) DetectLocalVersion(dir string) (string, error) {
 		return "", nil
 	}
 	return detectLocalVersion(dir), nil
+}
+
+// DirectoryExists reports whether the given path exists and is a directory.
+// Used by the instance form to warn about typos before saving/launching.
+func (a *App) DirectoryExists(dir string) bool {
+	if strings.TrimSpace(dir) == "" {
+		return false
+	}
+	st, err := os.Stat(dir)
+	return err == nil && st.IsDir()
 }
 
 // GetAppDataPath returns the config file location, for debugging.
@@ -218,7 +305,10 @@ func (a *App) EnsureConfigDir() error {
 // HideToTray hides the main window to the system tray (called from the header
 // button). The app keeps running.
 func (a *App) HideToTray() {
-	a.hideWindow()
+	if a.ctx == nil {
+		return
+	}
+	a.hideToTrayTip(a.ctx)
 }
 
 // GetCloseToTray returns whether clicking the window close (X) hides to tray

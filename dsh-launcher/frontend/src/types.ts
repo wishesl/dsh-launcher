@@ -2,6 +2,14 @@
 // These intentionally mirror the generated wailsjs models but as plain
 // interfaces so we can pass/receive plain JSON objects.
 
+export type InstanceStatus =
+  | 'stopped'
+  | 'starting'
+  | 'running'   // process alive, web not confirmed yet
+  | 'ready'     // web port reachable (URL captured from process output)
+  | 'stopping'
+  | 'crashed';  // process exited on its own with a non-zero code
+
 export interface Instance {
   id: string;
   name: string;
@@ -13,10 +21,9 @@ export interface Instance {
   autoStart: boolean;
   createdAt: any;       // RFC3339 string
   pid: number;
-  status: string;       // "stopped" | "running" | "starting" | "stopping"
+  status: InstanceStatus | string; // union kept loose for forward compat
+  webUrl?: string | null; // runtime-captured working URL (from "ready")
 }
-
-export type InstanceStatus = 'stopped' | 'running' | 'starting' | 'stopping';
 
 export interface DSHVersion {
   version: string;
@@ -44,4 +51,10 @@ export interface StatusEvent {
   instanceId: string;
   status: string;
   pid: number;
+  webUrl?: string;        // set when status === 'ready'
+  exitCode?: number;      // set when status === 'crashed'
+}
+
+export interface NoticeEvent {
+  msg: string;
 }

@@ -6,6 +6,10 @@ export function DetectLocalVersion(arg1) {
   return window['go']['main']['App']['DetectLocalVersion'](arg1);
 }
 
+export function DirectoryExists(arg1) {
+  return window['go']['main']['App']['DirectoryExists'](arg1);
+}
+
 export function EnsureConfigDir() {
   return window['go']['main']['App']['EnsureConfigDir']();
 }
