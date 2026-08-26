@@ -1,13 +1,20 @@
 import {
+  ApproveBuilds,
+  CancelMarketOp,
   CheckEnvironment,
   DetectLocalVersion,
   DirectoryExists,
+  FetchMarketCatalog,
   GetAppDataPath,
   GetInstances,
+  GetMarketSettings,
   HideToTray,
   InstallPnpm,
+  InstallPlugin,
   InstallToDirectory,
   LaunchInstance,
+  ListInstalledPlugins,
+  MarketOpRunning,
   QueryRegistry,
   QuitApp,
   RemoveInstance,
@@ -15,14 +22,23 @@ import {
   SaveInstance,
   SelectDirectory,
   SetAutoStart,
+  SetMarketRegistryURL,
   StopInstance,
+  TogglePlugin,
+  UninstallPlugin,
 } from '../wailsjs/go/main/App';
 import { EventsOff, EventsOn } from '../wailsjs/runtime/runtime';
 import type {
   EnvLogEvent,
   EnvReport,
   Instance,
+  InstalledPlugin,
   LogEvent,
+  MarketCatalog,
+  MarketLogEvent,
+  MarketOpResult,
+  MarketSettings,
+  MarketStatusEvent,
   NoticeEvent,
   RegistryInfo,
   StatusEvent,
@@ -54,6 +70,32 @@ export const api = {
   checkEnvironment: (): Promise<EnvReport> => CheckEnvironment(),
   installPnpm: (): Promise<void> => InstallPnpm(),
 
+  // plugin market
+  fetchMarketCatalog: (force: boolean): Promise<MarketCatalog> => FetchMarketCatalog(force),
+  installPlugin: (instanceId: string, entryUrl: string): Promise<MarketOpResult> =>
+    InstallPlugin(instanceId, entryUrl),
+  uninstallPlugin: (instanceId: string, name: string): Promise<MarketOpResult> =>
+    UninstallPlugin(instanceId, name),
+  cancelMarketOp: (): Promise<boolean> => CancelMarketOp(),
+  marketOpRunning: (): Promise<boolean> => MarketOpRunning(),
+  listInstalledPlugins: (): Promise<InstalledPlugin[]> => ListInstalledPlugins(),
+  togglePlugin: (name: string, enabled: boolean): Promise<void> => TogglePlugin(name, enabled),
+  approveBuilds: (names: string[]): Promise<void> => ApproveBuilds(names),
+  getMarketSettings: (): Promise<MarketSettings> => GetMarketSettings(),
+  setMarketRegistryURL: (url: string): Promise<void> => SetMarketRegistryURL(url),
+
+  onMarketLog(cb: (e: MarketLogEvent) => void): void {
+    EventsOn('dsh:market-log', cb);
+  },
+  offMarketLog(): void {
+    EventsOff('dsh:market-log');
+  },
+  onMarketStatus(cb: (e: MarketStatusEvent) => void): void {
+    EventsOn('dsh:market-status', cb);
+  },
+  offMarketStatus(): void {
+    EventsOff('dsh:market-status');
+  },
   onLog(cb: (e: LogEvent) => void): void {
     EventsOn('dsh:log', cb);
   },

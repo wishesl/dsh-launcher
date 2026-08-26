@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, errMsg } from '../api';
-import type { EnvReport, ToolStatus } from '../types';
+import type { EnvReport, MarketSettings, ToolStatus } from '../types';
 
 interface Props {
   onClose: () => void;
@@ -43,6 +43,9 @@ export default function SettingsModal({ onClose, showToast }: Props) {
   const [installing, setInstalling] = useState(false);
   const [lines, setLines] = useState<string[]>([]);
   const outRef = useRef<HTMLPreElement>(null);
+  const [market, setMarket] = useState<MarketSettings | null>(null);
+  const [marketUrl, setMarketUrl] = useState('');
+  const [savingMarket, setSavingMarket] = useState(false);
 
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
@@ -67,6 +70,26 @@ export default function SettingsModal({ onClose, showToast }: Props) {
   useEffect(() => {
     check();
   }, [check]);
+
+  // Load plugin-market settings (registry mirror) when the dialog opens.
+  useEffect(() => {
+    api.getMarketSettings().then((m) => {
+      setMarket(m);
+      setMarketUrl(m.registryUrl);
+    }).catch(() => undefined);
+  }, []);
+
+  const saveMarket = async () => {
+    setSavingMarket(true);
+    try {
+      await api.setMarketRegistryURL(marketUrl.trim());
+      showToast('市场设置已保存');
+    } catch (e) {
+      showToast('保存失败: ' + errMsg(e), 'error');
+    } finally {
+      setSavingMarket(false);
+    }
+  };
 
   // Live output of the pnpm install.
   useEffect(() => {
@@ -130,6 +153,25 @@ export default function SettingsModal({ onClose, showToast }: Props) {
                 {lines.join('\n')}
               </pre>
             )}
+          </div>
+
+          <div className="field">
+            <span className="field-label">插件市场</span>
+            <div className="field-hint">
+              插件目录源（默认官方 <b>{market?.registryUrl === '' || market?.registryUrl?.startsWith('https://awesome-dsh-plugin.com') ? 'awesome-dsh-plugin.com' : '官方目录'}</b>）。
+              网络受限时可填镜像地址，留空恢复官方。
+            </div>
+            <div className="row">
+              <input
+                type="text"
+                value={marketUrl}
+                onChange={(e) => setMarketUrl(e.target.value)}
+                placeholder="https://your-mirror.example/plugins.json"
+              />
+              <button className="btn btn-accent" onClick={saveMarket} disabled={savingMarket}>
+                {savingMarket ? '保存中…' : '保存'}
+              </button>
+            </div>
           </div>
         </div>
 

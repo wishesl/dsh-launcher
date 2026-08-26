@@ -17,6 +17,8 @@ type settings struct {
 	WinY int `json:"winY"`
 	WinW int `json:"winW"`
 	WinH int `json:"winH"`
+	// Plugin-market registry mirror (empty = official curated catalog).
+	MarketRegistryURL string `json:"marketRegistryURL"`
 }
 
 // settingsStore persists launcher preferences next to instances.json.
@@ -80,6 +82,15 @@ func (s *settingsStore) setTrayTipShown(shown bool) {
 func (s *settingsStore) setWindowGeometry(x, y, w, h int) {
 	s.mu.Lock()
 	s.data.WinX, s.data.WinY, s.data.WinW, s.data.WinH = x, y, w, h
+	s.saveLocked()
+	s.mu.Unlock()
+}
+
+// setMarketRegistryURL persists the plugin-market registry mirror (empty
+// restores the official curated catalog).
+func (s *settingsStore) setMarketRegistryURL(url string) {
+	s.mu.Lock()
+	s.data.MarketRegistryURL = url
 	s.saveLocked()
 	s.mu.Unlock()
 }

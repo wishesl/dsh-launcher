@@ -5,23 +5,22 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 )
 
-// allowBuildsYAML approves native-module build scripts for pnpm so koffi /
-// node-pty / etc. get their binaries compiled. pnpm 11 reads this from
-// pnpm-workspace.yaml (it writes a "set this to true or false" placeholder
+// defaultBuildPackages approves native-module build scripts for pnpm so
+// koffi / node-pty / etc. get their binaries compiled. pnpm 11 reads this
+// from pnpm-workspace.yaml (it writes a "set this to true or false" placeholder
 // file on first install when builds are ignored).
-const allowBuildsYAML = `allowBuilds:
-  '@deepseek-ai/dsh-subprocess-local': true
-  '@google/genai': true
-  koffi: true
-  node-pty: true
-  protobufjs: true
-`
+var defaultBuildPackages = []string{
+	"@deepseek-ai/dsh-subprocess-local",
+	"@google/genai",
+	"koffi",
+	"node-pty",
+	"protobufjs",
+}
 
 // effectiveVersion returns the version used for pnpm add (latest passthrough).
 func effectiveVersion(version string) string {
@@ -76,9 +75,10 @@ func (a *App) InstallToDirectory(id string) ([]Instance, error) {
 		return nil, err
 	}
 
-	// 2) approve native builds
+	// 2) approve native builds (merge — preserve any existing entries the
+	// user already approved instead of overwriting the whole file)
 	a.systemLog(snapshot.ID, 0, "批准原生模块构建 (koffi / node-pty 等)...")
-	if err := os.WriteFile(filepath.Join(snapshot.Directory, "pnpm-workspace.yaml"), []byte(allowBuildsYAML), 0o644); err != nil {
+	if _, err := mergeAllowBuilds(snapshot.Directory, defaultBuildPackages); err != nil {
 		return nil, err
 	}
 

@@ -64,6 +64,26 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class InstalledPlugin {
+	    name: string;
+	    spec: string;
+	    version: string;
+	    kind: string;
+	    state: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new InstalledPlugin(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.spec = source["spec"];
+	        this.version = source["version"];
+	        this.kind = source["kind"];
+	        this.state = source["state"];
+	    }
+	}
 	export class Instance {
 	    id: string;
 	    name: string;
@@ -114,6 +134,113 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class MarketPlugin {
+	    name: string;
+	    owner: string;
+	    url: string;
+	    category: string;
+	    description: Record<string, string>;
+	    npm?: string;
+	    stars?: number;
+	    downloads?: number;
+	    install: string;
+	    added: string;
+	    deprecated: boolean;
+	    replacement: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MarketPlugin(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.owner = source["owner"];
+	        this.url = source["url"];
+	        this.category = source["category"];
+	        this.description = source["description"];
+	        this.npm = source["npm"];
+	        this.stars = source["stars"];
+	        this.downloads = source["downloads"];
+	        this.install = source["install"];
+	        this.added = source["added"];
+	        this.deprecated = source["deprecated"];
+	        this.replacement = source["replacement"];
+	    }
+	}
+	export class MarketCatalog {
+	    updated: string;
+	    count: number;
+	    categories: Record<string, any>;
+	    plugins: MarketPlugin[];
+	
+	    static createFrom(source: any = {}) {
+	        return new MarketCatalog(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.updated = source["updated"];
+	        this.count = source["count"];
+	        this.categories = source["categories"];
+	        this.plugins = this.convertValues(source["plugins"], MarketPlugin);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class MarketOpResult {
+	    ok: boolean;
+	    cancelled: boolean;
+	    installed: string[];
+	    blockedBuilds: string[];
+	    output: string;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MarketOpResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.cancelled = source["cancelled"];
+	        this.installed = source["installed"];
+	        this.blockedBuilds = source["blockedBuilds"];
+	        this.output = source["output"];
+	        this.error = source["error"];
+	    }
+	}
+	
+	export class MarketSettings {
+	    registryUrl: string;
+	    profile: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MarketSettings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.registryUrl = source["registryUrl"];
+	        this.profile = source["profile"];
+	    }
 	}
 	export class RegistryInfo {
 	    package: string;

@@ -7,6 +7,8 @@ interface Props {
   onRefreshRegistry: () => void;
   onOpenSettings: () => void;
   onHideToTray: () => void;
+  onOpenMarket: () => void;
+  marketActive: boolean;
 }
 
 export default function Header({
@@ -16,6 +18,8 @@ export default function Header({
   onRefreshRegistry,
   onOpenSettings,
   onHideToTray,
+  onOpenMarket,
+  marketActive,
 }: Props) {
   return (
     <header className="app-header">
@@ -54,7 +58,14 @@ export default function Header({
         <button className="btn btn-ghost" onClick={onHideToTray} title="隐藏到系统托盘，进程继续运行">
           最小化到托盘
         </button>
-        <button className="btn btn-ghost" onClick={onOpenSettings} title="前置环境检查 / 安装 pnpm">
+        <button
+          className={`btn ${marketActive ? 'btn-accent' : 'btn-ghost'}`}
+          onClick={onOpenMarket}
+          title="浏览社区插件、一键安装 / 卸载"
+        >
+          🛒 插件市场
+        </button>
+        <button className="btn btn-ghost" onClick={onOpenSettings} title="前置环境检查 / 安装 pnpm / 市场设置">
           ⚙ 设置
         </button>
 

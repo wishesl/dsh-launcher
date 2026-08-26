@@ -9,6 +9,7 @@ import VersionPanel from './components/VersionPanel';
 import LogPanel from './components/LogPanel';
 import ExitDialog from './components/ExitDialog';
 import SettingsModal from './components/SettingsModal';
+import MarketView from './components/MarketView';
 
 type ModalState = { mode: 'new' } | { mode: 'edit'; instance: Instance } | null;
 type Toast = { msg: string; kind: 'ok' | 'error' } | null;
@@ -22,6 +23,7 @@ export default function App() {
   const [activeLogId, setActiveLogId] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalState>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [view, setView] = useState<'main' | 'market'>('main');
   // Window ✕ pressed and the user wants to be asked (no remembered choice).
   const [exitAsk, setExitAsk] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -238,45 +240,51 @@ export default function App() {
         onRefreshRegistry={refreshRegistry}
         onOpenSettings={() => setShowSettings(true)}
         onHideToTray={hideToTray}
+        onOpenMarket={() => setView((v) => (v === 'market' ? 'main' : 'market'))}
+        marketActive={view === 'market'}
       />
 
-      <main className="layout">
-        <div className="col-left">
-          <InstanceList
-            instances={instances}
-            registry={registry}
-            busyId={busyId}
-            activeLogId={activeLogId}
-            onAdd={() => setModal({ mode: 'new' })}
-            onStart={start}
-            onStop={stop}
-            onInstall={install}
-            onOpen={openWeb}
-            onCopyUrl={copyUrl}
-            onEdit={(inst) => setModal({ mode: 'edit', instance: inst })}
-            onDelete={remove}
-            onToggleLog={toggleLog}
-            onToggleAutoStart={toggleAutoStart}
-          />
-          <LogPanel
-            instance={activeInstance}
-            logs={activeLogId ? logs[activeLogId] ?? [] : []}
-            onClear={() => {
-              if (activeLogId) {
-                const map = { ...logsRef.current };
-                map[activeLogId] = [];
-                logsRef.current = map;
-                setLogs(map);
-              }
-            }}
-            logRef={logViewRef}
-          />
-        </div>
+      {view === 'market' ? (
+        <MarketView instances={instances} showToast={showToast} onBack={() => setView('main')} />
+      ) : (
+        <main className="layout">
+          <div className="col-left">
+            <InstanceList
+              instances={instances}
+              registry={registry}
+              busyId={busyId}
+              activeLogId={activeLogId}
+              onAdd={() => setModal({ mode: 'new' })}
+              onStart={start}
+              onStop={stop}
+              onInstall={install}
+              onOpen={openWeb}
+              onCopyUrl={copyUrl}
+              onEdit={(inst) => setModal({ mode: 'edit', instance: inst })}
+              onDelete={remove}
+              onToggleLog={toggleLog}
+              onToggleAutoStart={toggleAutoStart}
+            />
+            <LogPanel
+              instance={activeInstance}
+              logs={activeLogId ? logs[activeLogId] ?? [] : []}
+              onClear={() => {
+                if (activeLogId) {
+                  const map = { ...logsRef.current };
+                  map[activeLogId] = [];
+                  logsRef.current = map;
+                  setLogs(map);
+                }
+              }}
+              logRef={logViewRef}
+            />
+          </div>
 
-        <div className="col-right">
-          <VersionPanel registry={registry} loading={registryLoading} />
-        </div>
-      </main>
+          <div className="col-right">
+            <VersionPanel registry={registry} loading={registryLoading} />
+          </div>
+        </main>
+      )}
 
       {modal && (
         <InstanceForm

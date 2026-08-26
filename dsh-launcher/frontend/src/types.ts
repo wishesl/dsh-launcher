@@ -77,3 +77,60 @@ export interface EnvLogEvent {
 
 // What the user picked in the exit chooser on window close.
 export type ExitChoice = 'tray' | 'quit';
+
+// --- plugin market ---
+export interface MarketPlugin {
+  name: string;
+  owner: string;
+  url: string;
+  category: string;
+  description: Record<string, string>; // zh / en
+  npm?: string | null;                  // preferred install source when set
+  stars?: number | null;
+  downloads?: number | null;            // npm 30-day downloads
+  install: string;
+  added: string;
+  deprecated?: boolean;
+  replacement?: string;
+}
+
+export interface MarketCatalog {
+  updated: string;
+  count: number;
+  categories: Record<string, Record<string, string>>; // id -> {zh,en}
+  plugins: MarketPlugin[];
+}
+
+export interface InstalledPlugin {
+  name: string;
+  spec: string;
+  version: string;
+  kind: string;  // npm | github | linked | other
+  state: string; // enabled | disabled
+}
+
+export interface MarketOpResult {
+  ok: boolean;
+  cancelled: boolean;
+  installed: string[];
+  blockedBuilds: string[];
+  output: string;
+  error: string;
+}
+
+export interface MarketSettings {
+  registryUrl: string;
+  profile: string;
+}
+
+export interface MarketLogEvent {
+  line: string;
+}
+
+export interface MarketStatusEvent {
+  state: string; // running | done | failed | cancelled
+  kind: string;  // install | uninstall
+  target: string;
+  error?: string;
+  blockedBuilds?: string[];
+}
