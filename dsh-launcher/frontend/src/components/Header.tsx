@@ -1,4 +1,5 @@
 import type { RegistryInfo } from '../types';
+import logo from '../assets/images/logo-universal.png';
 
 interface Props {
   registry: RegistryInfo | null;
@@ -11,7 +12,7 @@ export default function Header({ registry, registryLoading, onRefreshRegistry, o
   return (
     <header className="app-header">
       <div className="brand">
-        <span className="brand-logo">DSH</span>
+        <img className="brand-logo-img" src={logo} alt="DSH Launcher" draggable={false} />
         <div className="brand-text">
           <h1>DSH Launcher</h1>
           <p className="brand-sub">DeepSeek Harness 启动器</p>

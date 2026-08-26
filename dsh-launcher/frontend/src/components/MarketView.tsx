@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, errMsg } from '../api';
 import type { Instance, InstalledPlugin, MarketCatalog, MarketPlugin } from '../types';
+import Switch from './Switch';
 import './market.css';
 
 interface Props {
@@ -460,13 +461,14 @@ export default function MarketView({ instances, showToast }: Props) {
                 </div>
                 <div className="installed-actions">
                   <label className="installed-toggle" title="写入 cordis.patch.yml 的 disabled 开关">
-                    <input
-                      type="checkbox"
+                    <Switch
                       checked={p.state !== 'disabled'}
                       disabled={opRunning}
-                      onChange={(e) => toggle(p, e.target.checked)}
+                      onChange={(v) => toggle(p, v)}
                     />
-                    {p.state === 'disabled' ? '启用' : '停用'}
+                    <span className={p.state === 'disabled' ? 'muted' : ''}>
+                      {p.state === 'disabled' ? '已停用' : '已启用'}
+                    </span>
                   </label>
                   <button className="btn btn-ghost btn-sm danger-text" disabled={opRunning} onClick={() => uninstall(p)}>
                     卸载

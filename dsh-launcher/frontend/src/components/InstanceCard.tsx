@@ -1,5 +1,6 @@
 import type { Instance, RegistryInfo } from '../types';
 import { getWebUrl } from '../util';
+import Switch from './Switch';
 
 interface Props {
   instance: Instance;
@@ -83,11 +84,7 @@ export default function InstanceCard({
           className="autostart-toggle"
           title="随启动器自动启动此实例：打开 DSH Launcher 时自动拉起"
         >
-          <input
-            type="checkbox"
-            checked={instance.autoStart}
-            onChange={(e) => onToggleAutoStart(instance.id, e.target.checked)}
-          />
+          <Switch checked={instance.autoStart} onChange={(v) => onToggleAutoStart(instance.id, v)} />
           自启
         </label>
       </div>
