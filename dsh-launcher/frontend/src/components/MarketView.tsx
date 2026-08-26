@@ -6,7 +6,6 @@ import './market.css';
 interface Props {
   instances: Instance[];
   showToast: (msg: string, kind?: 'ok' | 'error') => void;
-  onBack: () => void;
 }
 
 const PAGE_SIZE = 60;
@@ -81,7 +80,7 @@ function findCatalogEntry(installed: InstalledPlugin, catalog: MarketCatalog | n
   });
 }
 
-export default function MarketView({ instances, showToast, onBack }: Props) {
+export default function MarketView({ instances, showToast }: Props) {
   const [tab, setTab] = useState<'discover' | 'installed'>('discover');
   const [catalog, setCatalog] = useState<MarketCatalog | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
@@ -272,7 +271,6 @@ export default function MarketView({ instances, showToast, onBack }: Props) {
   return (
     <main className="market">
       <div className="market-bar">
-        <button className="btn btn-ghost btn-sm" onClick={onBack}>← 返回</button>
         <h2>插件市场</h2>
         <div className="market-bar-right">
           <select
@@ -348,10 +346,14 @@ export default function MarketView({ instances, showToast, onBack }: Props) {
           )}
 
           {!catalog && !catalogError && (
-            <div className="empty">
-              <p><span className="spin" /> 加载插件目录…</p>
-              <p className="muted" style={{ fontSize: 12 }}>
-                首次下载目录可能较慢（视网络需 1-2 分钟），之后会秒开
+            <div className="market-loading">
+              <div className="market-grid">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="skeleton-card" />
+                ))}
+              </div>
+              <p className="muted" style={{ textAlign: 'center', marginTop: 10, fontSize: 12 }}>
+                正在加载插件目录… 首次下载较慢（视网络 1-2 分钟），之后秒开
               </p>
             </div>
           )}

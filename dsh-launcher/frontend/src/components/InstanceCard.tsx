@@ -17,13 +17,13 @@ interface Props {
   onToggleAutoStart: (id: string, v: boolean) => void;
 }
 
-const STATUS_META: Record<string, { label: string; cls: string }> = {
-  running: { label: '运行中', cls: 'status-running' },
-  starting: { label: '启动中…', cls: 'status-starting' },
-  ready: { label: '已就绪', cls: 'status-ready' },
-  stopping: { label: '停止中…', cls: 'status-stopping' },
-  stopped: { label: '已停止', cls: 'status-stopped' },
-  crashed: { label: '异常退出', cls: 'status-crashed' },
+const STATUS_META: Record<string, { label: string; cls: string; rail: string }> = {
+  running: { label: '运行中', cls: 'sb-running', rail: 'rail-running' },
+  starting: { label: '启动中…', cls: 'sb-starting', rail: 'rail-starting' },
+  ready: { label: '已就绪', cls: 'sb-ready', rail: 'rail-ready' },
+  stopping: { label: '停止中…', cls: 'sb-stopping', rail: 'rail-stopping' },
+  stopped: { label: '已停止', cls: 'sb-stopped', rail: 'rail-stopped' },
+  crashed: { label: '异常退出', cls: 'sb-crashed', rail: 'rail-crashed' },
 };
 
 const PKGMGR_LABEL: Record<string, string> = {
@@ -58,8 +58,6 @@ export default function InstanceCard({
   const outdated = instance.localVersion && registry && registry.latest && instance.localVersion !== registry.latest;
   const needsInstall = pkgMgr === 'local' && !instance.localVersion;
   const webUrl = getWebUrl(instance);
-  // The web address is only clickable once it actually answers (runtime
-  // capture) or when a static port was configured and the process is alive.
   const canOpen = !!instance.webUrl || (isRunning && !webUrl.autoPort);
   const openTitle = instance.webUrl
     ? '在浏览器打开 DSH web'
@@ -70,18 +68,20 @@ export default function InstanceCard({
         : '实例未运行';
 
   return (
-    <div className={`instance-card ${activeLog ? 'active' : ''}`}>
+    <div className={`instance-card ${st.rail} ${activeLog ? 'active' : ''}`}>
       <div className="instance-top">
-        <span className={`status-dot ${st.cls}`} title={st.label} />
         <span className="instance-name" title={instance.directory}>{instance.name}</span>
+        <span className={`status-badge ${st.cls}`}>
+          <span className="status-dot" />
+          {st.label}
+        </span>
         <span className={`pill pill-version ${instance.version === 'latest' ? 'pill-accent' : ''}`}>
           {instance.version === 'latest' ? 'latest' : instance.version}
         </span>
         <span className="pill" title="启动方式">{PKGMGR_LABEL[pkgMgr] ?? pkgMgr}</span>
-        <span className="instance-state">{st.label}</span>
         <label
           className="autostart-toggle"
-          title="随启动器自动启动此实例：打开 DSH Launcher 时自动拉起（无需打开编辑表单）"
+          title="随启动器自动启动此实例：打开 DSH Launcher 时自动拉起"
         >
           <input
             type="checkbox"
@@ -120,7 +120,7 @@ export default function InstanceCard({
             {outdated && <span className="tag-warn">有新版</span>}
           </span>
         ) : (
-          <span className={`meta-item ${needsInstall ? 'meta-warn' : 'muted'}`}>
+          <span className={`meta-item ${needsInstall ? 'meta-warn' : ''}`}>
             {needsInstall ? '本地副本未安装 — 点「安装到目录」' : '本地无副本（将从 registry 拉取）'}
           </span>
         )}
@@ -130,17 +130,17 @@ export default function InstanceCard({
 
       <div className="instance-actions">
         {isRunning ? (
-          <button className="btn btn-danger btn-sm" onClick={() => onStop(instance.id)} disabled={isBusy}>
+          <button className="btn btn-danger" onClick={() => onStop(instance.id)} disabled={isBusy}>
             停止
           </button>
         ) : (
-          <button className="btn btn-primary btn-sm" onClick={() => onStart(instance.id)} disabled={isBusy}>
+          <button className="btn btn-primary" onClick={() => onStart(instance.id)} disabled={isBusy}>
             启动
           </button>
         )}
         {!isRunning && (
           <button
-            className={`btn btn-sm ${needsInstall ? 'btn-accent' : 'btn-ghost'}`}
+            className={`btn ${needsInstall ? 'btn-accent' : 'btn-ghost'}`}
             onClick={() => onInstall(instance.id)}
             disabled={isBusy}
             title={needsInstall ? '把该版本真实安装进目录（生成可读源码 node_modules）' : '重新安装该版本到目录（生成可读源码）'}
@@ -148,11 +148,11 @@ export default function InstanceCard({
             安装到目录
           </button>
         )}
-        <button className="btn btn-ghost btn-sm" onClick={() => onToggleLog(instance.id)}>
+        <button className="btn btn-ghost" onClick={() => onToggleLog(instance.id)}>
           {activeLog ? '收起日志' : '查看日志'}
         </button>
-        <button className="btn btn-ghost btn-sm" onClick={() => onEdit(instance)}>编辑</button>
-        <button className="btn btn-ghost btn-sm danger-text" onClick={() => onDelete(instance.id)}>删除</button>
+        <button className="btn btn-ghost" onClick={() => onEdit(instance)}>编辑</button>
+        <button className="btn btn-ghost danger-text" onClick={() => onDelete(instance.id)}>删除</button>
       </div>
     </div>
   );

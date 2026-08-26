@@ -3,31 +3,18 @@ import type { RegistryInfo } from '../types';
 interface Props {
   registry: RegistryInfo | null;
   registryLoading: boolean;
-  appDataPath: string;
   onRefreshRegistry: () => void;
-  onOpenSettings: () => void;
   onHideToTray: () => void;
-  onOpenMarket: () => void;
-  marketActive: boolean;
 }
 
-export default function Header({
-  registry,
-  registryLoading,
-  appDataPath,
-  onRefreshRegistry,
-  onOpenSettings,
-  onHideToTray,
-  onOpenMarket,
-  marketActive,
-}: Props) {
+export default function Header({ registry, registryLoading, onRefreshRegistry, onHideToTray }: Props) {
   return (
     <header className="app-header">
       <div className="brand">
         <span className="brand-logo">DSH</span>
         <div className="brand-text">
           <h1>DSH Launcher</h1>
-          <p className="brand-sub">DeepSeek Harness 版本启动器</p>
+          <p className="brand-sub">DeepSeek Harness 启动器</p>
         </div>
       </div>
 
@@ -35,7 +22,7 @@ export default function Header({
         <div className="latest-chip" title={`npm 最新版本（来源: ${registry?.source ?? '-'}）`}>
           <span className={`dot ${registry ? 'dot-live' : ''}`} />
           {registryLoading ? (
-            <span>查询中…</span>
+            <span className="chip-label">查询中…</span>
           ) : registry ? (
             <>
               <span className="chip-label">npm latest</span>
@@ -48,28 +35,15 @@ export default function Header({
               )}
             </>
           ) : (
-            <span>无法获取版本</span>
+            <span className="chip-label">无法获取版本</span>
           )}
         </div>
-        <button className="btn btn-ghost" onClick={onRefreshRegistry} disabled={registryLoading} title="刷新最新版本">
+        <button className="btn btn-ghost btn-sm" onClick={onRefreshRegistry} disabled={registryLoading} title="刷新最新版本">
           {registryLoading ? '刷新中…' : '刷新版本'}
         </button>
-
-        <button className="btn btn-ghost" onClick={onHideToTray} title="隐藏到系统托盘，进程继续运行">
+        <button className="btn btn-ghost btn-sm" onClick={onHideToTray} title="隐藏到系统托盘，进程继续运行">
           最小化到托盘
         </button>
-        <button
-          className={`btn ${marketActive ? 'btn-accent' : 'btn-ghost'}`}
-          onClick={onOpenMarket}
-          title="浏览社区插件、一键安装 / 卸载"
-        >
-          🛒 插件市场
-        </button>
-        <button className="btn btn-ghost" onClick={onOpenSettings} title="前置环境检查 / 安装 pnpm / 市场设置">
-          ⚙ 设置
-        </button>
-
-        <span className="appdata" title="配置文件位置">{appDataPath}</span>
       </div>
     </header>
   );

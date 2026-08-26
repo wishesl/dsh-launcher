@@ -67,7 +67,7 @@ export default function LogPanel({ instance, logs, onClear, logRef }: Props) {
 
   const body = useMemo(() => {
     if (!instance) {
-      return <div className="log-empty">选择左侧一个实例，查看它的运行日志</div>;
+      return <div className="log-empty">从下方标签页选择一个实例，查看它的运行日志</div>;
     }
     if (logs.length === 0) {
       return <div className="log-empty">暂无日志。启动实例后，输出会实时显示在这里。</div>;

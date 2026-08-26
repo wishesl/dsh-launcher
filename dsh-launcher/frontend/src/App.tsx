@@ -3,18 +3,18 @@ import { api, errMsg } from './api';
 import { BrowserOpenURL } from '../wailsjs/runtime/runtime';
 import type { ExitChoice, Instance, LogEvent, RegistryInfo } from './types';
 import Header from './components/Header';
-import InstanceList from './components/InstanceList';
-import InstanceForm from './components/InstanceForm';
-import VersionPanel from './components/VersionPanel';
-import LogPanel from './components/LogPanel';
-import ExitDialog from './components/ExitDialog';
-import SettingsModal from './components/SettingsModal';
+import Sidebar, { type ViewKey } from './components/Sidebar';
+import InstancesView from './components/InstancesView';
 import MarketView from './components/MarketView';
+import SettingsView from './components/SettingsView';
+import InstanceForm from './components/InstanceForm';
+import ExitDialog from './components/ExitDialog';
 
 type ModalState = { mode: 'new' } | { mode: 'edit'; instance: Instance } | null;
 type Toast = { msg: string; kind: 'ok' | 'error' } | null;
 
 export default function App() {
+  const [view, setView] = useState<ViewKey>('instances');
   const [instances, setInstances] = useState<Instance[]>([]);
   const [registry, setRegistry] = useState<RegistryInfo | null>(null);
   const [registryLoading, setRegistryLoading] = useState(false);
@@ -22,22 +22,18 @@ export default function App() {
   const [logs, setLogs] = useState<Record<string, LogEvent[]>>({});
   const [activeLogId, setActiveLogId] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalState>(null);
-  const [showSettings, setShowSettings] = useState(false);
-  const [view, setView] = useState<'main' | 'market'>('main');
   // Window ✕ pressed and the user wants to be asked (no remembered choice).
   const [exitAsk, setExitAsk] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast>(null);
 
   const logsRef = useRef<Record<string, LogEvent[]>>({});
-  const logViewRef = useRef<HTMLDivElement>(null);
   const toastTimer = useRef<number | undefined>(undefined);
   // "本次启动不再提示": remembered exit choice for THIS app run only —
   // deliberately not persisted, the chooser asks again on next launch.
   const exitChoiceRef = useRef<ExitChoice | null>(null);
 
-  // Unified feedback channel: success (default) and error toasts replace the
-  // old split of "error banner (manual close)" + "success toast (3s)".
+  // Unified feedback channel: success (default) and error toasts.
   const showToast = useCallback((msg: string, kind: 'ok' | 'error' = 'ok') => {
     setToast({ msg, kind });
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
@@ -77,8 +73,6 @@ export default function App() {
   // (and hot reloads) don't stack duplicate listeners.
   useEffect(() => {
     api.onLog((e: LogEvent) => {
-      // Immutable update: always create a NEW array so LogPanel's
-      // useMemo([instance, logs]) invalidates and log lines render live.
       const prev = logsRef.current[e.instanceId] ?? [];
       const arr = [...prev, e];
       if (arr.length > 3000) arr.splice(0, arr.length - 3000);
@@ -102,8 +96,6 @@ export default function App() {
       );
     });
     api.onNotice((n) => showToast(n.msg));
-    // Window close is decided in the frontend: show the exit chooser, or run
-    // the choice remembered via "本次启动不再提示" straight away.
     api.onCloseRequest(() => {
       const remembered = exitChoiceRef.current;
       if (remembered === 'tray') {
@@ -115,9 +107,7 @@ export default function App() {
       }
     });
     // Auto-start must run only AFTER the listeners above are registered —
-    // Wails events emitted before subscription are dropped, which is why
-    // auto-started instances used to show an empty log panel. The returned
-    // IDs let us open the log panel for the first auto-started instance.
+    // Wails events emitted before subscription are dropped.
     api.runAutoStartInstances()
       .then((ids) => {
         if (ids && ids.length > 0) setActiveLogId((cur) => cur ?? ids[0]);
@@ -201,8 +191,6 @@ export default function App() {
     api.hideToTray().catch((e) => showToast('隐藏失败: ' + errMsg(e), 'error'));
   };
 
-  // Exit-chooser answer. `remember` = "本次启动不再提示" was ticked: keep the
-  // choice for this app run so later ✕ presses skip the dialog.
   const chooseExit = (action: ExitChoice, remember: boolean) => {
     if (remember) exitChoiceRef.current = action;
     setExitAsk(false);
@@ -221,39 +209,38 @@ export default function App() {
     }
   };
 
-  const toggleLog = (id: string) => {
+  // Select / toggle which instance's log the drawer shows.
+  const selectLog = (id: string) => {
     setActiveLogId((cur) => (cur === id ? null : id));
-    if (logViewRef.current) {
-      // scroll to bottom when opening logs
-      setTimeout(() => logViewRef.current?.scrollTo({ top: logViewRef.current.scrollHeight }), 50);
-    }
   };
 
-  const activeInstance = instances.find((i) => i.id === activeLogId) ?? null;
+  const clearLog = (id: string) => {
+    const map = { ...logsRef.current };
+    map[id] = [];
+    logsRef.current = map;
+    setLogs(map);
+  };
 
   return (
     <div className="app">
       <Header
         registry={registry}
         registryLoading={registryLoading}
-        appDataPath={appDataPath}
         onRefreshRegistry={refreshRegistry}
-        onOpenSettings={() => setShowSettings(true)}
         onHideToTray={hideToTray}
-        onOpenMarket={() => setView((v) => (v === 'market' ? 'main' : 'market'))}
-        marketActive={view === 'market'}
       />
 
-      {view === 'market' ? (
-        <MarketView instances={instances} showToast={showToast} onBack={() => setView('main')} />
-      ) : (
-        <main className="layout">
-          <div className="col-left">
-            <InstanceList
+      <div className="app-body">
+        <Sidebar view={view} onNavigate={setView} />
+        <div className="app-content">
+          {view === 'instances' && (
+            <InstancesView
               instances={instances}
               registry={registry}
+              registryLoading={registryLoading}
               busyId={busyId}
               activeLogId={activeLogId}
+              logs={logs}
               onAdd={() => setModal({ mode: 'new' })}
               onStart={start}
               onStop={stop}
@@ -262,29 +249,16 @@ export default function App() {
               onCopyUrl={copyUrl}
               onEdit={(inst) => setModal({ mode: 'edit', instance: inst })}
               onDelete={remove}
-              onToggleLog={toggleLog}
+              onSelectLog={selectLog}
+              onClearLog={clearLog}
               onToggleAutoStart={toggleAutoStart}
+              onRefreshRegistry={refreshRegistry}
             />
-            <LogPanel
-              instance={activeInstance}
-              logs={activeLogId ? logs[activeLogId] ?? [] : []}
-              onClear={() => {
-                if (activeLogId) {
-                  const map = { ...logsRef.current };
-                  map[activeLogId] = [];
-                  logsRef.current = map;
-                  setLogs(map);
-                }
-              }}
-              logRef={logViewRef}
-            />
-          </div>
-
-          <div className="col-right">
-            <VersionPanel registry={registry} loading={registryLoading} />
-          </div>
-        </main>
-      )}
+          )}
+          {view === 'market' && <MarketView instances={instances} showToast={showToast} />}
+          {view === 'settings' && <SettingsView showToast={showToast} appDataPath={appDataPath} />}
+        </div>
+      </div>
 
       {modal && (
         <InstanceForm
@@ -296,10 +270,6 @@ export default function App() {
             if (note) showToast(note);
           }}
         />
-      )}
-
-      {showSettings && (
-        <SettingsModal onClose={() => setShowSettings(false)} showToast={showToast} />
       )}
 
       {exitAsk && <ExitDialog onClose={() => setExitAsk(false)} onChoose={chooseExit} />}
