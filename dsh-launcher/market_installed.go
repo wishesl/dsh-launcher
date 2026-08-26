@@ -30,11 +30,13 @@ func isInboxBundle(name string) bool { return inboxBundles[name] }
 
 // InstalledPlugin is one community plugin present in the profile manifest.
 type InstalledPlugin struct {
-	Name    string `json:"name"`
-	Spec    string `json:"spec"`
-	Version string `json:"version"`
-	Kind    string `json:"kind"`  // npm | github | linked | other
-	State   string `json:"state"` // enabled | disabled
+	Name        string `json:"name"`
+	Spec        string `json:"spec"`
+	Version     string `json:"version"`
+	Kind        string `json:"kind"`  // npm | github | linked | other
+	State       string `json:"state"` // enabled | disabled
+	Description string `json:"description"`
+	Homepage    string `json:"homepage"`
 }
 
 // readInstalledPlugins returns profile manifest dependencies (in-box bundles
@@ -89,6 +91,24 @@ func readInstalledVersion(name string) string {
 	return doc.Version
 }
 
+// readInstalledMeta reads description + homepage from the installed package
+// manifest, so the installed list still shows something recognizable even
+// when the market catalog is unreachable.
+func readInstalledMeta(name string) (description, homepage string) {
+	data, err := os.ReadFile(filepath.Join(marketProfileDir(), "node_modules", name, "package.json"))
+	if err != nil {
+		return "", ""
+	}
+	var doc struct {
+		Description string `json:"description"`
+		Homepage    string `json:"homepage"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return "", ""
+	}
+	return doc.Description, doc.Homepage
+}
+
 // ListInstalledPlugins returns the installed community plugins with their
 // version, source kind, and enable/disable state. Sorted by name.
 func (a *App) ListInstalledPlugins() ([]InstalledPlugin, error) {
@@ -102,12 +122,15 @@ func (a *App) ListInstalledPlugins() ([]InstalledPlugin, error) {
 		if packageDisabled(name) {
 			state = "disabled"
 		}
+		description, homepage := readInstalledMeta(name)
 		out = append(out, InstalledPlugin{
-			Name:    name,
-			Spec:    spec,
-			Version: readInstalledVersion(name),
-			Kind:    pluginKind(spec),
-			State:   state,
+			Name:        name,
+			Spec:        spec,
+			Version:     readInstalledVersion(name),
+			Kind:        pluginKind(spec),
+			State:       state,
+			Description: description,
+			Homepage:    homepage,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })

@@ -57,6 +57,30 @@ function fmtCount(n: number | null | undefined): string {
   return String(n);
 }
 
+// githubRepoOf extracts `owner/repo` from a catalog entry URL.
+function githubRepoOf(url: string): string | null {
+  const m = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:[/?#].*)?$/.exec(url);
+  return m ? m[1].toLowerCase() : null;
+}
+
+// findCatalogEntry matches an installed package back to its catalog entry by
+// npm name, catalog display name, or GitHub repo — so the Installed tab can
+// show the recognizable name / category / owner / description.
+function findCatalogEntry(installed: InstalledPlugin, catalog: MarketCatalog | null): MarketPlugin | undefined {
+  if (!catalog) return undefined;
+  const name = installed.name.toLowerCase();
+  const specRepo = /^github:([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/.exec(installed.spec)?.[1]?.toLowerCase();
+  return catalog.plugins.find((p) => {
+    if (p.npm && p.npm.toLowerCase() === name) return true;
+    if (p.name.toLowerCase() === name) return true;
+    if (specRepo) {
+      const cr = githubRepoOf(p.url);
+      if (cr === specRepo) return true;
+    }
+    return false;
+  });
+}
+
 export default function MarketView({ instances, showToast, onBack }: Props) {
   const [tab, setTab] = useState<'discover' | 'installed'>('discover');
   const [catalog, setCatalog] = useState<MarketCatalog | null>(null);
@@ -402,29 +426,53 @@ export default function MarketView({ instances, showToast, onBack }: Props) {
             </span>
           </div>
           {installed.length === 0 && <div className="empty"><p>暂无已装社区插件</p></div>}
-          {installed.map((p) => (
-            <div key={p.name} className="installed-row">
-              <div className="installed-main">
-                <span className="installed-name">{p.name}</span>
-                <span className="pill pill-soft">{p.kind}</span>
-                {p.version && <span className="installed-version mono">{p.version}</span>}
+          {installed.map((p) => {
+            const cat = findCatalogEntry(p, catalog);
+            const displayName = cat?.name || p.name;
+            const desc =
+              (cat && (cat.description[LANG] || cat.description.en)) ||
+              p.description ||
+              '（无描述）';
+            const catLabel =
+              (cat && catalog?.categories?.[cat.category]?.[LANG]) ||
+              (cat && catalog?.categories?.[cat.category]?.en) ||
+              cat?.category ||
+              '';
+            return (
+              <div key={p.name} className="installed-row">
+                <div className="installed-info">
+                  <div className="installed-head">
+                    <span className="installed-name" title={p.name}>{displayName}</span>
+                    {catLabel && <span className="pill">{catLabel}</span>}
+                    <span className="pill pill-soft">{p.kind}</span>
+                    {p.version && <span className="installed-version mono">v{p.version}</span>}
+                    {p.state === 'disabled' && <span className="pill tag-warn">已停用</span>}
+                  </div>
+                  <div className="installed-desc">{desc}</div>
+                  <div className="installed-sub">
+                    <span className="mono">{p.name}</span>
+                    {cat?.owner && <span> · {cat.owner}</span>}
+                    {cat?.stars != null && <span> · ★ {fmtCount(cat.stars)}</span>}
+                    {cat?.downloads != null && <span> · ⬇ {fmtCount(cat.downloads)}</span>}
+                  </div>
+                </div>
+                <div className="installed-actions">
+                  <label className="installed-toggle" title="写入 cordis.patch.yml 的 disabled 开关">
+                    <input
+                      type="checkbox"
+                      checked={p.state !== 'disabled'}
+                      disabled={opRunning}
+                      onChange={(e) => toggle(p, e.target.checked)}
+                    />
+                    {p.state === 'disabled' ? '启用' : '停用'}
+                  </label>
+                  <button className="btn btn-ghost btn-sm danger-text" disabled={opRunning} onClick={() => uninstall(p)}>
+                    卸载
+                  </button>
+                </div>
               </div>
-              <div className="installed-actions">
-                <label className="installed-toggle" title="写入 cordis.patch.yml 的 disabled 开关">
-                  <input
-                    type="checkbox"
-                    checked={p.state !== 'disabled'}
-                    disabled={opRunning}
-                    onChange={(e) => toggle(p, e.target.checked)}
-                  />
-                  {p.state === 'disabled' ? '已禁用' : '已启用'}
-                </label>
-                <button className="btn btn-ghost btn-sm danger-text" disabled={opRunning} onClick={() => uninstall(p)}>
-                  卸载
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

@@ -70,6 +70,8 @@ export namespace main {
 	    version: string;
 	    kind: string;
 	    state: string;
+	    description: string;
+	    homepage: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new InstalledPlugin(source);
@@ -82,6 +84,8 @@ export namespace main {
 	        this.version = source["version"];
 	        this.kind = source["kind"];
 	        this.state = source["state"];
+	        this.description = source["description"];
+	        this.homepage = source["homepage"];
 	    }
 	}
 	export class Instance {

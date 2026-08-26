@@ -107,6 +107,8 @@ export interface InstalledPlugin {
   version: string;
   kind: string;  // npm | github | linked | other
   state: string; // enabled | disabled
+  description: string;
+  homepage: string;
 }
 
 export interface MarketOpResult {
