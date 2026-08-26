@@ -43,44 +43,68 @@ func (a *App) startTray() {
 		ready:   make(chan struct{}),
 		entries: map[string]*trayEntry{},
 	}
-	go systray.Run(func() {
-		if err := applyTrayIcon(); err != nil {
-			println("tray: set icon failed:", err.Error())
-		}
-		systray.SetTooltip("DSH Launcher")
-
-		mShow := systray.AddMenuItem("显示主界面", "Show DSH Launcher")
-		mHide := systray.AddMenuItem("隐藏", "Hide DSH Launcher to tray")
-		systray.AddSeparator()
-
-		// Per-instance submenu: one checkbox-style item per instance;
-		// clicking toggles start/stop without opening the main window.
-		a.tray.mu.Lock()
-		a.tray.parent = systray.AddMenuItem("实例", "Start / stop DSH instances")
-		a.tray.mu.Unlock()
-
-		systray.AddSeparator()
-		mQuit := systray.AddMenuItem("退出", "Quit DSH Launcher")
-
-		// Single left-click on the tray icon restores the window.
-		systray.SetOnTapped(a.showWindow)
-
-		go func() {
-			for {
-				select {
-				case <-mShow.ClickedCh:
-					a.showWindow()
-				case <-mHide.ClickedCh:
-					a.hideWindow()
-				case <-mQuit.ClickedCh:
-					a.requestQuit()
-				}
+	// systray.Run must run on an OS-thread-locked goroutine. Its Win32
+	// hidden-window message pump only receives messages on the thread that
+	// created the window; if the Go scheduler migrates this goroutine to a
+	// different thread, GetMessage blocks on the wrong thread's queue and the
+	// tray icon silently goes dead (click/right-click unresponsive) while the
+	// rest of the app keeps working. Guarded by TestTrayLoopStaysOnLockedOSThread.
+	go runSystrayLoop(func() {
+		systray.Run(func() {
+			if err := applyTrayIcon(); err != nil {
+				println("tray: set icon failed:", err.Error())
 			}
-		}()
+			systray.SetTooltip("DSH Launcher")
 
-		close(a.tray.ready)
-		a.refreshTrayInstances()
-	}, func() {})
+			mShow := systray.AddMenuItem("显示主界面", "Show DSH Launcher")
+			mHide := systray.AddMenuItem("隐藏", "Hide DSH Launcher to tray")
+			systray.AddSeparator()
+
+			// Per-instance submenu: one checkbox-style item per instance;
+			// clicking toggles start/stop without opening the main window.
+			a.tray.mu.Lock()
+			a.tray.parent = systray.AddMenuItem("实例", "Start / stop DSH instances")
+			a.tray.mu.Unlock()
+
+			systray.AddSeparator()
+			mQuit := systray.AddMenuItem("退出", "Quit DSH Launcher")
+
+			// Single left-click restores the window. This handler runs
+			// synchronously inside systray's Win32 wndProc: if runtime.WindowShow
+			// blocks (the WebView2/main thread wedged after long idle/sleep), the
+			// whole tray pump freezes and no click works anymore. Dispatch it on
+			// a goroutine, matching the menu-item ClickedCh pattern.
+			systray.SetOnTapped(func() {
+				go a.showWindow()
+			})
+
+			go func() {
+				for {
+					select {
+					case <-mShow.ClickedCh:
+						a.showWindow()
+					case <-mHide.ClickedCh:
+						a.hideWindow()
+					case <-mQuit.ClickedCh:
+						a.requestQuit()
+					}
+				}
+			}()
+
+			close(a.tray.ready)
+			a.refreshTrayInstances()
+		}, func() {})
+	})
+}
+
+// runSystrayLoop pins fn to a single OS thread for its whole lifetime. On
+// Windows, fyne.io/systray's hidden-window message loop only works when it
+// stays on the thread that created the window; an unlocked goroutine can be
+// migrated by the scheduler, after which the tray icon stops responding.
+func runSystrayLoop(fn func()) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	fn()
 }
 
 // trayStatusLabel maps an instance status to a short Chinese label.
