@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,6 +142,91 @@ func TestMarketCacheFile(t *testing.T) {
 	p := marketCacheFile()
 	if p == "" || !strings.Contains(p, "DSHLauncher") || !strings.HasSuffix(p, "market-catalog.json") {
 		t.Fatalf("marketCacheFile() = %q", p)
+	}
+}
+
+func TestParseInsertedIDs(t *testing.T) {
+	patch := `# dsh bundle layer
+- insert:
+    - id: modlens
+      name: '@liustack/modlens'
+`
+	ids := parseInsertedIDs(patch)
+	if len(ids) != 1 || ids[0] != "modlens" {
+		t.Fatalf("parseInsertedIDs = %v, want [modlens]", ids)
+	}
+
+	// Nested insert blocks and non-insert rows (config of OTHER plugins) must
+	// be ignored; only ids under `insert:` count as owned.
+	patch2 := `- insert:
+    - id: a
+- id: other
+  config:
+    x: 1
+- insert:
+    - id: b
+`
+	ids2 := parseInsertedIDs(patch2)
+	if len(ids2) != 2 || ids2[0] != "a" || ids2[1] != "b" {
+		t.Fatalf("parseInsertedIDs(patch2) = %v, want [a b]", ids2)
+	}
+}
+
+func TestPackageEntryIDs(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DSH_HOME", dir) // marketProfileDir = <dir>/profiles/web
+	profile := marketProfileDir()
+	pkg := filepath.Join(profile, "node_modules", "@liustack", "modlens")
+	if err := os.MkdirAll(pkg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"@liustack/modlens","dsh":{"bundle":{"patch":"./cordis.patch.yml"}}}`
+	if err := os.WriteFile(filepath.Join(pkg, "package.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "- insert:\n    - id: modlens\n      name: '@liustack/modlens'\n"
+	if err := os.WriteFile(filepath.Join(pkg, "cordis.patch.yml"), []byte(patch), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ids := packageEntryIDs("@liustack/modlens")
+	if len(ids) != 1 || ids[0] != "modlens" {
+		t.Fatalf("packageEntryIDs = %v, want [modlens]", ids)
+	}
+	if ids := packageEntryIDs("not-a-plugin"); len(ids) != 0 {
+		t.Fatalf("expected no ids for unknown package, got %v", ids)
+	}
+}
+
+func TestSetDshMarketDisabled(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DSH_HOME", dir)
+	profile := marketProfileDir()
+	if err := os.MkdirAll(filepath.Join(profile, ".dsh-market"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	state := `{"disabled":["a"],"groups":{},"region":"china"}`
+	if err := os.WriteFile(filepath.Join(profile, ".dsh-market", "state.json"), []byte(state), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := setDshMarketDisabled("@liustack/modlens", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := setDshMarketDisabled("a", false); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(profile, ".dsh-market", "state.json"))
+	var doc struct {
+		Disabled []string `json:"disabled"`
+		Region   string   `json:"region"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Disabled) != 1 || doc.Disabled[0] != "@liustack/modlens" {
+		t.Fatalf("disabled = %v, want [@liustack/modlens]", doc.Disabled)
+	}
+	if doc.Region != "china" {
+		t.Fatalf("region lost: %q", doc.Region)
 	}
 }
 

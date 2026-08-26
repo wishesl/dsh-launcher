@@ -96,11 +96,10 @@ func (a *App) ListInstalledPlugins() ([]InstalledPlugin, error) {
 	if err != nil {
 		return nil, err
 	}
-	disabled := readPatchDisabled()
 	out := make([]InstalledPlugin, 0, len(installed))
 	for name, spec := range installed {
 		state := "enabled"
-		if disabled[name] {
+		if packageDisabled(name) {
 			state = "disabled"
 		}
 		out = append(out, InstalledPlugin{
@@ -115,12 +114,174 @@ func (a *App) ListInstalledPlugins() ([]InstalledPlugin, error) {
 	return out, nil
 }
 
+// packageEntryIDs returns the loader entry ids a package declares via its
+// bundle patch (dsh.bundle.patch -> `insert:` block). These ids are what DSH
+// identifies entries by — a disable row must target the entry id (e.g.
+// `modlens`), NOT the npm package name (`@liustack/modlens`). Port of
+// dsh-market's bundlePatchInsertedIds.
+func packageEntryIDs(name string) []string {
+	profile := marketProfileDir()
+	manifestPath := filepath.Join(profile, "node_modules", name, "package.json")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return nil
+	}
+	var doc struct {
+		DSH *struct {
+			Bundle *struct {
+				Patch string `json:"patch"`
+			} `json:"bundle"`
+		} `json:"dsh"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil || doc.DSH == nil || doc.DSH.Bundle == nil || doc.DSH.Bundle.Patch == "" {
+		return nil
+	}
+	patchData, err := os.ReadFile(filepath.Join(profile, "node_modules", name, doc.DSH.Bundle.Patch))
+	if err != nil {
+		return nil
+	}
+	return parseInsertedIDs(string(patchData))
+}
+
+// parseInsertedIDs collects the `- id:` rows nested under `insert:` blocks of
+// a bundle patch — the ids the package itself brings into the tree.
+func parseInsertedIDs(text string) []string {
+	var out []string
+	insertIndent := -1
+	for _, raw := range strings.Split(text, "\n") {
+		line := strings.TrimRight(raw, "\r")
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if trimmed == "- insert:" || trimmed == "insert:" {
+			insertIndent = indent
+			continue
+		}
+		if insertIndent >= 0 && indent <= insertIndent {
+			insertIndent = -1
+			continue
+		}
+		if insertIndent >= 0 {
+			if m := anyIDRe.FindStringSubmatch(line); m != nil {
+				found := false
+				for _, id := range out {
+					if id == m[1] {
+						found = true
+						break
+					}
+				}
+				if !found {
+					out = append(out, m[1])
+				}
+			}
+		}
+	}
+	return out
+}
+
+// dshMarketDisabledList reads dsh-market's own persisted disable list
+// (.dsh-market/state.json). The real market replays this list at every boot
+// (and writes it when the user toggles in its settings page), so the
+// launcher must agree with it for the state to stick across restarts.
+func dshMarketDisabledList() map[string]bool {
+	out := map[string]bool{}
+	data, err := os.ReadFile(filepath.Join(marketProfileDir(), ".dsh-market", "state.json"))
+	if err != nil {
+		return out
+	}
+	var doc struct {
+		Disabled []string `json:"disabled"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return out
+	}
+	for _, n := range doc.Disabled {
+		out[n] = true
+	}
+	return out
+}
+
+// setDshMarketDisabled adds/removes a package name in dsh-market's persisted
+// disable list, preserving every other field of state.json.
+func setDshMarketDisabled(name string, disabled bool) error {
+	file := filepath.Join(marketProfileDir(), ".dsh-market", "state.json")
+	raw := map[string]any{}
+	if data, err := os.ReadFile(file); err == nil {
+		_ = json.Unmarshal(data, &raw)
+	}
+	var list []string
+	if v, ok := raw["disabled"].([]any); ok {
+		for _, x := range v {
+			if s, ok := x.(string); ok {
+				list = append(list, s)
+			}
+		}
+	}
+	if disabled {
+		exists := false
+		for _, n := range list {
+			if n == name {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			list = append(list, name)
+		}
+	} else {
+		kept := list[:0]
+		for _, n := range list {
+			if n != name {
+				kept = append(kept, n)
+			}
+		}
+		list = kept
+	}
+	raw["disabled"] = list
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	_ = os.MkdirAll(filepath.Dir(file), 0o755)
+	return os.WriteFile(file, data, 0o644)
+}
+
+// packageDisabled reports whether a package is off: any of its loader entry
+// ids carries `disabled: true` in the profile patch layer, the package name
+// itself is a patch row, or dsh-market's persisted list says so.
+func packageDisabled(name string) bool {
+	patch := readPatchDisabled()
+	if patch[name] {
+		return true // row keyed by package name (older/own writes)
+	}
+	for _, id := range packageEntryIDs(name) {
+		if patch[id] {
+			return true
+		}
+	}
+	return dshMarketDisabledList()[name]
+}
+
+// clearPluginDisabled removes every disable trace for a package (entry-id
+// rows, package-name rows, and dsh-market's persisted list). Used on
+// uninstall so a reinstall starts enabled.
+func clearPluginDisabled(name string) {
+	for _, id := range packageEntryIDs(name) {
+		_ = applyPatchState(id, false)
+	}
+	_ = applyPatchState(name, false)
+	_ = setDshMarketDisabled(name, false)
+}
+
 // --- cordis.patch.yml line editing (port of dsh-market patch.ts) ---
 
 var (
-	topLevelIDRe   = regexp.MustCompile(`^-\s+id:\s*['"]?([^'"\s]+)['"]?\s*$`)
-	disabledKeyRe  = regexp.MustCompile(`^(\s*)disabled:\s*(true|false)\s*$`)
-	patchAnyKeyRe  = regexp.MustCompile(`^\s*[A-Za-z][A-Za-z0-9_-]*\s*:`)
+	topLevelIDRe  = regexp.MustCompile(`^-\s+id:\s*['"]?([^'"\s]+)['"]?\s*$`)
+	anyIDRe       = regexp.MustCompile(`^\s*-\s+id:\s*['"]?([^'"\s]+)['"]?\s*$`)
+	disabledKeyRe = regexp.MustCompile(`^(\s*)disabled:\s*(true|false)\s*$`)
+	patchAnyKeyRe = regexp.MustCompile(`^\s*[A-Za-z][A-Za-z0-9_-]*\s*:`)
 )
 
 // patchFilePath returns the profile's user patch layer. A var so tests can
@@ -262,6 +423,11 @@ func applyPatchState(name string, wantDisabled bool) error {
 
 // TogglePlugin enables/disables an installed plugin via the official patch
 // layer (no uninstall; DSH HMR re-composes in ~1s, loader re-applies on boot).
+//
+// Disable rows must target the package's loader ENTRY ids (e.g. `modlens`),
+// not the npm package name — the same ids dsh-market writes, otherwise DSH
+// ignores the row. dsh-market's own persisted list (.dsh-market/state.json)
+// is synced too, so the choice survives that market's boot replay.
 func (a *App) TogglePlugin(name string, enabled bool) error {
 	if isInboxBundle(name) {
 		return fmt.Errorf("官方基础插件不可开关")
@@ -269,7 +435,16 @@ func (a *App) TogglePlugin(name string, enabled bool) error {
 	if _, ok, _ := installedLookup(name); !ok {
 		return fmt.Errorf("插件未安装: %s", name)
 	}
-	return applyPatchState(name, !enabled)
+	ids := packageEntryIDs(name)
+	if len(ids) == 0 {
+		ids = []string{name}
+	}
+	for _, id := range ids {
+		if err := applyPatchState(id, !enabled); err != nil {
+			return err
+		}
+	}
+	return setDshMarketDisabled(name, !enabled)
 }
 
 func installedLookup(name string) (string, bool, error) {
