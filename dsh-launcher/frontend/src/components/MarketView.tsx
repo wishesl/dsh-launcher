@@ -316,11 +316,21 @@ export default function MarketView({ instances, showToast, onBack }: Props) {
           {catalogError && (
             <div className="log-hint log-hint-err">
               {catalogError}
-              <button className="btn btn-ghost btn-sm" onClick={() => loadCatalog(false)}>重试</button>
+              <div className="row" style={{ marginTop: 6 }}>
+                <button className="btn btn-ghost btn-sm" onClick={() => loadCatalog(false)}>重试</button>
+                <span className="field-hint">网络较慢或受限时，可在「设置 → 插件市场」配置镜像源</span>
+              </div>
             </div>
           )}
 
-          {!catalog && !catalogError && <div className="empty"><span className="spin" /> 加载插件目录…</div>}
+          {!catalog && !catalogError && (
+            <div className="empty">
+              <p><span className="spin" /> 加载插件目录…</p>
+              <p className="muted" style={{ fontSize: 12 }}>
+                首次下载目录可能较慢（视网络需 1-2 分钟），之后会秒开
+              </p>
+            </div>
+          )}
 
           {catalog && filtered.length === 0 && (
             <div className="empty"><p>没有匹配的插件</p></div>

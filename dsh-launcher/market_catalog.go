@@ -20,8 +20,13 @@ import (
 // would read as "does not exist").
 const (
 	defaultMarketRegistryURL = "https://awesome-dsh-plugin.com/plugins.json"
-	marketFetchTimeout       = 15 * time.Second
-	marketFetchAttempts      = 2
+	// The curated catalog is 300KB+ and grows daily. Some networks download
+	// it at ~10KB/s (TTFB is fast, the BODY is slow), so 15s used to kill
+	// every first open with "context deadline exceeded" — and the catalog
+	// only gets bigger. 90s lets a slow-but-working link finish. Every later
+	// open revalidates with ETag/304 (empty body → fast).
+	marketFetchTimeout  = 90 * time.Second
+	marketFetchAttempts = 2
 )
 
 // MarketPlugin mirrors one curated registry entry
@@ -61,7 +66,10 @@ type MarketSettings struct {
 const marketProfileName = "web"
 
 // marketProfileDir resolves <DSH_HOME>/profiles/<profile>, honoring DSH_HOME
-// the same way the dsh CLI and dsh-market do.
+// the same way the dsh CLI and dsh-market do. When DSH_HOME is unset the
+// default is <user home>/.dsh — the leading ".dsh" is part of the fallback
+// (a missing dot here silently points every read/toggle at a non-existent
+// profile directory while the dsh CLI keeps using the real one).
 func marketProfileDir() string {
 	home := strings.TrimSpace(os.Getenv("DSH_HOME"))
 	if home == "" {
@@ -69,22 +77,71 @@ func marketProfileDir() string {
 		if err != nil || h == "" {
 			h = "."
 		}
-		home = h
+		home = filepath.Join(h, ".dsh")
 	}
 	return filepath.Join(home, "profiles", marketProfileName)
 }
 
-// --- catalog cache (in-memory, revalidated on every fetch) ---
+// --- catalog cache (in-memory + disk, revalidated on every fetch) ---
 
 type cachedCatalog struct {
-	etag, modified string
-	data           *MarketCatalog
+	Etag     string         `json:"etag"`
+	Modified string         `json:"modified"`
+	Data     *MarketCatalog `json:"data"`
 }
 
 var (
-	marketCacheMu sync.Mutex
-	marketCache   *cachedCatalog
+	marketCacheMu   sync.Mutex
+	marketCache     *cachedCatalog // in-memory cache
+	marketCachePath string         // resolved once
 )
+
+// marketCacheFile is %APPDATA%\DSHLauncher\market-catalog.json. On a slow
+// network the catalog download takes a minute; persisting it (with the
+// validators) means a restart revalidates with a 304 instead of re-downloading
+// a megabyte at ~10KB/s. The disk copy is NEVER served without the server
+// confirming it is current — freshness is still verified on every call.
+func marketCacheFile() string {
+	if marketCachePath != "" {
+		return marketCachePath
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil || dir == "" {
+		dir = "."
+	}
+	marketCachePath = filepath.Join(dir, "DSHLauncher", "market-catalog.json")
+	return marketCachePath
+}
+
+// loadDiskCacheLocked seeds the in-memory cache from disk when nothing is
+// loaded yet (caller holds marketCacheMu).
+func loadDiskCacheLocked() {
+	if marketCache != nil {
+		return
+	}
+	data, err := os.ReadFile(marketCacheFile())
+	if err != nil {
+		return
+	}
+	var c cachedCatalog
+	if err := json.Unmarshal(data, &c); err != nil || c.Data == nil || len(c.Data.Plugins) == 0 {
+		return
+	}
+	marketCache = &c
+}
+
+// persistDiskCache writes the current cache (caller holds marketCacheMu).
+func persistDiskCache() {
+	if marketCache == nil {
+		return
+	}
+	data, err := json.Marshal(marketCache)
+	if err != nil {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(marketCacheFile()), 0o755)
+	_ = os.WriteFile(marketCacheFile(), data, 0o644)
+}
 
 // marketRegistryURL returns the configured mirror, falling back to the
 // official curated catalog.
@@ -115,6 +172,9 @@ func (a *App) FetchMarketCatalog(force bool) (*MarketCatalog, error) {
 
 func fetchMarketCatalogOnce(url string, force bool) (*MarketCatalog, error) {
 	marketCacheMu.Lock()
+	if marketCache == nil {
+		loadDiskCacheLocked()
+	}
 	cached := marketCache
 	marketCacheMu.Unlock()
 
@@ -128,10 +188,10 @@ func fetchMarketCatalogOnce(url string, force bool) (*MarketCatalog, error) {
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "dsh-launcher/1.0")
 	if cached != nil && !force {
-		if cached.etag != "" {
-			req.Header.Set("If-None-Match", cached.etag)
-		} else if cached.modified != "" {
-			req.Header.Set("If-Modified-Since", cached.modified)
+		if cached.Etag != "" {
+			req.Header.Set("If-None-Match", cached.Etag)
+		} else if cached.Modified != "" {
+			req.Header.Set("If-Modified-Since", cached.Modified)
 		}
 	}
 
@@ -142,8 +202,8 @@ func fetchMarketCatalogOnce(url string, force bool) (*MarketCatalog, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotModified {
-		if cached != nil && cached.data != nil {
-			return cached.data, nil
+		if cached != nil && cached.Data != nil {
+			return cached.Data, nil
 		}
 		return nil, fmt.Errorf("目录返回 304 但无缓存可复用")
 	}
@@ -151,7 +211,7 @@ func fetchMarketCatalogOnce(url string, force bool) (*MarketCatalog, error) {
 		return nil, fmt.Errorf("目录源响应 %s", resp.Status)
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	if err != nil {
 		return nil, err
 	}
@@ -165,10 +225,11 @@ func fetchMarketCatalogOnce(url string, force bool) (*MarketCatalog, error) {
 
 	marketCacheMu.Lock()
 	marketCache = &cachedCatalog{
-		etag:     resp.Header.Get("Etag"),
-		modified: resp.Header.Get("Last-Modified"),
-		data:     &catalog,
+		Etag:     resp.Header.Get("Etag"),
+		Modified: resp.Header.Get("Last-Modified"),
+		Data:     &catalog,
 	}
+	persistDiskCache()
 	marketCacheMu.Unlock()
 	return &catalog, nil
 }

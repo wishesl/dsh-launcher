@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -117,6 +118,29 @@ func TestApplyPatchState(t *testing.T) {
 	}
 	if readPatchDisabled()["dsh-x"] {
 		t.Fatal("dsh-x should no longer be disabled")
+	}
+}
+
+func TestMarketProfileDir(t *testing.T) {
+	// Regression: without DSH_HOME the fallback MUST include the leading
+	// ".dsh" — otherwise every read/toggle/duplicate-guard points at
+	// <home>/profiles/web while the dsh CLI still uses <home>/.dsh/profiles/web.
+	t.Setenv("DSH_HOME", "")
+	got := marketProfileDir()
+	if !strings.HasSuffix(got, filepath.Join(".dsh", "profiles", "web")) {
+		t.Fatalf("marketProfileDir() without DSH_HOME = %q, want suffix %q", got, filepath.Join(".dsh", "profiles", "web"))
+	}
+
+	t.Setenv("DSH_HOME", "X:/custom-home")
+	if got := marketProfileDir(); got != filepath.Join("X:/custom-home", "profiles", "web") {
+		t.Fatalf("marketProfileDir() with DSH_HOME = %q, want %q", got, filepath.Join("X:/custom-home", "profiles", "web"))
+	}
+}
+
+func TestMarketCacheFile(t *testing.T) {
+	p := marketCacheFile()
+	if p == "" || !strings.Contains(p, "DSHLauncher") || !strings.HasSuffix(p, "market-catalog.json") {
+		t.Fatalf("marketCacheFile() = %q", p)
 	}
 }
 
