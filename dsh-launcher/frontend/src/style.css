@@ -147,9 +147,30 @@ html, body, #root {
 }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: #c2c8d6; }
 .dot-live { background: var(--green); box-shadow: 0 0 8px rgba(22, 163, 74, .5); }
+.dot-warn { background: var(--amber); box-shadow: 0 0 8px rgba(217, 119, 6, .5); }
 .chip-label { color: var(--text-3); font-size: 11.5px; }
 .chip-version { font-weight: 700; color: var(--accent); font-family: var(--mono); }
 .chip-muted { color: var(--text-3); }
+
+/* DSH quick status chip */
+.dsh-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  font-size: 12.5px;
+  max-width: 360px;
+  overflow: hidden;
+}
+.dsh-chip-open {
+  background: none; border: none; cursor: pointer;
+  color: var(--accent); font-family: var(--mono); font-size: 12px;
+  padding: 0; text-decoration: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 300px;
+}
+.dsh-chip-open:hover { text-decoration: underline; }
 
 /* ---------- Sidebar ---------- */
 .app-body { flex: 1; display: flex; min-height: 0; }

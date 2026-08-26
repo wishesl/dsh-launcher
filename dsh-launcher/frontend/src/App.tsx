@@ -221,6 +221,30 @@ export default function App() {
     setLogs(map);
   };
 
+  // The DSH the header chip tracks: a ready instance first, else the first
+  // running/starting one.
+  const dshLive =
+    instances.find((i) => i.status === 'ready') ??
+    instances.find((i) => i.status === 'running' || i.status === 'starting') ??
+    null;
+
+  // Quick restart of the tracked DSH instance (stop → launch).
+  const restartDsh = async () => {
+    if (!dshLive) {
+      showToast('当前没有运行中的 DSH 实例', 'error');
+      return;
+    }
+    if (!window.confirm(`确定重启「${dshLive.name}」？运行中的会话会中断，实例目录与插件不变。`)) return;
+    try {
+      await api.stopInstance(dshLive.id);
+      showToast(`正在重启 ${dshLive.name}…`);
+      setActiveLogId(dshLive.id);
+      await api.launchInstance(dshLive.id);
+    } catch (e) {
+      showToast('重启失败: ' + errMsg(e), 'error');
+    }
+  };
+
   return (
     <div className="app">
       <Header
@@ -228,6 +252,9 @@ export default function App() {
         registryLoading={registryLoading}
         onRefreshRegistry={refreshRegistry}
         onHideToTray={hideToTray}
+        dshLive={dshLive}
+        onRestartDsh={restartDsh}
+        onOpenWeb={openWeb}
       />
 
       <div className="app-body">
