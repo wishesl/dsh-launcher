@@ -339,6 +339,7 @@ export default function App() {
               registryLoading={registryLoading}
               busyId={busyId}
               activeLogId={activeLogId}
+              logsOpen={logsOpen}
               logs={logs}
               onAdd={() => setModal({ mode: 'new' })}
               onStart={start}

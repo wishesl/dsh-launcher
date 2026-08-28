@@ -7,6 +7,7 @@ interface Props {
   registryLoading: boolean;
   busyId: string | null;
   activeLogId: string | null;
+  logsOpen: boolean;
   logs: Record<string, LogEvent[]>;
   onAdd: () => void;
   onStart: (id: string) => void;
@@ -26,6 +27,7 @@ export default function InstancesView({
   registryLoading,
   busyId,
   activeLogId,
+  logsOpen,
   logs,
   onAdd,
   onStart,
@@ -68,7 +70,7 @@ export default function InstancesView({
             instance={inst}
             registry={registry}
             busy={busyId === inst.id}
-            activeLog={activeLogId === inst.id}
+            activeLog={activeLogId === inst.id && logsOpen}
             onStart={onStart}
             onStop={onStop}
             onInstall={onInstall}
