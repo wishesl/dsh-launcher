@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api, errMsg } from '../api';
 import type {
   FavoriteDraft,
@@ -9,6 +9,7 @@ import type {
   MarketOpState,
   MarketPlugin,
 } from '../types';
+import { ChevronDown } from 'lucide-react';
 import Switch from './Switch';
 import ShareCodeDialog from './ShareCodeDialog';
 import './market.css';
@@ -80,6 +81,50 @@ function fmtDate(s: string): string {
   if (Number.isNaN(d.getTime())) return s;
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// PluginDesc: clamps the description to 2 lines; when it actually overflows,
+// shows a downward chevron that expands/collapses the full text.
+function PluginDesc({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [clamped, setClamped] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const measure = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    setClamped(el.scrollHeight - el.clientHeight > 1);
+  }, []);
+
+  useLayoutEffect(() => {
+    measure();
+  }, [measure, text, expanded]);
+
+  useEffect(() => {
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [measure]);
+
+  const showToggle = clamped || expanded;
+
+  return (
+    <>
+      <div ref={ref} className={`plugin-desc ${expanded ? 'expanded' : 'clamped'}`}>
+        {text}
+      </div>
+      {showToggle && (
+        <button
+          type="button"
+          className="desc-toggle"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          title={expanded ? '收起描述' : '展开完整描述'}
+        >
+          <ChevronDown size={14} strokeWidth={1.75} className={expanded ? 'rot' : ''} aria-hidden />
+        </button>
+      )}
+    </>
+  );
 }
 
 // githubRepoOf extracts `owner/repo` from a catalog entry URL.
@@ -561,9 +606,9 @@ export default function MarketView({
                         <span className="pill">{p.category}</span>
                       </div>
                       <div className="plugin-owner">{p.owner}</div>
-                      <div className="plugin-desc">
-                        {(p.description && (p.description[LANG] || p.description.en)) || '暂无描述'}
-                      </div>
+                      <PluginDesc
+                        text={(p.description && (p.description[LANG] || p.description.en)) || '暂无描述'}
+                      />
                       <div className="plugin-meta">
                         <span title="Star">★ {fmtCount(p.stars)}</span>
                         <span title="npm 30天下载量">⬇ {fmtCount(p.downloads)}</span>
@@ -588,7 +633,7 @@ export default function MarketView({
                           </span>
                         ) : (
                           <button
-                            className="btn btn-accent btn-sm"
+                            className="btn btn-primary btn-sm"
                             disabled={marketOp.running || busy}
                             onClick={() => install(p)}
                           >
@@ -710,9 +755,9 @@ export default function MarketView({
                       <span className="pill">{f.category || f.source}</span>
                     </div>
                     <div className="plugin-owner">{f.owner || '—'}</div>
-                    <div className="plugin-desc">
-                      {(f.description && (f.description[LANG] || f.description.en)) || '暂无描述'}
-                    </div>
+                    <PluginDesc
+                      text={(f.description && (f.description[LANG] || f.description.en)) || '暂无描述'}
+                    />
                     <div className="plugin-meta">
                       {f.stars != null && <span title="Star">★ {fmtCount(f.stars)}</span>}
                       {f.downloads != null && <span title="npm 30天下载量">⬇ {fmtCount(f.downloads)}</span>}
@@ -733,7 +778,7 @@ export default function MarketView({
                         </button>
                       ) : (
                         <button
-                          className="btn btn-accent btn-sm"
+                          className="btn btn-primary btn-sm"
                           disabled={marketOp.running || busy}
                           onClick={() => installFavorite(f)}
                         >

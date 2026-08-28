@@ -149,11 +149,32 @@
   color: var(--text);
   line-height: 1.5;
   min-height: 38px;
+}
+.plugin-desc.clamped {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.plugin-desc.expanded { display: block; overflow: visible; }
+/* 描述被截断时出现的展开/收起箭头 */
+.desc-toggle {
+  display: inline-grid;
+  place-items: center;
+  margin-top: 2px;
+  padding: 2px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-3);
+  line-height: 0;
+  transition: color .12s, background .12s;
+}
+.desc-toggle:hover { color: var(--text); background: var(--panel-2); }
+.desc-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.desc-toggle svg { transition: transform .15s; }
+.desc-toggle .rot { transform: rotate(180deg); }
 .plugin-meta { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
 .plugin-deprecated {
   font-size: 11.5px;
