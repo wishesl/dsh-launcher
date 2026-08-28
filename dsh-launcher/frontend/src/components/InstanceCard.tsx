@@ -1,9 +1,10 @@
-import type { Instance, RegistryInfo } from '../types';
+import type { Instance, RegistryInfo, ServiceState } from '../types';
 import { getWebUrl } from '../util';
 import Switch from './Switch';
 
 interface Props {
   instance: Instance;
+  service?: ServiceState | null; // independent port-service reachability
   registry: RegistryInfo | null;
   busy: boolean;
   activeLog: boolean;
@@ -18,10 +19,13 @@ interface Props {
   onToggleAutoStart: (id: string, v: boolean) => void;
 }
 
+// Process-managed state (launcher spawn/kill). "ready" is folded into 运行中:
+// whether the DSH service is actually up is shown by the independent service
+// indicator below, not by the process badge — the two must not affect each other.
 const STATUS_META: Record<string, { label: string; cls: string; rail: string }> = {
   running: { label: '运行中', cls: 'sb-running', rail: 'rail-running' },
   starting: { label: '启动中…', cls: 'sb-starting', rail: 'rail-starting' },
-  ready: { label: '已就绪', cls: 'sb-ready', rail: 'rail-ready' },
+  ready: { label: '运行中', cls: 'sb-running', rail: 'rail-running' },
   stopping: { label: '停止中…', cls: 'sb-stopping', rail: 'rail-stopping' },
   stopped: { label: '已停止', cls: 'sb-stopped', rail: 'rail-stopped' },
   crashed: { label: '异常退出', cls: 'sb-crashed', rail: 'rail-crashed' },
@@ -35,6 +39,7 @@ const PKGMGR_LABEL: Record<string, string> = {
 
 export default function InstanceCard({
   instance,
+  service,
   registry,
   busy,
   activeLog,
@@ -58,15 +63,32 @@ export default function InstanceCard({
 
   const outdated = instance.localVersion && registry && registry.latest && instance.localVersion !== registry.latest;
   const needsInstall = pkgMgr === 'local' && !instance.localVersion;
+
+  // Service state (decoupled from process state): only a reachable port gives
+  // a usable 打开 button.
+  const svcUrl = service && service.reachable && service.url ? service.url : null;
   const webUrl = getWebUrl(instance);
-  const canOpen = !!instance.webUrl || (isRunning && !webUrl.autoPort);
-  const openTitle = instance.webUrl
+  const displayUrl = svcUrl ?? webUrl.url;
+  const canOpen = !!svcUrl;
+  const svcTag =
+    service == null
+      ? { text: '服务检测中…', cls: 'tag-muted', title: '正在检测端口服务…' }
+      : service.reachable
+        ? { text: '服务已就绪', cls: 'tag-ok', title: '配置端口当前可访问 DSH 服务' }
+        : {
+            text: '服务未就绪',
+            cls: 'tag-warn',
+            title: service.url
+              ? `端口 ${service.url} 当前未响应`
+              : '端口未知（--port 0 时需等待进程输出实际地址）',
+          };
+  const openTitle = svcUrl
     ? '在浏览器打开 DSH web'
-    : webUrl.autoPort
-      ? '--port 0 自动选端口，等待进程输出实际地址后可点击'
-      : isRunning
-        ? '在浏览器打开 DSH web（若尚未就绪可能打不开）'
-        : '实例未运行';
+    : service == null
+      ? '正在检测端口服务，稍后可点击'
+      : webUrl.autoPort
+        ? '--port 0 自动选端口，等待进程输出实际地址后可点击'
+        : '服务未就绪（端口未响应），无法打开';
 
   return (
     <div className={`instance-card ${st.rail} ${activeLog ? 'active' : ''}`}>
@@ -94,15 +116,16 @@ export default function InstanceCard({
       <div className="instance-url-row">
         <span className="meta-item">web:</span>
         <code
-          className={`mono url-text ${webUrl.runtime ? 'url-runtime' : ''}`}
-          title={webUrl.runtime ? '从运行中进程捕获的真实地址（点击复制）' : 'DSH web 地址（点击复制）'}
-          onClick={() => onCopyUrl(webUrl.url)}
+          className={`mono url-text ${svcUrl ? 'url-runtime' : ''}`}
+          title={svcUrl ? 'DSH 服务当前地址（点击复制）' : 'DSH web 地址（点击复制）'}
+          onClick={() => onCopyUrl(displayUrl)}
         >
-          {webUrl.url}
+          {displayUrl}
         </code>
+        <span className={`tag ${svcTag.cls}`} title={svcTag.title}>{svcTag.text}</span>
         <button
           className="btn btn-primary btn-sm"
-          onClick={() => onOpen(webUrl.url)}
+          onClick={() => onOpen(displayUrl)}
           disabled={!canOpen}
           title={openTitle}
         >

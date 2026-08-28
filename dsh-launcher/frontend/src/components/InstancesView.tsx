@@ -1,8 +1,9 @@
-import type { Instance, LogEvent, RegistryInfo } from '../types';
+import type { Instance, LogEvent, RegistryInfo, ServiceState } from '../types';
 import InstanceCard from './InstanceCard';
 
 interface Props {
   instances: Instance[];
+  service: Record<string, ServiceState>;
   registry: RegistryInfo | null;
   registryLoading: boolean;
   busyId: string | null;
@@ -23,6 +24,7 @@ interface Props {
 
 export default function InstancesView({
   instances,
+  service,
   registry,
   registryLoading,
   busyId,
@@ -68,6 +70,7 @@ export default function InstancesView({
           <InstanceCard
             key={inst.id}
             instance={inst}
+            service={service[inst.id] ?? null}
             registry={registry}
             busy={busyId === inst.id}
             activeLog={activeLogId === inst.id && logsOpen}

@@ -22,6 +22,7 @@ import {
   ListInstalledPlugins,
   MarketOpRunning,
   ParseShareCode,
+  ProbeServices,
   QueryRegistry,
   QuitApp,
   RemoveFavorite,
@@ -54,6 +55,7 @@ import type {
   NoticeEvent,
   ProxySettings,
   RegistryInfo,
+  ServiceState,
   ShareImportResult,
   StatusEvent,
 } from './types';
@@ -72,6 +74,7 @@ export const api = {
   selectDirectory: (): Promise<string> => SelectDirectory(),
   detectLocalVersion: (dir: string): Promise<string> => DetectLocalVersion(dir),
   directoryExists: (dir: string): Promise<boolean> => DirectoryExists(dir),
+  probeServices: (): Promise<ServiceState[]> => ProbeServices(),
   queryRegistry: (): Promise<RegistryInfo> => QueryRegistry(),
   runAutoStartInstances: (): Promise<string[]> => RunAutoStartInstances(),
   getAppDataPath: (): Promise<string> => GetAppDataPath(),
@@ -137,6 +140,12 @@ export const api = {
   },
   offStatus(): void {
     EventsOff('dsh:status');
+  },
+  onService(cb: (e: ServiceState) => void): void {
+    EventsOn('dsh:service', cb);
+  },
+  offService(): void {
+    EventsOff('dsh:service');
   },
   onNotice(cb: (e: NoticeEvent) => void): void {
     EventsOn('dsh:notice', cb);

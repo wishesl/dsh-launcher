@@ -349,6 +349,14 @@ html, body, #root {
   margin-left: 6px; font-size: 11px; color: var(--amber);
   border: 1px solid var(--amber); border-radius: 999px; padding: 0 7px;
 }
+.tag-muted {
+  margin-left: 6px; font-size: 11px; color: var(--text-3);
+  border: 1px solid var(--border-soft); border-radius: 999px; padding: 0 7px;
+}
+.tag-ok {
+  margin-left: 6px; font-size: 11px; color: var(--green);
+  border: 1px solid var(--green); border-radius: 999px; padding: 0 7px;
+}
 .instance-actions { display: flex; gap: 8px; margin-top: 2px; flex-wrap: wrap; }
 
 /* version history page: scrollable content under the toolbar */

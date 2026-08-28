@@ -36,15 +36,23 @@ type App struct {
 
 	autoStartIDs     atomic.Value // []string — instances to launch when the frontend is ready
 	autoStartStarted atomic.Bool  // guards one-shot launch per app run
+
+	// Service reachability, decoupled from process management (see
+	// service_probe.go): does each instance's configured port answer HTTP?
+	svcMu      sync.Mutex
+	svcKnown   map[string]ServiceState // last emitted state per instance id
+	svcTrigger chan struct{}           // wake the probe loop (non-blocking)
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{
-		store:     newInstanceStore(),
-		settings:  newSettingsStore(),
-		logs:      newLogStore(),
-		processes: make(map[string]*managedProcess),
+		store:      newInstanceStore(),
+		settings:   newSettingsStore(),
+		logs:       newLogStore(),
+		processes:  make(map[string]*managedProcess),
+		svcKnown:   make(map[string]ServiceState),
+		svcTrigger: make(chan struct{}, 1),
 	}
 }
 
@@ -54,11 +62,11 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	_ = a.EnsureConfigDir()
 	// Reconcile persisted instances against live processes on cold start.
+	// resetRuntime mutates the store directly — iterating list()'s copies
+	// would not touch the stored instances (the old leak: a persisted "ready"
+	// status survived restarts and showed 运行中 with no process running).
 	a.mu.Lock()
-	for _, inst := range a.store.list() {
-		inst.Status = "stopped"
-		inst.PID = 0
-	}
+	a.store.resetRuntime()
 	autoStart := make([]string, 0)
 	for _, inst := range a.store.list() {
 		if inst.AutoStart {
@@ -80,6 +88,10 @@ func (a *App) startup(ctx context.Context) {
 
 	// Install the system tray icon + menu.
 	a.startTray()
+
+	// Service probe loop: independent HTTP reachability checks on a fallback
+	// ticker, waking immediately on process start/stop/save/remove.
+	go a.serviceProbeLoop()
 
 	// NOTE: auto-start is NOT launched here. Wails events are fire-and-forget:
 	// anything emitted before the frontend registers its EventsOn listeners is
@@ -272,6 +284,7 @@ func (a *App) SaveInstance(inst Instance) ([]Instance, error) {
 		existing.AutoStart = inst.AutoStart
 		a.store.saveAll()
 		go a.refreshTrayInstances()
+		a.triggerServiceProbe() // config (port/args) may have changed
 		return a.store.list(), nil
 	}
 
@@ -281,6 +294,7 @@ func (a *App) SaveInstance(inst Instance) ([]Instance, error) {
 	a.store.add(inst)
 	a.store.saveAll()
 	go a.refreshTrayInstances()
+	a.triggerServiceProbe()
 	return a.store.list(), nil
 }
 
@@ -299,7 +313,11 @@ func (a *App) RemoveInstance(id string) ([]Instance, error) {
 
 	a.store.remove(id)
 	a.store.saveAll()
+	a.svcMu.Lock()
+	delete(a.svcKnown, id)
+	a.svcMu.Unlock()
 	go a.refreshTrayInstances()
+	a.triggerServiceProbe()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.store.list(), nil

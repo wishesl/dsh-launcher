@@ -167,6 +167,7 @@ export namespace main {
 	    createdAt: any;
 	    pid: number;
 	    status: string;
+	    webUrl: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Instance(source);
@@ -185,6 +186,7 @@ export namespace main {
 	        this.createdAt = this.convertValues(source["createdAt"], null);
 	        this.pid = source["pid"];
 	        this.status = source["status"];
+	        this.webUrl = source["webUrl"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -363,6 +365,22 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class ServiceState {
+	    instanceId: string;
+	    url: string;
+	    reachable: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ServiceState(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.instanceId = source["instanceId"];
+	        this.url = source["url"];
+	        this.reachable = source["reachable"];
+	    }
 	}
 	export class ShareImportResult {
 	    imported: FavoritePlugin[];

@@ -230,6 +230,9 @@ func (a *App) LaunchInstance(id string) error {
 
 	a.systemLog(snapshot.ID, mp.pid, fmt.Sprintf("进程已启动 PID=%d，命令: %s", mp.pid, cmdStr))
 	a.emitStatus(snapshot.ID, "running", mp.pid)
+	// A process just started — ask the service probe to re-check its port so
+	// the header/card flip to "已就绪" as soon as DSH answers.
+	a.triggerServiceProbe()
 
 	// Stream output lines to the frontend; capture advertised web URLs.
 	stream := func(r *bufio.Scanner, tag string) {
@@ -271,23 +274,38 @@ func (a *App) LaunchInstance(id string) error {
 		if crashed {
 			status = "crashed"
 		}
+		// Reconcile state for THIS process only. A quick stop→start may have
+		// registered a new process under the same instance id by now; the old
+		// goroutine must never clobber it (the stuck-"running" race): guard the
+		// store write by PID and the map delete by identity.
 		a.mu.Lock()
-		if cur := a.store.find(id); cur != nil {
+		wasCurrent := false
+		if cur := a.store.find(id); cur != nil && cur.PID == mp.pid {
 			cur.PID = 0
 			cur.Status = status
+			cur.WebUrl = ""
+			wasCurrent = true
 		}
-		delete(a.processes, id)
+		if curP, ok := a.processes[id]; ok && curP == mp {
+			delete(a.processes, id)
+			wasCurrent = true
+		}
 		a.mu.Unlock()
-		switch {
-		case crashed:
-			// unexpected self-exit (bad args, port conflict, broken install...)
-			a.emit("dsh:status", StatusEvent{InstanceID: snapshot.ID, Status: "crashed", PID: 0, ExitCode: code})
-		case !mp.stopRequested():
-			// clean self-exit: nothing else announced "stopped" for us
-			a.emitStatus(snapshot.ID, "stopped", 0)
-		default:
-			// user-initiated stop: StopInstance already announced stopped
+		if wasCurrent {
+			switch {
+			case crashed:
+				// unexpected self-exit (bad args, port conflict, broken install...)
+				a.emit("dsh:status", StatusEvent{InstanceID: snapshot.ID, Status: "crashed", PID: 0, ExitCode: code})
+			case !mp.stopRequested():
+				// clean self-exit: nothing else announced "stopped" for us
+				a.emitStatus(snapshot.ID, "stopped", 0)
+			default:
+				// user-initiated stop: StopInstance already announced stopped
+			}
 		}
+		// A process exited — the service it was serving may be gone (or a
+		// replacement may be coming up): ask the service probe to re-check.
+		a.triggerServiceProbe()
 	}()
 
 	return nil
@@ -329,6 +347,7 @@ func (a *App) probeReady(mp *managedProcess) {
 				a.mu.Lock()
 				if cur := a.store.find(mp.instanceID); cur != nil {
 					cur.Status = "ready"
+					cur.WebUrl = u
 				}
 				a.mu.Unlock()
 				a.emit("dsh:status", StatusEvent{
@@ -369,11 +388,20 @@ func (a *App) StopInstance(id string) error {
 		return fmt.Errorf("实例不存在: %s", id)
 	}
 	if mp == nil {
-		if inst.Status != "stopped" && inst.Status != "crashed" {
+		// No launcher-managed process. If the instance still claims to be
+		// running (e.g. a stale persisted/desynced state), correct the store
+		// AND announce it — otherwise the frontend keeps showing 运行中 forever.
+		changed := inst.Status != "stopped" && inst.Status != "crashed"
+		if changed {
 			inst.Status = "stopped"
 			inst.PID = 0
+			inst.WebUrl = ""
 		}
 		a.mu.Unlock()
+		if changed {
+			a.emitStatus(id, "stopped", 0)
+		}
+		a.triggerServiceProbe()
 		return nil // not running, nothing to do
 	}
 	inst.Status = "stopping"
@@ -388,10 +416,12 @@ func (a *App) StopInstance(id string) error {
 	if cur := a.store.find(id); cur != nil {
 		cur.Status = "stopped"
 		cur.PID = 0
+		cur.WebUrl = ""
 	}
 	delete(a.processes, id)
 	a.mu.Unlock()
 	a.emitStatus(id, "stopped", 0)
+	a.triggerServiceProbe()
 	return nil
 }
 
@@ -400,9 +430,11 @@ func (a *App) setStopped(id string) {
 	if cur := a.store.find(id); cur != nil {
 		cur.Status = "stopped"
 		cur.PID = 0
+		cur.WebUrl = ""
 	}
 	a.mu.Unlock()
 	a.emitStatus(id, "stopped", 0)
+	a.triggerServiceProbe()
 }
 
 func (a *App) emitStatus(id, status string, pid int) {

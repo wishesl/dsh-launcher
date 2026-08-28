@@ -50,6 +50,8 @@ export function MarketOpRunning():Promise<boolean>;
 
 export function ParseShareCode(arg1:string):Promise<main.ShareImportResult>;
 
+export function ProbeServices():Promise<Array<main.ServiceState>>;
+
 export function QueryLatestVersion():Promise<string>;
 
 export function QueryRegistry():Promise<main.RegistryInfo>;

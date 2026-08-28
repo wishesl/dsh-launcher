@@ -55,6 +55,15 @@ export interface StatusEvent {
   exitCode?: number;      // set when status === 'crashed'
 }
 
+// Independent service reachability: does the DSH service this instance is
+// configured to serve answer on its port right now? Decoupled from whether the
+// launcher itself is managing the process — drives the header "已就绪" + open.
+export interface ServiceState {
+  instanceId: string;
+  url: string;        // "" when not determinable yet (--port 0, no runtime URL)
+  reachable: boolean; // the URL answered an HTTP request
+}
+
 export interface NoticeEvent {
   msg: string;
 }

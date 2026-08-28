@@ -7,7 +7,10 @@ import { RotateCw } from 'lucide-react';
 interface Props {
   registry: RegistryInfo | null;
   registryLoading: boolean;
-  // DSH quick status: the ready / first-running instance, or null.
+  // Service-driven "DSH 已就绪": the instance whose configured port answers
+  // HTTP right now — independent of whether the launcher manages its process.
+  serviceLive: { id: string; name: string; url: string } | null;
+  // Process-managed running instance (运行中… fallback + 重启 button).
   dshLive: Instance | null;
   onRestartDsh: () => void;
   onOpenWeb: (url: string) => void;
@@ -22,6 +25,7 @@ interface Props {
 export default function Header({
   registry,
   registryLoading,
+  serviceLive,
   dshLive,
   onRestartDsh,
   onOpenWeb,
@@ -30,8 +34,11 @@ export default function Header({
   onToggleLogs,
   onCloseRequest,
 }: Props) {
-  const ready = dshLive?.status === 'ready' && !!dshLive.webUrl;
-  const running = !!dshLive && dshLive.status !== 'stopped' && dshLive.status !== 'crashed';
+  // Ready = the configured port actually serves DSH (service state), NOT the
+  // launcher's process status — so an externally-started DSH on the same port
+  // still counts and the open button always works when the service is up.
+  const ready = !!serviceLive;
+  const running = !ready && !!dshLive && dshLive.status !== 'stopped' && dshLive.status !== 'crashed';
 
   // 自定义窗口控制：最小化 / 最大化-还原 / 关闭（替代被去掉的原生标题栏按钮）。
   const [maximized, setMaximized] = useState(false);
@@ -82,12 +89,12 @@ export default function Header({
         {/* DSH 快捷状态 + 重启 */}
         <div
           className="dsh-chip"
-          title={ready ? 'DSH web 已就绪，点击打开' : running ? 'DSH 正在运行，等待 web 就绪' : '当前没有运行中的 DSH 实例'}
+          title={ready ? 'DSH 服务可达，点击打开' : running ? 'DSH 正在运行，等待服务就绪' : '当前没有运行中的 DSH 实例'}
         >
           <span className={`dot ${ready ? 'dot-live' : running ? 'dot-warn' : ''}`} />
           {ready ? (
-            <button className="dsh-chip-open" onClick={() => onOpenWeb((dshLive as Instance).webUrl as string)}>
-              DSH 已就绪 · {dshLive!.name} · {dshLive!.webUrl}
+            <button className="dsh-chip-open" onClick={() => onOpenWeb(serviceLive!.url)}>
+              DSH 已就绪 · {serviceLive!.name} · {serviceLive!.url}
             </button>
           ) : running ? (
             <span className="chip-label">{dshLive!.status === 'starting' ? 'DSH 启动中…' : 'DSH 运行中…'}</span>

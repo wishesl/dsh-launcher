@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, errMsg } from './api';
 import { BrowserOpenURL } from '../wailsjs/runtime/runtime';
-import type { ExitChoice, Instance, LogEvent, MarketOpState, RegistryInfo } from './types';
+import type { ExitChoice, Instance, LogEvent, MarketOpState, RegistryInfo, ServiceState } from './types';
 import Header from './components/Header';
 import Sidebar, { type ViewKey } from './components/Sidebar';
 import VersionView from './components/VersionView';
@@ -18,6 +18,10 @@ type Toast = { msg: string; kind: 'ok' | 'error' } | null;
 export default function App() {
   const [view, setView] = useState<ViewKey>('versions'); // 首页默认打开「版本历史」
   const [instances, setInstances] = useState<Instance[]>([]);
+  // Independent service reachability per instance (does the configured port
+  // answer HTTP right now). Decoupled from process state — drives the header
+  // "已就绪" + the open button.
+  const [service, setService] = useState<Record<string, ServiceState>>({});
   const [registry, setRegistry] = useState<RegistryInfo | null>(null);
   const [registryLoading, setRegistryLoading] = useState(false);
   const [appDataPath, setAppDataPath] = useState('');
@@ -94,11 +98,26 @@ export default function App() {
     }
   }, [showToast]);
 
+  // Re-read the backend's service-reachability snapshot (best-effort).
+  const refreshServices = useCallback(async () => {
+    try {
+      const list = await api.probeServices();
+      setService((prev) => {
+        const next = { ...prev };
+        for (const s of list) next[s.instanceId] = s;
+        return next;
+      });
+    } catch {
+      /* service probe is best-effort; the dsh:service stream fills gaps */
+    }
+  }, []);
+
   useEffect(() => {
     refresh();
     refreshRegistry();
+    refreshServices();
     api.getAppDataPath().then(setAppDataPath).catch(() => undefined);
-  }, [refresh, refreshRegistry]);
+  }, [refresh, refreshRegistry, refreshServices]);
 
   // Wire Go -> frontend events. Return cleanup so StrictMode's double-mount
   // (and hot reloads) don't stack duplicate listeners.
@@ -125,6 +144,10 @@ export default function App() {
           return next;
         })
       );
+    });
+    // Independent service reachability (decoupled from process state).
+    api.onService((e) => {
+      setService((prev) => ({ ...prev, [e.instanceId]: e }));
     });
     api.onNotice((n) => showToast(n.msg));
     // Plugin-market operation stream (drawer shows it as the "市场任务" tab).
@@ -159,6 +182,7 @@ export default function App() {
     return () => {
       api.offLog();
       api.offStatus();
+      api.offService();
       api.offNotice();
       api.offMarketLog();
       api.offMarketStatus();
@@ -197,6 +221,11 @@ export default function App() {
     try {
       const list = await api.removeInstance(id);
       setInstances(list);
+      setService((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       if (activeLogId === id) setActiveLogId(null);
       showToast('已删除');
     } catch (e) {
@@ -279,8 +308,20 @@ export default function App() {
     setLogs(map);
   };
 
-  // The DSH the header chip tracks: a ready instance first, else the first
-  // running/starting one.
+  // Service-driven "DSH 已就绪": the first instance whose configured port
+  // answers HTTP right now — independent of whether the launcher manages its
+  // process (an externally-started DSH on the same port still counts).
+  const serviceLive = (() => {
+    for (const i of instances) {
+      const s = service[i.id];
+      if (s && s.reachable && s.url) return { id: i.id, name: i.name, url: s.url };
+    }
+    return null;
+  })();
+
+  // Process-managed running instance: drives the header's "运行中…" fallback
+  // and the 重启 button (restart only makes sense for a launcher-managed
+  // process). Deliberately separate from serviceLive.
   const dshLive =
     instances.find((i) => i.status === 'ready') ??
     instances.find((i) => i.status === 'running' || i.status === 'starting') ??
@@ -313,6 +354,7 @@ export default function App() {
       <Header
         registry={registry}
         registryLoading={registryLoading}
+        serviceLive={serviceLive}
         dshLive={dshLive}
         onRestartDsh={restartDsh}
         onOpenWeb={openWeb}
@@ -335,6 +377,7 @@ export default function App() {
           {view === 'instances' && (
             <InstancesView
               instances={instances}
+              service={service}
               registry={registry}
               registryLoading={registryLoading}
               busyId={busyId}

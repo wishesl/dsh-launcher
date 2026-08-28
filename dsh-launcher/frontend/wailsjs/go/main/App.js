@@ -98,6 +98,10 @@ export function ParseShareCode(arg1) {
   return window['go']['main']['App']['ParseShareCode'](arg1);
 }
 
+export function ProbeServices() {
+  return window['go']['main']['App']['ProbeServices']();
+}
+
 export function QueryLatestVersion() {
   return window['go']['main']['App']['QueryLatestVersion']();
 }

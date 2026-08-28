@@ -22,9 +22,13 @@ type Instance struct {
 	AutoStart    bool      `json:"autoStart"`
 	CreatedAt    time.Time `json:"createdAt"`
 
-	// Runtime fields (not persisted as meaningful state on disk):
+	// Runtime fields — live process state. Persisted to disk for continuity,
+	// but always re-derived at cold start via resetRuntime: a persisted
+	// "ready"/PID must never survive a launcher restart (it previously leaked
+	// into the UI as a phantom 运行中 with no process running).
 	PID    int    `json:"pid"`
 	Status string `json:"status"` // "stopped" | "running" | "starting" | "stopping"
+	WebUrl string `json:"webUrl"` // runtime-captured working URL (informational)
 }
 
 // instanceStore persists the instance list as JSON in the user config dir.
@@ -84,6 +88,20 @@ func (s *instanceStore) list() []Instance {
 	out := make([]Instance, len(s.loaded))
 	copy(out, s.loaded)
 	return out
+}
+
+// resetRuntime clears per-process runtime fields on every stored instance.
+// Called on cold start: whatever PID/status was persisted (or was running in a
+// previous launcher session) can no longer be trusted. Note this mutates the
+// store directly — iterating list()'s copy and assigning would be a no-op.
+func (s *instanceStore) resetRuntime() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.loaded {
+		s.loaded[i].Status = "stopped"
+		s.loaded[i].PID = 0
+		s.loaded[i].WebUrl = ""
+	}
 }
 
 func (s *instanceStore) find(id string) *Instance {
