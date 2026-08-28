@@ -4,6 +4,7 @@ import { BrowserOpenURL } from '../wailsjs/runtime/runtime';
 import type { ExitChoice, Instance, LogEvent, MarketOpState, RegistryInfo } from './types';
 import Header from './components/Header';
 import Sidebar, { type ViewKey } from './components/Sidebar';
+import VersionView from './components/VersionView';
 import InstancesView from './components/InstancesView';
 import MarketView from './components/MarketView';
 import SettingsView from './components/SettingsView';
@@ -15,7 +16,7 @@ type ModalState = { mode: 'new' } | { mode: 'edit'; instance: Instance } | null;
 type Toast = { msg: string; kind: 'ok' | 'error' } | null;
 
 export default function App() {
-  const [view, setView] = useState<ViewKey>('instances');
+  const [view, setView] = useState<ViewKey>('versions'); // 首页默认打开「版本历史」
   const [instances, setInstances] = useState<Instance[]>([]);
   const [registry, setRegistry] = useState<RegistryInfo | null>(null);
   const [registryLoading, setRegistryLoading] = useState(false);
@@ -307,8 +308,6 @@ export default function App() {
       <Header
         registry={registry}
         registryLoading={registryLoading}
-        onRefreshRegistry={refreshRegistry}
-        onHideToTray={hideToTray}
         dshLive={dshLive}
         onRestartDsh={restartDsh}
         onOpenWeb={openWeb}
@@ -321,6 +320,13 @@ export default function App() {
       <div className="app-body">
         <Sidebar view={view} onNavigate={setView} />
         <div className="app-content">
+          {view === 'versions' && (
+            <VersionView
+              registry={registry}
+              registryLoading={registryLoading}
+              onRefreshRegistry={refreshRegistry}
+            />
+          )}
           {view === 'instances' && (
             <InstancesView
               instances={instances}
@@ -339,7 +345,6 @@ export default function App() {
               onDelete={remove}
               onSelectLog={selectLog}
               onToggleAutoStart={toggleAutoStart}
-              onRefreshRegistry={refreshRegistry}
             />
           )}
           {view === 'market' && (

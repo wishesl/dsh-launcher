@@ -240,9 +240,9 @@ html, body, #root {
 .app-content { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 
 /* ============================================================
-   Instances view
+   View pages (通用页面容器：实例 / 版本历史 …)
    ============================================================ */
-.instances-view {
+.view-page {
   flex: 1; min-height: 0;
   display: flex; flex-direction: column; gap: var(--sp-4);
   padding: var(--sp-4) var(--sp-5);
@@ -353,8 +353,12 @@ html, body, #root {
 }
 .instance-actions { display: flex; gap: 8px; margin-top: 2px; flex-wrap: wrap; }
 
-/* version history collapsible */
-.version-panel { flex: none; }
+/* version history page: scrollable content under the toolbar */
+.version-page-body {
+  flex: 1 1 auto; min-height: 0;
+  overflow-y: auto;
+  padding: 2px 2px 4px;
+}
 
 /* ============================================================
    Run-log pane (in-flow third column: sidebar | content | logs)

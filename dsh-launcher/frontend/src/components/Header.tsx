@@ -6,13 +6,11 @@ import appicon from '../../../build/appicon.png';
 interface Props {
   registry: RegistryInfo | null;
   registryLoading: boolean;
-  onRefreshRegistry: () => void;
-  onHideToTray: () => void;
   // DSH quick status: the ready / first-running instance, or null.
   dshLive: Instance | null;
   onRestartDsh: () => void;
   onOpenWeb: (url: string) => void;
-  // Right-side run-log drawer toggle (permanent button next to 最小化到托盘).
+  // Right-side run-log drawer toggle (permanent header button).
   logsOpen: boolean;
   logsLive: boolean;
   onToggleLogs: () => void;
@@ -23,8 +21,6 @@ interface Props {
 export default function Header({
   registry,
   registryLoading,
-  onRefreshRegistry,
-  onHideToTray,
   dshLive,
   onRestartDsh,
   onOpenWeb,
@@ -126,12 +122,6 @@ export default function Header({
             <span className="chip-label">无法获取版本</span>
           )}
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={onRefreshRegistry} disabled={registryLoading} title="刷新最新版本">
-          {registryLoading ? '刷新中…' : '刷新版本'}
-        </button>
-        <button className="btn btn-ghost btn-sm" onClick={onHideToTray} title="隐藏到系统托盘，进程继续运行">
-          最小化到托盘
-        </button>
         <button
           className={`btn btn-sm log-toggle-btn ${logsOpen ? 'btn-accent' : 'btn-ghost'}`}
           onClick={onToggleLogs}

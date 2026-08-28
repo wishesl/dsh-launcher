@@ -1,7 +1,5 @@
-import { useState } from 'react';
 import type { Instance, LogEvent, RegistryInfo } from '../types';
 import InstanceCard from './InstanceCard';
-import VersionPanel from './VersionPanel';
 
 interface Props {
   instances: Instance[];
@@ -20,7 +18,6 @@ interface Props {
   onDelete: (id: string) => void;
   onSelectLog: (id: string) => void;
   onToggleAutoStart: (id: string, v: boolean) => void;
-  onRefreshRegistry: () => void;
 }
 
 export default function InstancesView({
@@ -40,16 +37,14 @@ export default function InstancesView({
   onDelete,
   onSelectLog,
   onToggleAutoStart,
-  onRefreshRegistry,
 }: Props) {
-  const [showVersion, setShowVersion] = useState(false);
   const running = instances.filter(
     (i) => i.status === 'running' || i.status === 'starting' || i.status === 'ready'
   ).length;
   const liveCount = Object.values(logs).reduce((n, arr) => n + arr.length, 0);
 
   return (
-    <div className="instances-view">
+    <div className="view-page">
       <div className="instances-toolbar">
         <h2>实例</h2>
         <div className="status-strip" title="运行中 / 实例总数">
@@ -57,20 +52,8 @@ export default function InstancesView({
           <span className="muted">·</span>
           <span>日志 <b>{liveCount}</b> 行</span>
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={() => setShowVersion((v) => !v)} title="npm 版本历史">
-          {showVersion ? '收起版本' : '版本历史'}
-        </button>
-        <button className="btn btn-ghost btn-sm" onClick={onRefreshRegistry} disabled={registryLoading}>
-          {registryLoading ? '刷新中…' : '刷新版本'}
-        </button>
         <button className="btn btn-primary" onClick={onAdd}>+ 添加实例</button>
       </div>
-
-      {showVersion && (
-        <div className="version-panel">
-          <VersionPanel registry={registry} loading={registryLoading} />
-        </div>
-      )}
 
       <div className="instance-grid">
         {instances.length === 0 && (

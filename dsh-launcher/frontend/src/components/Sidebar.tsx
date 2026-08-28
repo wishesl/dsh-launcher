@@ -1,4 +1,4 @@
-export type ViewKey = 'instances' | 'market' | 'settings';
+export type ViewKey = 'versions' | 'instances' | 'market' | 'settings';
 
 interface Props {
   view: ViewKey;
@@ -6,6 +6,7 @@ interface Props {
 }
 
 const NAV: { key: ViewKey; label: string; icon: string }[] = [
+  { key: 'versions', label: '版本历史', icon: '🕘' },
   { key: 'instances', label: '实例', icon: '🖥' },
   { key: 'market', label: '插件市场', icon: '🛒' },
   { key: 'settings', label: '设置', icon: '⚙' },
