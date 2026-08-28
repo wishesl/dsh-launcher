@@ -85,12 +85,12 @@ html, body, #root {
   user-select: none;
 }
 
-/* 右侧大卡片：中间内容 + 右侧日志，整体为一卡 */
+/* 右侧大卡片：中间内容 + 右侧日志，横向两列，整体为一卡 */
 .app-main {
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   background: var(--panel);
   border-radius: 14px;
   box-shadow: var(--shadow-card);
