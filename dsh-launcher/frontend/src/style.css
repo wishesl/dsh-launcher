@@ -225,15 +225,12 @@ html, body, #root {
 }
 .side-nav:hover { background: var(--panel-2); color: var(--text); }
 .side-nav.active { background: var(--accent-soft); color: var(--accent); }
+/* 极简图标：无背景、无描边盒，仅描边跟随文字色（active 时变为主色） */
 .nav-ico {
-  width: 30px; height: 30px; flex: none;
-  border-radius: 8px;
+  width: 20px; height: 20px; flex: none;
   display: grid; place-items: center;
-  font-size: 15px;
-  background: var(--panel-2);
-  border: 1px solid var(--border-soft);
+  color: inherit;
 }
-.side-nav.active .nav-ico { background: #fff; border-color: var(--accent); box-shadow: 0 1px 4px rgba(59, 108, 255, .25); }
 .sidebar-foot { margin-top: auto; font-size: 11px; color: var(--text-3); padding: 10px 12px; }
 
 /* ---------- Content ---------- */
