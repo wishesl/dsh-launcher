@@ -111,8 +111,6 @@ export default function MarketView({
   const [targetId, setTargetId] = useState('');
   const [pendingApprove, setPendingApprove] = useState<{ entry: MarketPlugin; names: string[] } | null>(null);
   const wasRunningRef = useRef(false);
-  const gridRef = useRef<HTMLDivElement>(null);
-  const sentinelRef = useRef<HTMLDivElement>(null);
 
   const loadCatalog = useCallback(async (force: boolean) => {
     setCatalogLoading(true);
@@ -165,25 +163,6 @@ export default function MarketView({
   );
   const visible = filtered.slice(0, visibleCount);
   const hasMore = filtered.length > visibleCount;
-
-  // Infinite scroll: load the next page once the grid scrolls near its end.
-  // The sentinel lives INSIDE the grid, so it scrolls with the content and
-  // never sits as a fixed footer below the list.
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    const root = gridRef.current;
-    if (!hasMore || !sentinel || !root) return;
-    const io = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          setVisibleCount((n) => Math.min(filtered.length, n + PAGE_SIZE));
-        }
-      },
-      { root, rootMargin: '160px 0px' }
-    );
-    io.observe(sentinel);
-    return () => io.disconnect();
-  }, [hasMore, filtered.length]);
   const targetInstance = instances.find((i) => i.id === targetId) ?? null;
   const installedNames = useMemo(() => new Set(installed.map((i) => i.name)), [installed]);
 
@@ -389,7 +368,7 @@ export default function MarketView({
           )}
 
           {catalog && filtered.length > 0 && (
-            <div className="market-grid" ref={gridRef}>
+            <div className="market-grid">
               {visible.map((p) => {
                   const isInstalled = installedNames.has(p.name) || installedNames.has(p.npm || '');
                   return (
@@ -432,9 +411,13 @@ export default function MarketView({
                   );
                 })}
               {hasMore && (
-                <div className="market-load-more" ref={sentinelRef}>
-                  <span className="spin" />
-                  滚动加载更多…
+                <div className="market-load-more">
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
+                  >
+                    加载更多（{filtered.length - visibleCount} 个）
+                  </button>
                 </div>
               )}
               {!hasMore && (
