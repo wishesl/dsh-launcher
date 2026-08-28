@@ -355,22 +355,22 @@ export default function App() {
 
   return (
     <div className="app">
-      <div className="win-bar">
-        <WinControls onCloseRequest={requestClose} />
-        <button
-          className="side-collapse"
-          onClick={() => setCollapsed((v) => !v)}
-          title={collapsed ? '展开菜单' : '收起菜单'}
-          aria-label={collapsed ? '展开菜单' : '收起菜单'}
-        >
-          {collapsed ? (
-            <ChevronsRight size={16} strokeWidth={1.75} aria-hidden />
-          ) : (
-            <ChevronsLeft size={16} strokeWidth={1.75} aria-hidden />
-          )}
-        </button>
-      </div>
-      <div className="app-row">
+      <div className="left-col">
+        <div className="win-bar">
+          <WinControls onCloseRequest={requestClose} />
+          <button
+            className="side-collapse"
+            onClick={() => setCollapsed((v) => !v)}
+            title={collapsed ? '展开菜单' : '收起菜单'}
+            aria-label={collapsed ? '展开菜单' : '收起菜单'}
+          >
+            {collapsed ? (
+              <ChevronsRight size={16} strokeWidth={1.75} aria-hidden />
+            ) : (
+              <ChevronsLeft size={16} strokeWidth={1.75} aria-hidden />
+            )}
+          </button>
+        </div>
         <Sidebar
           view={view}
           onNavigate={setView}
