@@ -1,5 +1,6 @@
 import type { Instance, RegistryInfo } from '../types';
-import { RotateCw } from 'lucide-react';
+import { RotateCw, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import WinControls from './WinControls';
 
 interface Props {
   registry: RegistryInfo | null;
@@ -15,6 +16,10 @@ interface Props {
   logsOpen: boolean;
   logsLive: boolean;
   onToggleLogs: () => void;
+  // 顶部整体：三个点 + 展开按钮 + 状态，同属一条状态栏。
+  onCloseRequest: () => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
 export default function Header({
@@ -27,6 +32,9 @@ export default function Header({
   logsOpen,
   logsLive,
   onToggleLogs,
+  onCloseRequest,
+  collapsed,
+  onToggleCollapse,
 }: Props) {
   // Ready = the configured port actually serves DSH (service state), NOT the
   // launcher's process status — so an externally-started DSH on the same port
@@ -36,6 +44,20 @@ export default function Header({
 
   return (
     <header className="app-header">
+      <WinControls onCloseRequest={onCloseRequest} />
+      <button
+        className="side-collapse"
+        onClick={onToggleCollapse}
+        title={collapsed ? '展开菜单' : '收起菜单'}
+        aria-label={collapsed ? '展开菜单' : '收起菜单'}
+      >
+        {collapsed ? (
+          <ChevronsRight size={16} strokeWidth={1.75} aria-hidden />
+        ) : (
+          <ChevronsLeft size={16} strokeWidth={1.75} aria-hidden />
+        )}
+      </button>
+
       <div className="header-right">
         {/* DSH 快捷状态 + 重启 */}
         <div

@@ -11,8 +11,6 @@ import SettingsView from './components/SettingsView';
 import InstanceForm from './components/InstanceForm';
 import ExitDialog from './components/ExitDialog';
 import LogDrawer from './components/LogDrawer';
-import WinControls from './components/WinControls';
-import { ChevronsLeft, ChevronsRight } from 'lucide-react';
 
 type ModalState = { mode: 'new' } | { mode: 'edit'; instance: Instance } | null;
 type Toast = { msg: string; kind: 'ok' | 'error' } | null;
@@ -355,41 +353,28 @@ export default function App() {
 
   return (
     <div className="app">
-      <div className="left-col">
-        <div className="win-bar">
-          <WinControls onCloseRequest={requestClose} />
-          <button
-            className="side-collapse"
-            onClick={() => setCollapsed((v) => !v)}
-            title={collapsed ? '展开菜单' : '收起菜单'}
-            aria-label={collapsed ? '展开菜单' : '收起菜单'}
-          >
-            {collapsed ? (
-              <ChevronsRight size={16} strokeWidth={1.75} aria-hidden />
-            ) : (
-              <ChevronsLeft size={16} strokeWidth={1.75} aria-hidden />
-            )}
-          </button>
-        </div>
+      <Header
+        registry={registry}
+        registryLoading={registryLoading}
+        serviceLive={serviceLive}
+        dshLive={dshLive}
+        onRestartDsh={restartDsh}
+        onOpenWeb={openWeb}
+        logsOpen={logsOpen}
+        logsLive={logsLive}
+        onToggleLogs={() => setLogsOpen((o) => !o)}
+        onCloseRequest={requestClose}
+        collapsed={collapsed}
+        onToggleCollapse={() => setCollapsed((v) => !v)}
+      />
+
+      <div className="app-body">
         <Sidebar
           view={view}
           onNavigate={setView}
           collapsed={collapsed}
         />
         <div className="app-main">
-          <Header
-            registry={registry}
-            registryLoading={registryLoading}
-          serviceLive={serviceLive}
-          dshLive={dshLive}
-          onRestartDsh={restartDsh}
-          onOpenWeb={openWeb}
-          logsOpen={logsOpen}
-          logsLive={logsLive}
-          onToggleLogs={() => setLogsOpen((o) => !o)}
-        />
-
-      <div className="app-body">
         <div className="app-content">
           {view === 'versions' && (
             <VersionView
@@ -450,7 +435,6 @@ export default function App() {
           onClearMarketLogs={clearMarketLogs}
           onCancelMarket={cancelMarket}
         />
-      </div>
       </div>
       </div>
 
