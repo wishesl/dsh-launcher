@@ -2,16 +2,15 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"net"
 	"os/exec"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -99,14 +98,11 @@ func (p *managedProcess) stop() {
 	p.requestStop()
 	p.once.Do(func() { close(p.done) })
 	// Kernel-level kill first: closing the job handle terminates the whole
-	// tree (KILL_ON_JOB_CLOSE). Works even if taskkill is unavailable.
+	// tree on Windows (KILL_ON_JOB_CLOSE); it is a no-op elsewhere.
 	p.job.close()
-	if p.cmd != nil && p.cmd.Process != nil {
-		// taskkill /T kills the whole npx -> node process tree on Windows;
-		// kept as the fallback when the job object could not be created.
-		_ = exec.Command("taskkill", "/PID", strconv.Itoa(p.pid), "/T", "/F").Run()
-		_ = p.cmd.Process.Kill()
-	}
+	// killProcessTree reaps the whole npx -> node tree: taskkill /T /F on
+	// Windows, the child's process group on macOS/Linux.
+	killProcessTree(p.pid, p.cmd)
 }
 
 // validateVersion rejects version strings that would be interpolated into the
@@ -169,12 +165,11 @@ func (a *App) LaunchInstance(id string) error {
 	// buildCommandFn is a var (not a direct call) so tests can substitute the
 	// command without spawning real npx.
 	cmdStr := buildCommandFn(snapshot.Version, snapshot.ExtraArgs, snapshot.PkgMgr)
-	cmd := exec.Command("cmd", "/c", cmdStr)
+	cmd := shellCommand(context.Background(), cmdStr)
 	cmd.Dir = snapshot.Directory
 	if cmd.Dir == "" {
 		cmd.Dir = "."
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	// Auto-answer prompts (e.g. pnpm asking whether to build native modules
 	// like node-pty/koffi: "a" = select all, then "y" = confirm).
 	cmd.Stdin = strings.NewReader("a\na\ny\ny\n")
@@ -213,10 +208,10 @@ func (a *App) LaunchInstance(id string) error {
 	mp.job = newKillOnCloseJob()
 	if h, err := openProcessForJob(cmd.Process.Pid); err == nil {
 		if jerr := mp.job.assign(h); jerr != nil {
-			a.systemLog(snapshot.ID, mp.pid, "提示: 进程未纳入 Job 托管（将依赖 taskkill 兜底）")
+			a.systemLog(snapshot.ID, mp.pid, "提示: 进程未纳入 Job 托管（停止时将依赖平台进程树清理）")
 		}
 	} else {
-		a.systemLog(snapshot.ID, mp.pid, "提示: 进程未纳入 Job 托管（将依赖 taskkill 兜底）")
+		a.systemLog(snapshot.ID, mp.pid, "提示: 进程未纳入 Job 托管（停止时将依赖平台进程树清理）")
 	}
 
 	a.mu.Lock()

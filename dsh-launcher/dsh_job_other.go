@@ -6,8 +6,8 @@ import "errors"
 
 var errNoJob = errors.New("job object unavailable")
 
-// winJob is a no-op outside Windows: the graceful taskkill path is the only
-// child-reaping mechanism there.
+// winJob is a no-op outside Windows: killProcessTree (a process-group kill,
+// thanks to Setsid) is the child-reaping mechanism there.
 type winJob struct{}
 
 func newKillOnCloseJob() *winJob       { return nil }

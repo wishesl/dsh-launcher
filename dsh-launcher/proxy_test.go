@@ -52,7 +52,9 @@ func TestApplyProxyToCmd(t *testing.T) {
 	if err := a.SetProxy("http://127.0.0.1:20171"); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("cmd", "/c", "echo hi")
+	// The command is never started — only its Env is inspected, so a plain
+	// platform-neutral command keeps the test runnable on any OS.
+	cmd := exec.Command("echo", "hi")
 	a.applyProxyToCmd(cmd)
 	env := map[string]string{}
 	for _, kv := range cmd.Env {
@@ -76,7 +78,7 @@ func TestApplyProxyToCmd(t *testing.T) {
 
 	// no proxy configured → env untouched (nil = inherit)
 	a2 := testApp(t)
-	cmd2 := exec.Command("cmd", "/c", "echo hi")
+	cmd2 := exec.Command("echo", "hi")
 	a2.applyProxyToCmd(cmd2)
 	if cmd2.Env != nil {
 		t.Fatalf("without proxy, cmd.Env should stay nil, got %v", cmd2.Env)

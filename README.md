@@ -1,6 +1,6 @@
 # DSH Launcher
 
-一个 **Windows 桌面 GUI 启动器**，用于以「指定目录 + 指定版本」的方式启动
+一个 **跨平台桌面 GUI 启动器**（Windows / macOS / Linux），用于以「指定目录 + 指定版本」的方式启动
 **DeepSeek Harness（DSH）**，并可视化地查询版本、管理实例、查看实时日志。
 
 DSH 的启动方式本质是一条 `npx -y @deepseek-ai/dsh@<版本> web` 命令（在某个工作目录里运行）。
@@ -21,9 +21,11 @@ DSH 的启动方式本质是一条 `npx -y @deepseek-ai/dsh@<版本> web` 命令
 ## 快速上手
 
 1. **准备环境**：运行 DSH 需要 Node.js（推荐 pnpm）；构建本应用需要 [Wails v2 CLI](https://wails.io/docs/gettingstarted/installation) + Go 1.23+。
+   Linux 还需系统依赖（Debian/Ubuntu）：`sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev`。
    启动器「设置」面板可一键检测 npm / pnpm 是否可用并安装 pnpm。
-2. **获取应用**：克隆仓库后 `cd dsh-launcher && wails build`，产物在 `build/bin/dsh-launcher.exe`；
-   也可以直接用现成的 exe（无需安装，双击即用）。
+2. **获取应用**：直接下载 [Releases](https://github.com/wishesl/dsh-launcher/releases) 里对应平台的安装包
+   （Windows `dsh-launcher-windows-amd64.exe` / macOS `dsh-launcher-darwin-*.zip` / Linux `dsh-launcher-linux-amd64.tar.gz`，无需安装）；
+   或克隆仓库后 `cd dsh-launcher && wails build` 自行构建。
 3. **添加实例**：左侧「实例」→「+ 添加实例」→ 选择 DSH 启动目录（例如你的项目目录）→
    选版本（「最新版」或指定版本）→ 启动方式选 **本地副本**（官方推荐，agent 可读真实源码）→ 保存。
 4. **启动与打开**：卡片点「启动」，右侧运行日志面板自动弹出并实时滚动；顶部出现
@@ -74,10 +76,11 @@ DSH 的启动方式本质是一条 `npx -y @deepseek-ai/dsh@<版本> web` 命令
 
 | 层 | 技术 |
 |---|---|
-| 桌面壳 / 后端 | **Wails v2.10.2** + **Go 1.23** |
+| 桌面壳 / 后端 | **Wails v2.10.2** + **Go 1.23**（Windows / macOS / Linux 三端） |
 | 前端 | **React 18** + **TypeScript** + **Vite 3** |
-| 系统托盘 | `fyne.io/systray`（Wails 在 Windows 无原生托盘，用独立 goroutine 跑消息循环） |
-| 单实例 | Wails `options.SingleInstanceLock`（命名互斥体 + `WM_COPYDATA`） |
+| 系统托盘 | `fyne.io/systray`（独立 goroutine 跑消息循环，三端通用） |
+| 单实例 | Wails `options.SingleInstanceLock` |
+| 跨平台进程管理 | 平台抽象层（`procattr_windows.go` / `procattr_unix.go`）：Windows 走 `cmd /c` + Job Object + taskkill；macOS/Linux 走 `sh -c` + Setsid 进程组杀树 |
 
 ## 架构与目录结构
 
@@ -127,7 +130,7 @@ wails build
 
 ### 发布新版本（GitHub Actions 自动编译 + Releases）
 
-推送 `v*` 标签即触发 GitHub Actions 自动构建 Windows 版并发布到
+推送 `v*` 标签即触发 GitHub Actions 在 **Windows / macOS / Linux** 三个平台自动编译并发布到
 [Releases](https://github.com/wishesl/dsh-launcher/releases)：
 
 ```bash
@@ -135,9 +138,16 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-构建产物 `dsh-launcher.exe`（绿色免安装）与 zip 压缩包会自动上传，并附自动生成的更新说明。
+每次发布自动产出四份产物（附自动生成的更新说明）：
 
-> 提示：exe 未做代码签名，Windows SmartScreen 首次运行可能提示「未知发布者」，点「更多信息 → 仍要运行」即可。
+| 平台 | 产物 |
+|---|---|
+| Windows x64 | `dsh-launcher-windows-amd64.exe` |
+| macOS（Apple Silicon） | `dsh-launcher-darwin-arm64.zip` |
+| macOS（Intel） | `dsh-launcher-darwin-amd64.zip` |
+| Linux x64 | `dsh-launcher-linux-amd64.tar.gz` |
+
+> 提示：产物未做代码签名，Windows SmartScreen / macOS Gatekeeper 首次运行可能提示「未知发布者」，按提示「仍要运行/打开」即可。
 
 ## 数据与配置位置
 

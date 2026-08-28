@@ -4,11 +4,9 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -29,13 +27,12 @@ type EnvReport struct {
 var envBusy atomic.Bool
 
 // toolVersion runs `<tool> --version` and returns its trimmed first line.
-// Goes through cmd /c so npm.cmd / pnpm.cmd shims resolve exactly like they
-// do in the user's shell.
+// Goes through the platform shell (cmd /c on Windows) so npm.cmd / pnpm.cmd
+// shims resolve exactly like they do in the user's shell.
 func toolVersion(tool string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "cmd", "/c", tool+" --version")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	cmd := shellCommand(ctx, tool+" --version")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -88,8 +85,7 @@ func (a *App) InstallPnpm() error {
 	}
 
 	envLog("执行: npm install -g pnpm")
-	cmd := exec.Command("cmd", "/c", "npm install -g pnpm")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	cmd := shellCommand(context.Background(), "npm install -g pnpm")
 	// Route npm's registry download through the configured proxy (if any).
 	a.applyProxyToCmd(cmd)
 	if pl := a.proxyLogLine(); pl != "" {

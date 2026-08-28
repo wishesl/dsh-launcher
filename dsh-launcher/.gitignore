@@ -3,3 +3,5 @@ node_modules
 frontend/dist
 package.json.md5
 *.exe
+# go build ./... 在包目录生成的同名二进制（跨平台交叉编译时尤其容易产生）
+dsh-launcher

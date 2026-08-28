@@ -2,13 +2,13 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -145,7 +145,7 @@ func (a *App) CancelMarketOp() bool {
 	defer marketOpMu.Unlock()
 	marketOpCancel.Store(true)
 	if marketOpCmd != nil && marketOpCmd.Process != nil {
-		_ = exec.Command("taskkill", "/PID", fmt.Sprint(marketOpCmd.Process.Pid), "/T", "/F").Run()
+		killProcessTree(marketOpCmd.Process.Pid, marketOpCmd)
 	}
 	if marketOpJob != nil {
 		marketOpJob.close() // kernel kills the whole tree
@@ -216,12 +216,11 @@ func (a *App) runMarketCommand(dir, cmdStr string) (output string, cancelled boo
 		})
 	}
 
-	cmd := exec.Command("cmd", "/c", cmdStr)
+	cmd := shellCommand(context.Background(), cmdStr)
 	cmd.Dir = dir
 	if cmd.Dir == "" {
 		cmd.Dir = "."
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	// Route pnpm's registry downloads through the configured proxy (if any);
 	// without this, plugin installs on a restricted network time out.
 	a.applyProxyToCmd(cmd)
@@ -282,7 +281,7 @@ func (a *App) runMarketCommand(dir, cmdStr string) (output string, cancelled boo
 			marketOpJob.close()
 		}
 		if marketOpCmd != nil && marketOpCmd.Process != nil {
-			_ = exec.Command("taskkill", "/PID", fmt.Sprint(marketOpCmd.Process.Pid), "/T", "/F").Run()
+			killProcessTree(marketOpCmd.Process.Pid, marketOpCmd)
 		}
 		marketOpMu.Unlock()
 	})

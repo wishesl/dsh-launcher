@@ -2,11 +2,10 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -108,9 +107,8 @@ func (a *App) runStreamed(snapshot Instance, cmdStr string) error {
 	if pl := a.proxyLogLine(); pl != "" {
 		a.systemLog(snapshot.ID, 0, pl)
 	}
-	cmd := exec.Command("cmd", "/c", cmdStr)
+	cmd := shellCommand(context.Background(), cmdStr)
 	cmd.Dir = snapshot.Directory
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	// Route pnpm/npm downloads through the configured proxy (if any).
 	a.applyProxyToCmd(cmd)
 
