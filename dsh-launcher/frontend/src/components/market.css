@@ -165,7 +165,19 @@
 }
 .plugin-actions { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
 
-.market-more { flex: none; text-align: center; padding-bottom: 4px; }
+/* in-grid infinite-scroll indicators: span every column and scroll with the
+   content (never a fixed footer) */
+.market-load-more,
+.market-end {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 18px 0 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
 
 /* installed list */
 .market-installed { overflow-y: auto; }
