@@ -303,6 +303,12 @@ export default function App() {
     }
   };
 
+  // 日志面板内部的实例标签：永远选中并打开，绝不收起（收起只由实例卡片的「查看日志」toggle 触发）。
+  const showLog = (id: string) => {
+    setActiveLogId(id);
+    openLogs('logs');
+  };
+
   const clearLog = (id: string) => {
     const map = { ...logsRef.current };
     map[id] = [];
@@ -426,7 +432,7 @@ export default function App() {
           instances={instances}
           logs={logs}
           activeLogId={activeLogId}
-          onSelect={selectLog}
+          onSelect={showLog}
           onClear={clearLog}
           tab={logsTab}
           onTabChange={setLogsTab}
