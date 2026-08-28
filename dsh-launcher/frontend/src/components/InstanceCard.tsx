@@ -145,8 +145,12 @@ export default function InstanceCard({
             安装到目录
           </button>
         )}
-        <button className="btn btn-ghost" onClick={() => onToggleLog(instance.id)}>
-          {activeLog ? '收起日志' : '查看日志'}
+        <button
+          className={`btn btn-ghost ${activeLog ? 'active-log-btn' : ''}`}
+          onClick={() => onToggleLog(instance.id)}
+          title="在右侧运行日志面板查看该实例的日志"
+        >
+          查看日志
         </button>
         <button className="btn btn-ghost" onClick={() => onEdit(instance)}>编辑</button>
         <button className="btn btn-ghost danger-text" onClick={() => onDelete(instance.id)}>删除</button>

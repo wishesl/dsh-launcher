@@ -10,6 +10,10 @@ interface Props {
   dshLive: Instance | null;
   onRestartDsh: () => void;
   onOpenWeb: (url: string) => void;
+  // Right-side run-log drawer toggle (permanent button next to 最小化到托盘).
+  logsOpen: boolean;
+  logsLive: boolean;
+  onToggleLogs: () => void;
 }
 
 export default function Header({
@@ -20,6 +24,9 @@ export default function Header({
   dshLive,
   onRestartDsh,
   onOpenWeb,
+  logsOpen,
+  logsLive,
+  onToggleLogs,
 }: Props) {
   const ready = dshLive?.status === 'ready' && !!dshLive.webUrl;
   const running = !!dshLive && dshLive.status !== 'stopped' && dshLive.status !== 'crashed';
@@ -84,6 +91,14 @@ export default function Header({
         </button>
         <button className="btn btn-ghost btn-sm" onClick={onHideToTray} title="隐藏到系统托盘，进程继续运行">
           最小化到托盘
+        </button>
+        <button
+          className={`btn btn-sm log-toggle-btn ${logsOpen ? 'btn-accent' : 'btn-ghost'}`}
+          onClick={onToggleLogs}
+          title={logsOpen ? '收起右侧运行日志面板' : '打开右侧运行日志面板（实例启动 / 插件安装时自动弹出）'}
+        >
+          {logsLive && <span className="live-dot" title="有实例正在启动或有任务运行中" />}
+          {logsOpen ? '收起日志' : '运行日志'}
         </button>
       </div>
     </header>

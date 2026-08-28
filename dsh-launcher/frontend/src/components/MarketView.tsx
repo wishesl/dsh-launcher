@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, errMsg } from '../api';
-import type { Instance, InstalledPlugin, MarketCatalog, MarketPlugin } from '../types';
+import type { Instance, InstalledPlugin, MarketCatalog, MarketOpState, MarketPlugin } from '../types';
 import Switch from './Switch';
 import './market.css';
 
 interface Props {
   instances: Instance[];
   showToast: (msg: string, kind?: 'ok' | 'error') => void;
+  // Market operation stream is hoisted to App so the right-side run-log drawer
+  // can render the same progress (auto-popped on install/uninstall).
+  marketLogs: string[];
+  marketOp: MarketOpState;
+  onClearMarketLogs: () => void;
+  onCancelMarket: () => void;
+  onShowMarketLogs: () => void;              // open the drawer on the 市场任务 tab
+  onMarketRunning: (running: boolean) => void; // sync from marketOpRunning() at boot
 }
 
 const PAGE_SIZE = 60;
@@ -81,7 +89,16 @@ function findCatalogEntry(installed: InstalledPlugin, catalog: MarketCatalog | n
   });
 }
 
-export default function MarketView({ instances, showToast }: Props) {
+export default function MarketView({
+  instances,
+  showToast,
+  marketLogs,
+  marketOp,
+  onClearMarketLogs,
+  onCancelMarket,
+  onShowMarketLogs,
+  onMarketRunning,
+}: Props) {
   const [tab, setTab] = useState<'discover' | 'installed'>('discover');
   const [catalog, setCatalog] = useState<MarketCatalog | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
@@ -92,12 +109,8 @@ export default function MarketView({ instances, showToast }: Props) {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [installed, setInstalled] = useState<InstalledPlugin[]>([]);
   const [targetId, setTargetId] = useState('');
-  const [opRunning, setOpRunning] = useState(false);
-  const [opKind, setOpKind] = useState('');
-  const [opTarget, setOpTarget] = useState('');
-  const [logs, setLogs] = useState<string[]>([]);
   const [pendingApprove, setPendingApprove] = useState<{ entry: MarketPlugin; names: string[] } | null>(null);
-  const logRef = useRef<HTMLDivElement>(null);
+  const wasRunningRef = useRef(false);
 
   const loadCatalog = useCallback(async (force: boolean) => {
     setCatalogLoading(true);
@@ -122,30 +135,17 @@ export default function MarketView({ instances, showToast }: Props) {
   useEffect(() => {
     loadCatalog(false);
     loadInstalled();
-    api.marketOpRunning().then((running) => setOpRunning(running)).catch(() => undefined);
-  }, [loadCatalog, loadInstalled]);
+    api.marketOpRunning().then((running) => onMarketRunning(running)).catch(() => undefined);
+  }, [loadCatalog, loadInstalled, onMarketRunning]);
 
-  // Live market operation stream.
+  // When an operation settles (running → done/failed/cancelled), refresh the
+  // installed list. marketOp is driven by dsh:market-status (subscribed in App).
   useEffect(() => {
-    api.onMarketLog((e) => setLogs((prev) => [...prev.slice(-400), e.line]));
-    api.onMarketStatus((e) => {
-      setOpRunning(e.state === 'running');
-      setOpKind(e.kind);
-      setOpTarget(e.target);
-      if (e.state === 'done' || e.state === 'failed' || e.state === 'cancelled') {
-        loadInstalled();
-      }
-    });
-    return () => {
-      api.offMarketLog();
-      api.offMarketStatus();
-    };
-  }, [loadInstalled]);
-
-  useEffect(() => {
-    const el = logRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [logs]);
+    if (wasRunningRef.current && !marketOp.running) {
+      loadInstalled();
+    }
+    wasRunningRef.current = marketOp.running;
+  }, [marketOp.running, loadInstalled]);
 
   // Default target instance = first.
   useEffect(() => {
@@ -190,8 +190,10 @@ export default function MarketView({ instances, showToast }: Props) {
     }
     const wasRunning = await stopIfRunning();
     if (targetInstance.status !== 'stopped' && targetInstance.status !== 'crashed' && !wasRunning) return;
-    setLogs([]);
+    onClearMarketLogs();
     setPendingApprove(null);
+    // Auto-pop the right-side run-log drawer on the 市场任务 tab to show progress.
+    onShowMarketLogs();
     try {
       const r = await api.installPlugin(targetId, entry.url);
       if (r.ok) {
@@ -235,7 +237,8 @@ export default function MarketView({ instances, showToast }: Props) {
     if (!window.confirm(`确定卸载插件「${p.name}」？将同步移除其补丁层禁用行。`)) return;
     const wasRunning = await stopIfRunning();
     if (targetInstance.status !== 'stopped' && targetInstance.status !== 'crashed' && !wasRunning) return;
-    setLogs([]);
+    onClearMarketLogs();
+    onShowMarketLogs();
     try {
       const r = await api.uninstallPlugin(targetId, p.name);
       if (r.ok) {
@@ -396,7 +399,7 @@ export default function MarketView({ instances, showToast }: Props) {
                         ) : (
                           <button
                             className="btn btn-accent btn-sm"
-                            disabled={opRunning}
+                            disabled={marketOp.running}
                             onClick={() => install(p)}
                           >
                             安装
@@ -463,14 +466,14 @@ export default function MarketView({ instances, showToast }: Props) {
                   <label className="installed-toggle" title="写入 cordis.patch.yml 的 disabled 开关">
                     <Switch
                       checked={p.state !== 'disabled'}
-                      disabled={opRunning}
+                      disabled={marketOp.running}
                       onChange={(v) => toggle(p, v)}
                     />
                     <span className={p.state === 'disabled' ? 'muted' : ''}>
                       {p.state === 'disabled' ? '已停用' : '已启用'}
                     </span>
                   </label>
-                  <button className="btn btn-ghost btn-sm danger-text" disabled={opRunning} onClick={() => uninstall(p)}>
+                  <button className="btn btn-ghost btn-sm danger-text" disabled={marketOp.running} onClick={() => uninstall(p)}>
                     卸载
                   </button>
                 </div>
@@ -487,24 +490,24 @@ export default function MarketView({ instances, showToast }: Props) {
         </div>
       )}
 
-      {(opRunning || logs.length > 0) && (
-        <div className="market-output">
-          <div className="market-output-head">
-            <span>
-              {opRunning
-                ? `正在${opKind === 'uninstall' ? '卸载' : '安装'} ${opTarget}…`
-                : `上次操作输出（${opKind === 'uninstall' ? '卸载' : '安装'} ${opTarget}）`}
+      {/* Slim status strip — full streamed output lives in the right-side
+          run-log drawer (auto-popped on install/uninstall). */}
+      {(marketOp.running || marketLogs.length > 0) && (
+        <div className={`market-strip ${marketOp.running ? 'busy' : ''}`}>
+          {marketOp.running ? (
+            <>
+              <span className="spin" />
+              <span className="market-strip-text">
+                正在{marketOp.kind === 'uninstall' ? '卸载' : '安装'} {marketOp.target}…
+              </span>
+              <button className="btn btn-ghost btn-sm" onClick={onCancelMarket}>取消</button>
+            </>
+          ) : (
+            <span className="market-strip-text">
+              上次{marketOp.kind === 'uninstall' ? '卸载' : '安装'}操作的输出已保留在右侧「运行日志」面板
             </span>
-            <div className="row">
-              {opRunning && (
-                <button className="btn btn-ghost btn-sm" onClick={() => api.cancelMarketOp()}>取消</button>
-              )}
-              <button className="btn btn-ghost btn-sm" onClick={() => setLogs([])}>清空</button>
-            </div>
-          </div>
-          <div className="market-output-body" ref={logRef}>
-            {logs.length === 0 ? <span className="muted">暂无输出</span> : logs.map((l, i) => <div key={i}>{l}</div>)}
-          </div>
+          )}
+          <button className="btn btn-ghost btn-sm" onClick={onShowMarketLogs}>查看进度</button>
         </div>
       )}
     </main>

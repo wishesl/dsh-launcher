@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, errMsg } from './api';
 import { BrowserOpenURL } from '../wailsjs/runtime/runtime';
-import type { ExitChoice, Instance, LogEvent, RegistryInfo } from './types';
+import type { ExitChoice, Instance, LogEvent, MarketOpState, RegistryInfo } from './types';
 import Header from './components/Header';
 import Sidebar, { type ViewKey } from './components/Sidebar';
 import InstancesView from './components/InstancesView';
@@ -9,6 +9,7 @@ import MarketView from './components/MarketView';
 import SettingsView from './components/SettingsView';
 import InstanceForm from './components/InstanceForm';
 import ExitDialog from './components/ExitDialog';
+import LogDrawer from './components/LogDrawer';
 
 type ModalState = { mode: 'new' } | { mode: 'edit'; instance: Instance } | null;
 type Toast = { msg: string; kind: 'ok' | 'error' } | null;
@@ -21,6 +22,12 @@ export default function App() {
   const [appDataPath, setAppDataPath] = useState('');
   const [logs, setLogs] = useState<Record<string, LogEvent[]>>({});
   const [activeLogId, setActiveLogId] = useState<string | null>(null);
+  // Right-side run-log drawer: open state + which tab (instance logs / market).
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [logsTab, setLogsTab] = useState<'logs' | 'market'>('logs');
+  // Plugin-market operation stream (hoisted so the drawer can show it too).
+  const [marketLogs, setMarketLogs] = useState<string[]>([]);
+  const [marketOp, setMarketOp] = useState<MarketOpState>({ running: false, kind: '', target: '' });
   const [modal, setModal] = useState<ModalState>(null);
   // Window ✕ pressed and the user wants to be asked (no remembered choice).
   const [exitAsk, setExitAsk] = useState(false);
@@ -28,6 +35,7 @@ export default function App() {
   const [toast, setToast] = useState<Toast>(null);
 
   const logsRef = useRef<Record<string, LogEvent[]>>({});
+  const marketLogsRef = useRef<string[]>([]);
   const toastTimer = useRef<number | undefined>(undefined);
   // "本次启动不再提示": remembered exit choice for THIS app run only —
   // deliberately not persisted, the chooser asks again on next launch.
@@ -41,6 +49,28 @@ export default function App() {
       () => setToast(null),
       kind === 'error' ? 6500 : 3000
     );
+  }, []);
+
+  // Open the right-side run-log drawer on a given tab.
+  const openLogs = useCallback((tab: 'logs' | 'market') => {
+    setLogsTab(tab);
+    setLogsOpen(true);
+  }, []);
+
+  const clearMarketLogs = useCallback(() => {
+    marketLogsRef.current = [];
+    setMarketLogs([]);
+  }, []);
+
+  const cancelMarket = useCallback(() => {
+    api.cancelMarketOp().catch(() => undefined);
+  }, []);
+
+  // Stable callbacks for MarketView — a new identity each render would re-fire
+  // its mount effect and clobber the live marketOp state.
+  const showMarketLogs = useCallback(() => openLogs('market'), [openLogs]);
+  const setMarketRunning = useCallback((running: boolean) => {
+    setMarketOp((o) => ({ ...o, running }));
   }, []);
 
   const refresh = useCallback(async () => {
@@ -96,6 +126,15 @@ export default function App() {
       );
     });
     api.onNotice((n) => showToast(n.msg));
+    // Plugin-market operation stream (drawer shows it as the "市场任务" tab).
+    api.onMarketLog((e) => {
+      const arr = [...marketLogsRef.current.slice(-400), e.line];
+      marketLogsRef.current = arr;
+      setMarketLogs(arr);
+    });
+    api.onMarketStatus((e) => {
+      setMarketOp({ running: e.state === 'running', kind: e.kind, target: e.target });
+    });
     api.onCloseRequest(() => {
       const remembered = exitChoiceRef.current;
       if (remembered === 'tray') {
@@ -110,23 +149,29 @@ export default function App() {
     // Wails events emitted before subscription are dropped.
     api.runAutoStartInstances()
       .then((ids) => {
-        if (ids && ids.length > 0) setActiveLogId((cur) => cur ?? ids[0]);
+        if (ids && ids.length > 0) {
+          setActiveLogId((cur) => cur ?? ids[0]);
+          openLogs('logs');
+        }
       })
       .catch(() => undefined);
     return () => {
       api.offLog();
       api.offStatus();
       api.offNotice();
+      api.offMarketLog();
+      api.offMarketStatus();
       api.offCloseRequest();
     };
-  }, [showToast]);
+  }, [showToast, openLogs]);
 
   const start = async (id: string) => {
     setBusyId(id);
     try {
       await api.launchInstance(id);
       setActiveLogId(id);
-      showToast('已发起启动，日志见下方');
+      openLogs('logs');
+      showToast('已发起启动，日志见右侧面板');
     } catch (e) {
       showToast(errMsg(e), 'error');
     } finally {
@@ -209,9 +254,10 @@ export default function App() {
     }
   };
 
-  // Select / toggle which instance's log the drawer shows.
+  // Select which instance's log the drawer shows (and open the drawer).
   const selectLog = (id: string) => {
-    setActiveLogId((cur) => (cur === id ? null : id));
+    setActiveLogId(id);
+    openLogs('logs');
   };
 
   const clearLog = (id: string) => {
@@ -228,6 +274,10 @@ export default function App() {
     instances.find((i) => i.status === 'running' || i.status === 'starting') ??
     null;
 
+  // Live activity badge for the header 运行日志 button.
+  const logsLive =
+    instances.some((i) => i.status === 'starting' || i.status === 'running') || marketOp.running;
+
   // Quick restart of the tracked DSH instance (stop → launch).
   const restartDsh = async () => {
     if (!dshLive) {
@@ -239,6 +289,7 @@ export default function App() {
       await api.stopInstance(dshLive.id);
       showToast(`正在重启 ${dshLive.name}…`);
       setActiveLogId(dshLive.id);
+      openLogs('logs');
       await api.launchInstance(dshLive.id);
     } catch (e) {
       showToast('重启失败: ' + errMsg(e), 'error');
@@ -255,6 +306,9 @@ export default function App() {
         dshLive={dshLive}
         onRestartDsh={restartDsh}
         onOpenWeb={openWeb}
+        logsOpen={logsOpen}
+        logsLive={logsLive}
+        onToggleLogs={() => setLogsOpen((o) => !o)}
       />
 
       <div className="app-body">
@@ -277,14 +331,41 @@ export default function App() {
               onEdit={(inst) => setModal({ mode: 'edit', instance: inst })}
               onDelete={remove}
               onSelectLog={selectLog}
-              onClearLog={clearLog}
               onToggleAutoStart={toggleAutoStart}
               onRefreshRegistry={refreshRegistry}
             />
           )}
-          {view === 'market' && <MarketView instances={instances} showToast={showToast} />}
+          {view === 'market' && (
+            <MarketView
+              instances={instances}
+              showToast={showToast}
+              marketLogs={marketLogs}
+              marketOp={marketOp}
+              onClearMarketLogs={clearMarketLogs}
+              onCancelMarket={cancelMarket}
+              onShowMarketLogs={showMarketLogs}
+              onMarketRunning={setMarketRunning}
+            />
+          )}
           {view === 'settings' && <SettingsView showToast={showToast} appDataPath={appDataPath} />}
         </div>
+
+        {/* Right-side run-log pane: in-flow third column (sidebar | content | logs) */}
+        <LogDrawer
+          open={logsOpen}
+          onClose={() => setLogsOpen(false)}
+          instances={instances}
+          logs={logs}
+          activeLogId={activeLogId}
+          onSelect={selectLog}
+          onClear={clearLog}
+          tab={logsTab}
+          onTabChange={setLogsTab}
+          marketLogs={marketLogs}
+          marketOp={marketOp}
+          onClearMarketLogs={clearMarketLogs}
+          onCancelMarket={cancelMarket}
+        />
       </div>
 
       {modal && (

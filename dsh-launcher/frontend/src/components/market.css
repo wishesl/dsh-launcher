@@ -212,35 +212,28 @@
 }
 .installed-toggle input { accent-color: var(--accent); cursor: pointer; margin: 0; }
 
-/* streamed operation output */
-.market-output {
+/* streamed operation output → lives in the right-side run-log drawer;
+   the market page shows a slim status strip that links into it */
+.market-strip {
   flex: none;
-  max-height: 200px;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
-}
-.market-output-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-soft);
   font-size: 12.5px;
-  color: var(--muted);
+  color: var(--text-2);
 }
-.market-output-body {
+.market-strip.busy {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.market-strip-text {
   flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 8px 12px;
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-all;
-  background: #f7f8fb;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

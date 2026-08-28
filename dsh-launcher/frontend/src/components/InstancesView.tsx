@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import type { Instance, LogEvent, RegistryInfo } from '../types';
 import InstanceCard from './InstanceCard';
-import LogDrawer from './LogDrawer';
 import VersionPanel from './VersionPanel';
 
 interface Props {
@@ -20,7 +19,6 @@ interface Props {
   onEdit: (inst: Instance) => void;
   onDelete: (id: string) => void;
   onSelectLog: (id: string) => void;
-  onClearLog: (id: string) => void;
   onToggleAutoStart: (id: string, v: boolean) => void;
   onRefreshRegistry: () => void;
 }
@@ -41,7 +39,6 @@ export default function InstancesView({
   onEdit,
   onDelete,
   onSelectLog,
-  onClearLog,
   onToggleAutoStart,
   onRefreshRegistry,
 }: Props) {
@@ -101,14 +98,6 @@ export default function InstancesView({
           />
         ))}
       </div>
-
-      <LogDrawer
-        instances={instances}
-        logs={logs}
-        activeLogId={activeLogId}
-        onSelect={onSelectLog}
-        onClear={onClearLog}
-      />
     </div>
   );
 }

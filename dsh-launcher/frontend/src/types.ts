@@ -136,3 +136,11 @@ export interface MarketStatusEvent {
   error?: string;
   blockedBuilds?: string[];
 }
+
+// Live state of the plugin-market operation (hoisted to App so the right-side
+// run-log drawer can render the "市场任务" tab from anywhere).
+export interface MarketOpState {
+  running: boolean;
+  kind: string;   // install | uninstall
+  target: string; // plugin / package name
+}
