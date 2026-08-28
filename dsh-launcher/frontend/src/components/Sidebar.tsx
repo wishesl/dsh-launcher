@@ -1,11 +1,14 @@
-import { History, Server, Store, Settings } from 'lucide-react';
+import { History, Server, Store, Settings, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import dshLogo from '../assets/dsh.svg';
 
 export type ViewKey = 'versions' | 'instances' | 'market' | 'settings';
 
 interface Props {
   view: ViewKey;
   onNavigate: (v: ViewKey) => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
 const NAV: { key: ViewKey; label: string; icon: LucideIcon }[] = [
@@ -15,9 +18,31 @@ const NAV: { key: ViewKey; label: string; icon: LucideIcon }[] = [
   { key: 'settings', label: '设置', icon: Settings },
 ];
 
-export default function Sidebar({ view, onNavigate }: Props) {
+export default function Sidebar({ view, onNavigate, collapsed, onToggleCollapse }: Props) {
   return (
-    <nav className="sidebar" aria-label="主导航">
+    <nav className={`sidebar ${collapsed ? 'collapsed' : ''}`} aria-label="主导航">
+      <div className="side-head">
+        <div className="brand">
+          <img className="brand-logo-img" src={dshLogo} alt="DSH Launcher" draggable={false} />
+          <div className="brand-text">
+            <h1>DSH Launcher</h1>
+            <p className="brand-sub">DeepSeek Harness 启动器</p>
+          </div>
+        </div>
+        <button
+          className="side-collapse"
+          onClick={onToggleCollapse}
+          title={collapsed ? '展开菜单' : '收起菜单'}
+          aria-label={collapsed ? '展开菜单' : '收起菜单'}
+        >
+          {collapsed ? (
+            <ChevronsRight size={16} strokeWidth={1.75} aria-hidden />
+          ) : (
+            <ChevronsLeft size={16} strokeWidth={1.75} aria-hidden />
+          )}
+        </button>
+      </div>
+
       {NAV.map((n) => {
         const Icon = n.icon;
         return (
@@ -36,7 +61,7 @@ export default function Sidebar({ view, onNavigate }: Props) {
             }}
           >
             <Icon className="nav-ico" size={18} strokeWidth={1.75} aria-hidden />
-            <span>{n.label}</span>
+            <span className="nav-label">{n.label}</span>
           </div>
         );
       })}

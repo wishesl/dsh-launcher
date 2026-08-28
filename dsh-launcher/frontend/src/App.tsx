@@ -29,6 +29,8 @@ export default function App() {
   const [activeLogId, setActiveLogId] = useState<string | null>(null);
   // Right-side run-log drawer: open state + which tab (instance logs / market).
   const [logsOpen, setLogsOpen] = useState(false);
+  // Sidebar (菜单栏) 展开/收起：收起后变为仅图标小卡片。
+  const [collapsed, setCollapsed] = useState(false);
   const [logsTab, setLogsTab] = useState<'logs' | 'market'>('logs');
   // Plugin-market operation stream (hoisted so the drawer can show it too).
   const [marketLogs, setMarketLogs] = useState<string[]>([]);
@@ -351,9 +353,16 @@ export default function App() {
 
   return (
     <div className="app">
-      <Header
-        registry={registry}
-        registryLoading={registryLoading}
+      <Sidebar
+        view={view}
+        onNavigate={setView}
+        collapsed={collapsed}
+        onToggleCollapse={() => setCollapsed((v) => !v)}
+      />
+      <div className="app-main">
+        <Header
+          registry={registry}
+          registryLoading={registryLoading}
         serviceLive={serviceLive}
         dshLive={dshLive}
         onRestartDsh={restartDsh}
@@ -365,7 +374,6 @@ export default function App() {
       />
 
       <div className="app-body">
-        <Sidebar view={view} onNavigate={setView} />
         <div className="app-content">
           {view === 'versions' && (
             <VersionView
@@ -426,6 +434,7 @@ export default function App() {
           onClearMarketLogs={clearMarketLogs}
           onCancelMarket={cancelMarket}
         />
+      </div>
       </div>
 
       {modal && (
