@@ -21,7 +21,8 @@ DSH 的启动方式本质是一条 `npx -y @deepseek-ai/dsh@<版本> web` 命令
 ## 快速上手
 
 1. **准备环境**：运行 DSH 需要 Node.js（推荐 pnpm）；构建本应用需要 [Wails v2 CLI](https://wails.io/docs/gettingstarted/installation) + Go 1.23+。
-   Linux 还需系统依赖（Debian/Ubuntu）：`sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev`。
+   Linux 还需系统依赖（Debian/Ubuntu）：`sudo apt install libgtk-3-dev libwebkit2gtk-4.0-dev libayatana-appindicator3-dev librsvg2-dev`
+   （Wails v2.10.2 构建需要 webkit2gtk-4.0；Ubuntu 24.04 可再加 `libwebkit2gtk-4.1-dev` 兼容新版）。
    启动器「设置」面板可一键检测 npm / pnpm 是否可用并安装 pnpm。
 2. **获取应用**：直接下载 [Releases](https://github.com/wishesl/dsh-launcher/releases) 里对应平台的安装包
    （Windows `dsh-launcher-windows-amd64.exe` / macOS `dsh-launcher-darwin-*.zip` / Linux `dsh-launcher-linux-amd64.tar.gz`，无需安装）；

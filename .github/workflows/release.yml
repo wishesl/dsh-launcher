@@ -52,7 +52,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxkbcommon-dev
+          # Wails v2.10.2 需要 webkit2gtk-4.0（pkg-config webkit2gtk-4.0）；4.1 一并装上兼容新版
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxkbcommon-dev
 
       - name: Install Wails CLI (v2.10.2)
         shell: bash
