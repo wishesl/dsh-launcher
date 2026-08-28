@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { WindowIsMaximised, WindowMinimise, WindowToggleMaximise } from '../../wailsjs/runtime/runtime';
 import type { Instance, RegistryInfo } from '../types';
-import appicon from '../../../build/appicon.png';
+import dshLogo from '../assets/dsh.svg';
 
 interface Props {
   registry: RegistryInfo | null;
@@ -70,7 +70,7 @@ export default function Header({
   return (
     <header className="app-header">
       <div className="brand">
-        <img className="brand-logo-img" src={appicon} alt="DSH Launcher" draggable={false} />
+        <img className="brand-logo-img" src={dshLogo} alt="DSH Launcher" draggable={false} />
         <div className="brand-text">
           <h1>DSH Launcher</h1>
           <p className="brand-sub">DeepSeek Harness 启动器</p>

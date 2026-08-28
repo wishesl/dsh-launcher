@@ -18,10 +18,10 @@
   --text-3: #9aa3b5;
   --muted: #6a7284; /* legacy alias */
 
-  /* intent colors */
-  --accent: #3b6cff;
-  --accent-strong: #2f5bf0;
-  --accent-soft: rgba(59, 108, 255, 0.1);
+  /* intent colors（黑白简约：accent 统一为墨黑，状态色 green/red/amber 保持不变） */
+  --accent: #141b2e;
+  --accent-strong: #0a0e18;
+  --accent-soft: rgba(20, 27, 46, 0.08);
   --green: #16a34a;
   --green-soft: rgba(22, 163, 74, 0.1);
   --red: #dc2626;
@@ -86,8 +86,8 @@ html, body, #root {
 }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn-sm { padding: 6px 11px; font-size: 12.5px; border-radius: 7px; }
-.btn-primary { background: linear-gradient(180deg, #4b78ff, var(--accent-strong)); color: #fff; box-shadow: 0 2px 8px rgba(47, 91, 240, .28); }
-.btn-primary:hover:not(:disabled) { filter: brightness(1.05); box-shadow: 0 3px 12px rgba(47, 91, 240, .34); }
+.btn-primary { background: linear-gradient(180deg, #2b3142, var(--accent-strong)); color: #fff; box-shadow: 0 2px 8px rgba(20, 27, 46, .22); }
+.btn-primary:hover:not(:disabled) { filter: brightness(1.08); box-shadow: 0 3px 12px rgba(20, 27, 46, .28); }
 .btn-danger { background: var(--red); color: #fff; }
 .btn-danger:hover:not(:disabled) { background: #c52222; }
 .btn-ghost { border-color: var(--border); background: var(--panel); }
@@ -130,8 +130,8 @@ html, body, #root {
   display: grid; place-items: center;
   font-weight: 800; font-size: 14px; letter-spacing: .5px;
   color: #fff;
-  background: linear-gradient(135deg, #3b6cff, #7a5cff);
-  box-shadow: 0 4px 12px rgba(59, 108, 255, .3);
+  background: linear-gradient(135deg, #2b3142, #141b2e);
+  box-shadow: 0 4px 12px rgba(20, 27, 46, .22);
 }
 .brand-logo-img {
   width: 36px; height: 36px; flex: none;
