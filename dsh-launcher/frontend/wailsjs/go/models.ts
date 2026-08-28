@@ -136,6 +136,7 @@ export namespace main {
 	    state: string;
 	    description: string;
 	    homepage: string;
+	    github: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new InstalledPlugin(source);
@@ -150,6 +151,7 @@ export namespace main {
 	        this.state = source["state"];
 	        this.description = source["description"];
 	        this.homepage = source["homepage"];
+	        this.github = source["github"];
 	    }
 	}
 	export class Instance {

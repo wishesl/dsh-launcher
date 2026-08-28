@@ -245,6 +245,13 @@
 }
 .installed-toggle input { accent-color: var(--accent); cursor: pointer; margin: 0; }
 
+/* installed list: local-dev vs remote badge */
+.tag-local {
+  background: rgba(63, 185, 80, 0.14);
+  color: #3fb950;
+  border-radius: 999px;
+}
+
 /* streamed operation output → lives in the right-side run-log drawer;
    the market page shows a slim status strip that links into it */
 .market-strip {

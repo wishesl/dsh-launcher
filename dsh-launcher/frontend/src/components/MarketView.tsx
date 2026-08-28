@@ -685,6 +685,12 @@ export default function MarketView({
               (cat && catalog?.categories?.[cat.category]?.en) ||
               cat?.category ||
               '';
+            // GitHub address: prefer the backend-derived one (from the install
+            // spec / homepage), fall back to the catalog entry URL. Empty = a
+            // locally-developed plugin with no remote repo.
+            const ghUrl = p.github || cat?.url || '';
+            const ghRepo = ghUrl ? githubRepoOf(ghUrl) : null;
+            const isLocal = p.kind === 'linked';
             const isFav = isFavoriteInstalled(p);
             return (
               <div key={p.name} className="installed-row">
@@ -692,13 +698,19 @@ export default function MarketView({
                   <div className="installed-head">
                     <span className="installed-name" title={p.name}>{displayName}</span>
                     {catLabel && <span className="pill">{catLabel}</span>}
-                    <span className="pill pill-soft">{p.kind}</span>
+                    <span className={`pill ${isLocal ? 'tag-local' : 'pill-soft'}`}>
+                      {isLocal ? '本地开发' : p.kind === 'github' ? '远程 GitHub' : p.kind === 'npm' ? '远程 npm' : p.kind}
+                    </span>
                     {p.version && <span className="installed-version mono">v{p.version}</span>}
                     {p.state === 'disabled' && <span className="pill tag-warn">已停用</span>}
                   </div>
                   <div className="installed-desc">{desc}</div>
                   <div className="installed-sub">
                     <span className="mono">{p.name}</span>
+                    {ghRepo && ghUrl && (
+                      <span> · <a className="link-btn" href={ghUrl} target="_blank" rel="noreferrer">github.com/{ghRepo}</a></span>
+                    )}
+                    {!ghRepo && <span> · 无远程仓库</span>}
                     {cat?.owner && <span> · {cat.owner}</span>}
                     {cat?.stars != null && <span> · ★ {fmtCount(cat.stars)}</span>}
                     {cat?.downloads != null && <span> · ⬇ {fmtCount(cat.downloads)}</span>}

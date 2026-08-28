@@ -309,3 +309,26 @@ func countStr(s, sub string) int {
 	}
 	return n
 }
+
+func TestInstalledGithub(t *testing.T) {
+	cases := []struct {
+		name     string
+		spec     string
+		homepage string
+		want     string
+	}{
+		{"github spec", "github:owner/repo", "", "https://github.com/owner/repo"},
+		{"github spec subpath", "github:owner/mono#path:/pkgs/a", "", "https://github.com/owner/mono"},
+		{"npm spec with github homepage", "dsh-x", "https://github.com/owner/dsh-x", "https://github.com/owner/dsh-x"},
+		{"npm spec with github homepage trailing", "dsh-x", "https://github.com/owner/dsh-x/", "https://github.com/owner/dsh-x/"},
+		{"npm spec with other homepage", "dsh-x", "https://example.com/x", ""},
+		{"linked local", "link:../my-plugin", "", ""},
+		{"file local", "file:../my-plugin", "https://example.com/x", ""},
+		{"no homepage", "dsh-x", "", ""},
+	}
+	for _, c := range cases {
+		if got := installedGithub(c.spec, c.homepage); got != c.want {
+			t.Errorf("%s: installedGithub(%q,%q) = %q, want %q", c.name, c.spec, c.homepage, got, c.want)
+		}
+	}
+}

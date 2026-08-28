@@ -109,6 +109,7 @@ export interface InstalledPlugin {
   state: string; // enabled | disabled
   description: string;
   homepage: string;
+  github?: string; // GitHub URL when derivable (spec `github:` or homepage)
 }
 
 export interface MarketOpResult {

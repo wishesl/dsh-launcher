@@ -37,6 +37,10 @@ type InstalledPlugin struct {
 	State       string `json:"state"` // enabled | disabled
 	Description string `json:"description"`
 	Homepage    string `json:"homepage"`
+	// Github is the plugin's GitHub URL when one is derivable from the install
+	// spec (`github:owner/repo`) or the package homepage. Empty = no remote
+	// repo (e.g. a locally-linked dev plugin), used to tell local from remote.
+	Github string `json:"github"`
 }
 
 // readInstalledPlugins returns profile manifest dependencies (in-box bundles
@@ -111,6 +115,19 @@ func readInstalledMeta(name string) (description, homepage string) {
 
 // ListInstalledPlugins returns the installed community plugins with their
 // version, source kind, and enable/disable state. Sorted by name.
+// installedGithub derives the GitHub URL of an installed plugin from its
+// install spec (`github:owner/repo`) or, failing that, a GitHub homepage.
+// Empty result = a local plugin with no remote repo.
+func installedGithub(spec, homepage string) string {
+	if u := githubURLFromSpec(spec); u != "" {
+		return u
+	}
+	if repoOf(homepage) != "" {
+		return homepage
+	}
+	return ""
+}
+
 func (a *App) ListInstalledPlugins() ([]InstalledPlugin, error) {
 	installed, err := readInstalledPlugins()
 	if err != nil {
@@ -131,6 +148,7 @@ func (a *App) ListInstalledPlugins() ([]InstalledPlugin, error) {
 			State:       state,
 			Description: description,
 			Homepage:    homepage,
+			Github:      installedGithub(spec, homepage),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
