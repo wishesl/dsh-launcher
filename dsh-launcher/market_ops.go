@@ -166,6 +166,7 @@ type MarketOpStatus struct {
 type MarketOpResult struct {
 	OK            bool     `json:"ok"`
 	Cancelled     bool     `json:"cancelled"`
+	Already       bool     `json:"already"` // already installed — not a real failure
 	Installed     []string `json:"installed"`
 	BlockedBuilds []string `json:"blockedBuilds"`
 	Output        string   `json:"output"`
@@ -204,6 +205,16 @@ func pluginCommand(inst Instance, args ...string) string {
 func (a *App) runMarketCommand(dir, cmdStr string) (output string, cancelled bool, err error) {
 	a.inFlight.Add(1)
 	defer a.inFlight.Done()
+
+	// pnpm >= 11 rejects `name@range` allowBuilds keys with
+	// ERR_PNPM_INVALID_VERSION_UNION, which breaks EVERY install/uninstall in
+	// the profile. Self-heal the profile's pnpm-workspace.yaml before invoking
+	// pnpm so a key written by pnpm's own approve-builds can't wedge the market.
+	if sanitizeAllowBuilds(marketProfileDir()) {
+		a.emit("dsh:market-log", map[string]string{
+			"line": "已修复 pnpm-workspace.yaml 中不兼容的 allowBuilds 版本键（pnpm 11）",
+		})
+	}
 
 	cmd := exec.Command("cmd", "/c", cmdStr)
 	cmd.Dir = dir
@@ -342,23 +353,40 @@ func (a *App) InstallPlugin(instanceID, entryURL string) (*MarketOpResult, error
 		return nil, err
 	}
 
+	// Fast-start feedback: flip the frontend to "running" BEFORE the slow
+	// catalog revalidation, so the button disables and the drawer shows
+	// progress immediately instead of sitting silent for seconds on a slow
+	// network (the previous "点安装没反应" symptom).
+	a.emitMarketStatus(MarketOpStatus{State: "running", Kind: "install"})
+	a.emit("dsh:market-log", map[string]string{"line": "正在校验插件来源…"})
+
 	// Whitelist: the source must be present in the curated catalog right now.
 	catalog, err := a.FetchMarketCatalog(false)
 	if err != nil {
-		return nil, err
+		msg := "获取插件目录失败，请检查网络后在设置中配置镜像源: " + err.Error()
+		a.emitMarketStatus(MarketOpStatus{State: "failed", Kind: "install", Error: msg})
+		return &MarketOpResult{OK: false, Error: msg}, nil
 	}
 	entry := findRegistryEntry(catalog, entryURL)
 	if entry == nil {
-		return nil, fmt.Errorf("该插件不在社区目录中，无法安装")
+		msg := "该插件不在社区目录中，无法安装"
+		a.emitMarketStatus(MarketOpStatus{State: "failed", Kind: "install", Error: msg})
+		return &MarketOpResult{OK: false, Error: msg}, nil
 	}
 	target, ok := installTargetFor(entry.URL, entry.NPM)
 	if !ok || !targetRe.MatchString(target) {
-		return nil, fmt.Errorf("不支持的插件来源: %s", entry.URL)
+		msg := "不支持的插件来源: " + entry.URL
+		a.emitMarketStatus(MarketOpStatus{State: "failed", Kind: "install", Error: msg})
+		return &MarketOpResult{OK: false, Error: msg}, nil
 	}
 
 	installed, _ := readInstalledPlugins()
 	if alias := installedAlias(*entry, installed); alias != "" {
-		return nil, fmt.Errorf("该插件已以「%s」安装，无需重复安装", alias)
+		// Already installed — a soft state, not a failure. Return it
+		// structurally so the frontend can say "已安装" instead of "安装失败".
+		msg := fmt.Sprintf("该插件已以「%s」安装", alias)
+		a.emitMarketStatus(MarketOpStatus{State: "failed", Kind: "install", Target: alias, Error: msg})
+		return &MarketOpResult{OK: false, Already: true, Error: msg}, nil
 	}
 
 	a.emitMarketStatus(MarketOpStatus{State: "running", Kind: "install", Target: target})

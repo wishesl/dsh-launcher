@@ -114,6 +114,7 @@ export interface InstalledPlugin {
 export interface MarketOpResult {
   ok: boolean;
   cancelled: boolean;
+  already?: boolean; // package already installed — soft state, not a failure
   installed: string[];
   blockedBuilds: string[];
   output: string;

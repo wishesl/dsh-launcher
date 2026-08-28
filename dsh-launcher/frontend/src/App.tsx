@@ -339,7 +339,6 @@ export default function App() {
             <MarketView
               instances={instances}
               showToast={showToast}
-              marketLogs={marketLogs}
               marketOp={marketOp}
               onClearMarketLogs={clearMarketLogs}
               onCancelMarket={cancelMarket}

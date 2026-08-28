@@ -212,6 +212,7 @@ export namespace main {
 	export class MarketOpResult {
 	    ok: boolean;
 	    cancelled: boolean;
+	    already: boolean;
 	    installed: string[];
 	    blockedBuilds: string[];
 	    output: string;
@@ -225,6 +226,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ok = source["ok"];
 	        this.cancelled = source["cancelled"];
+	        this.already = source["already"];
 	        this.installed = source["installed"];
 	        this.blockedBuilds = source["blockedBuilds"];
 	        this.output = source["output"];

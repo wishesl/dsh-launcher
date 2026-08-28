@@ -485,6 +485,87 @@ var allowBuildsBlockRe = regexp.MustCompile(`(?m)^allowBuilds:[ \t]*\r?\n((?:[ \
 
 var gitAllowKeyRe = regexp.MustCompile(`^[A-Za-z0-9@/_.-]+@git\+https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\.git$`)
 
+// exactVersionRe matches a fully-qualified semver (kept as-is in allowBuilds).
+var exactVersionRe = regexp.MustCompile(`^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$`)
+
+// normalizeAllowKey strips a NON-exact version suffix from an allowBuilds key.
+// pnpm >= 11 rejects `name@range` keys (e.g. `node-pty@1`) with
+// ERR_PNPM_INVALID_VERSION_UNION ("Use exact versions only"), which breaks
+// EVERY pnpm operation in the profile (install/uninstall/update). Bare names
+// (`node-pty`) and exact versions (`node-pty@1.0.0`) are both accepted by
+// pnpm. Scoped names (`@scope/pkg`) are safe because only a NON-leading `@`
+// can separate a version range.
+func normalizeAllowKey(key string) string {
+	if i := strings.LastIndex(key, "@"); i > 0 {
+		if !exactVersionRe.MatchString(key[i+1:]) {
+			return key[:i]
+		}
+	}
+	return key
+}
+
+// sanitizeAllowBuilds rewrites pnpm-workspace.yaml so every allowBuilds key is
+// a bare package name (or exact version), undoing `name@range` keys that pnpm
+// 11 rejects. Best-effort repair: preserves every other entry, the file's line
+// endings, and folds duplicate blocks. Returns true when the file changed.
+func sanitizeAllowBuilds(dir string) bool {
+	file := filepath.Join(dir, "pnpm-workspace.yaml")
+	text := ""
+	if data, err := os.ReadFile(file); err == nil {
+		text = string(data)
+	}
+	if len(allowBuildsBlockRe.FindAllString(text, -1)) == 0 {
+		return false
+	}
+	eol := "\n"
+	if strings.Contains(text, "\r\n") {
+		eol = "\r\n"
+	}
+
+	entries := map[string]string{}
+	changed := false
+	for _, m := range allowBuildsBlockRe.FindAllStringSubmatch(text, -1) {
+		for _, raw := range strings.Split(m[1], "\n") {
+			line := strings.TrimRight(raw, "\r")
+			kv := regexp.MustCompile(`^[ \t]+(\S.*?)\s*:\s*(true|false)?\s*$`).FindStringSubmatch(line)
+			if kv == nil || kv[1] == "" {
+				continue
+			}
+			key := kv[1]
+			if len(key) >= 2 && (key[0] == '\'' && key[len(key)-1] == '\'' || key[0] == '"' && key[len(key)-1] == '"') {
+				key = key[1 : len(key)-1]
+			}
+			norm := normalizeAllowKey(key)
+			if norm != key {
+				changed = true
+			}
+			entries[norm] = kv[2]
+		}
+	}
+	if !changed || len(entries) == 0 {
+		return false
+	}
+
+	keys := make([]string, 0, len(entries))
+	for k := range entries {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var block strings.Builder
+	block.WriteString("allowBuilds:" + eol)
+	for _, k := range keys {
+		block.WriteString("  " + quoteYamlKey(k) + ": " + entries[k] + eol)
+	}
+	next := allowBuildsBlockRe.ReplaceAllStringFunc(text, func(string) string { return block.String() })
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return false
+	}
+	if err := os.WriteFile(file, []byte(next), 0o644); err != nil {
+		return false
+	}
+	return true
+}
+
 // quoteYamlKey wraps a YAML block-mapping key when a plain scalar would be
 // invalid: scoped npm names start with `@` (a reserved indicator) and keys
 // ending in `:` need quoting.
@@ -524,6 +605,9 @@ func mergeAllowBuilds(dir string, packages []string) ([]string, error) {
 			if len(key) >= 2 && (key[0] == '\'' && key[len(key)-1] == '\'' || key[0] == '"' && key[len(key)-1] == '"') {
 				key = key[1 : len(key)-1]
 			}
+			// Normalize `name@range` keys (pnpm 11 rejects them with
+			// ERR_PNPM_INVALID_VERSION_UNION) while merging.
+			key = normalizeAllowKey(key)
 			entries[key] = kv[2]
 		}
 	}

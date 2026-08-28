@@ -9,7 +9,6 @@ interface Props {
   showToast: (msg: string, kind?: 'ok' | 'error') => void;
   // Market operation stream is hoisted to App so the right-side run-log drawer
   // can render the same progress (auto-popped on install/uninstall).
-  marketLogs: string[];
   marketOp: MarketOpState;
   onClearMarketLogs: () => void;
   onCancelMarket: () => void;
@@ -92,7 +91,6 @@ function findCatalogEntry(installed: InstalledPlugin, catalog: MarketCatalog | n
 export default function MarketView({
   instances,
   showToast,
-  marketLogs,
   marketOp,
   onClearMarketLogs,
   onCancelMarket,
@@ -111,6 +109,10 @@ export default function MarketView({
   const [targetId, setTargetId] = useState('');
   const [pendingApprove, setPendingApprove] = useState<{ entry: MarketPlugin; names: string[] } | null>(null);
   const wasRunningRef = useRef(false);
+  // Local busy flag: disables install/uninstall the instant it's clicked, so
+  // there is immediate feedback even before the backend's "running" status
+  // event arrives (it first revalidates the catalog, which can take seconds).
+  const [busy, setBusy] = useState(false);
 
   const loadCatalog = useCallback(async (force: boolean) => {
     setCatalogLoading(true);
@@ -195,9 +197,12 @@ export default function MarketView({
     setPendingApprove(null);
     // Auto-pop the right-side run-log drawer on the 市场任务 tab to show progress.
     onShowMarketLogs();
+    setBusy(true);
     try {
       const r = await api.installPlugin(targetId, entry.url);
-      if (r.ok) {
+      if (r.already) {
+        showToast(r.error || '该插件已安装');
+      } else if (r.ok) {
         const names = r.installed.length ? r.installed.join(', ') : entry.name;
         showToast(`已安装 ${names}，重启实例后生效`);
         if (wasRunning) {
@@ -215,6 +220,7 @@ export default function MarketView({
     } catch (e) {
       showToast('安装失败: ' + errMsg(e), 'error');
     } finally {
+      setBusy(false);
       loadInstalled();
     }
   };
@@ -240,6 +246,7 @@ export default function MarketView({
     if (targetInstance.status !== 'stopped' && targetInstance.status !== 'crashed' && !wasRunning) return;
     onClearMarketLogs();
     onShowMarketLogs();
+    setBusy(true);
     try {
       const r = await api.uninstallPlugin(targetId, p.name);
       if (r.ok) {
@@ -256,6 +263,7 @@ export default function MarketView({
     } catch (e) {
       showToast('卸载失败: ' + errMsg(e), 'error');
     } finally {
+      setBusy(false);
       loadInstalled();
     }
   };
@@ -399,10 +407,10 @@ export default function MarketView({
                         ) : (
                           <button
                             className="btn btn-accent btn-sm"
-                            disabled={marketOp.running}
+                            disabled={marketOp.running || busy}
                             onClick={() => install(p)}
                           >
-                            安装
+                            {busy && !marketOp.running ? '准备中…' : '安装'}
                           </button>
                         )}
                         <a className="link-btn" href={p.url} target="_blank" rel="noreferrer">GitHub ↗</a>
@@ -471,14 +479,14 @@ export default function MarketView({
                   <label className="installed-toggle" title="写入 cordis.patch.yml 的 disabled 开关">
                     <Switch
                       checked={p.state !== 'disabled'}
-                      disabled={marketOp.running}
+                      disabled={marketOp.running || busy}
                       onChange={(v) => toggle(p, v)}
                     />
                     <span className={p.state === 'disabled' ? 'muted' : ''}>
                       {p.state === 'disabled' ? '已停用' : '已启用'}
                     </span>
                   </label>
-                  <button className="btn btn-ghost btn-sm danger-text" disabled={marketOp.running} onClick={() => uninstall(p)}>
+                  <button className="btn btn-ghost btn-sm danger-text" disabled={marketOp.running || busy} onClick={() => uninstall(p)}>
                     卸载
                   </button>
                 </div>
@@ -495,23 +503,16 @@ export default function MarketView({
         </div>
       )}
 
-      {/* Slim status strip — full streamed output lives in the right-side
-          run-log drawer (auto-popped on install/uninstall). */}
-      {(marketOp.running || marketLogs.length > 0) && (
-        <div className={`market-strip ${marketOp.running ? 'busy' : ''}`}>
-          {marketOp.running ? (
-            <>
-              <span className="spin" />
-              <span className="market-strip-text">
-                正在{marketOp.kind === 'uninstall' ? '卸载' : '安装'} {marketOp.target}…
-              </span>
-              <button className="btn btn-ghost btn-sm" onClick={onCancelMarket}>取消</button>
-            </>
-          ) : (
-            <span className="market-strip-text">
-              上次{marketOp.kind === 'uninstall' ? '卸载' : '安装'}操作的输出已保留在右侧「运行日志」面板
-            </span>
-          )}
+      {/* Slim status strip — only while an install/uninstall is in flight;
+          full streamed output lives in the right-side run-log drawer
+          (auto-popped on install/uninstall), and completion is toasted. */}
+      {marketOp.running && (
+        <div className="market-strip busy">
+          <span className="spin" />
+          <span className="market-strip-text">
+            正在{marketOp.kind === 'uninstall' ? '卸载' : '安装'} {marketOp.target}…
+          </span>
+          <button className="btn btn-ghost btn-sm" onClick={onCancelMarket}>取消</button>
           <button className="btn btn-ghost btn-sm" onClick={onShowMarketLogs}>查看进度</button>
         </div>
       )}

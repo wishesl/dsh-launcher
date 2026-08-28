@@ -230,6 +230,63 @@ func TestSetDshMarketDisabled(t *testing.T) {
 	}
 }
 
+func TestNormalizeAllowKey(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"node-pty@1", "node-pty"},
+		{"node-pty@^1.0.0", "node-pty"},
+		{"node-pty@~1.2.0", "node-pty"},
+		{"node-pty@1.0.0", "node-pty@1.0.0"}, // exact kept
+		{"node-pty@1.1.0-beta.16", "node-pty@1.1.0-beta.16"},
+		{"@scope/pkg", "@scope/pkg"},
+		{"@scope/pkg@1", "@scope/pkg"},
+		{"@scope/pkg@2.1.3", "@scope/pkg@2.1.3"},
+		{"esbuild", "esbuild"},
+		{"koffi", "koffi"},
+	}
+	for _, c := range cases {
+		if got := normalizeAllowKey(c.in); got != c.want {
+			t.Errorf("normalizeAllowKey(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestSanitizeAllowBuilds(t *testing.T) {
+	dir := t.TempDir()
+	ws := "packages:\n  - .\n\nnodeLinker: hoisted\nallowBuilds:\n  esbuild: true\n  node-pty@1: true\n  msgpackr-extract: true\n"
+	if err := os.WriteFile(filepath.Join(dir, "pnpm-workspace.yaml"), []byte(ws), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !sanitizeAllowBuilds(dir) {
+		t.Fatal("sanitizeAllowBuilds should report a change")
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "pnpm-workspace.yaml"))
+	text := string(data)
+	if contains(text, "node-pty@1") {
+		t.Fatalf("node-pty@1 still present:\n%s", text)
+	}
+	for _, want := range []string{"node-pty: true", "esbuild: true", "msgpackr-extract: true", "nodeLinker: hoisted"} {
+		if !contains(text, want) {
+			t.Errorf("sanitized yaml lost %q:\n%s", want, text)
+		}
+	}
+	if countStr(text, "allowBuilds:") != 1 {
+		t.Fatalf("expected 1 allowBuilds block, got:\n%s", text)
+	}
+	// idempotent: a second pass reports no change
+	if sanitizeAllowBuilds(dir) {
+		t.Fatal("second sanitize should be a no-op")
+	}
+	// no allowBuilds block → untouched
+	dir2 := t.TempDir()
+	plain := "packages:\n  - .\n"
+	if err := os.WriteFile(filepath.Join(dir2, "pnpm-workspace.yaml"), []byte(plain), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if sanitizeAllowBuilds(dir2) {
+		t.Fatal("file without allowBuilds should not change")
+	}
+}
+
 func contains(s, sub string) bool {
 	return len(s) >= len(sub) && (indexOf(s, sub) >= 0)
 }
