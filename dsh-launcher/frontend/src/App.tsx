@@ -263,8 +263,13 @@ export default function App() {
 
   // Select which instance's log the drawer shows (and open the drawer).
   const selectLog = (id: string) => {
-    setActiveLogId(id);
-    openLogs('logs');
+    // 再次点击当前正在查看的实例：收起日志面板（toggle 关闭）；否则切换到该实例并打开。
+    if (activeLogId === id && logsOpen) {
+      setLogsOpen(false);
+    } else {
+      setActiveLogId(id);
+      openLogs('logs');
+    }
   };
 
   const clearLog = (id: string) => {
