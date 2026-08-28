@@ -21,18 +21,24 @@ jobs:
           - name: Windows x64
             os: windows-latest
             artifact: dsh-launcher-windows-amd64.exe
+            goarch: amd64
             wails_tags: ''
           - name: macOS arm64
             os: macos-latest
             artifact: dsh-launcher-darwin-arm64.zip
+            goarch: arm64
             wails_tags: ''
           - name: macOS x64
-            os: macos-13
+            os: macos-latest
             artifact: dsh-launcher-darwin-amd64.zip
+            # macos-13（Intel runner）已被 GitHub 下线，改在 arm64 runner 上用
+            # GOARCH=amd64 交叉编译（Xcode 通用工具链支持）
+            goarch: amd64
             wails_tags: ''
           - name: Linux x64
             os: ubuntu-latest
             artifact: dsh-launcher-linux-amd64.tar.gz
+            goarch: amd64
             # Wails v2.15.0 默认仍要 webkit2gtk-4.0（Ubuntu 24.04 已移除）；
             # webkit2_41 标签切换到 4.1 + libsoup-3.0
             wails_tags: '-tags webkit2_41'
@@ -70,6 +76,8 @@ jobs:
       - name: Wails Build
         working-directory: dsh-launcher
         shell: bash
+        env:
+          GOARCH: ${{ matrix.goarch }}
         run: wails build -clean ${{ matrix.wails_tags }}
 
       - name: Package Windows exe
