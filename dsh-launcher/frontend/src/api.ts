@@ -19,6 +19,7 @@ import {
   QueryRegistry,
   QuitApp,
   RemoveInstance,
+  RequestClose,
   RunAutoStartInstances,
   SaveInstance,
   SelectDirectory,
@@ -68,6 +69,7 @@ export const api = {
   // window close / tray
   hideToTray: (): Promise<void> => HideToTray(),
   quitApp: (): Promise<void> => QuitApp(),
+  requestClose: (): Promise<void> => RequestClose(),
 
   // prerequisite environment (Settings)
   checkEnvironment: (): Promise<EnvReport> => CheckEnvironment(),

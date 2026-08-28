@@ -90,6 +90,10 @@ export function RemoveInstance(arg1) {
   return window['go']['main']['App']['RemoveInstance'](arg1);
 }
 
+export function RequestClose() {
+  return window['go']['main']['App']['RequestClose']();
+}
+
 export function RunAutoStartInstances() {
   return window['go']['main']['App']['RunAutoStartInstances']();
 }

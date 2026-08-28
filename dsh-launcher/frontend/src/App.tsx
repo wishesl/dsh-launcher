@@ -236,6 +236,12 @@ export default function App() {
     api.hideToTray().catch((e) => showToast('隐藏失败: ' + errMsg(e), 'error'));
   };
 
+  // Frameless 自定义关闭按钮 → 复用与原生 ✕ 相同的关闭链路（后端
+  // RequestClose → dsh:close-requested → 托盘/退出选择框）。
+  const requestClose = useCallback(() => {
+    api.requestClose().catch(() => undefined);
+  }, []);
+
   const chooseExit = (action: ExitChoice, remember: boolean) => {
     if (remember) exitChoiceRef.current = action;
     setExitAsk(false);
@@ -309,6 +315,7 @@ export default function App() {
         logsOpen={logsOpen}
         logsLive={logsLive}
         onToggleLogs={() => setLogsOpen((o) => !o)}
+        onCloseRequest={requestClose}
       />
 
       <div className="app-body">

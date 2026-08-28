@@ -380,6 +380,16 @@ func (a *App) QuitApp() {
 	a.requestQuit()
 }
 
+// RequestClose asks the frontend to run the exact same close flow as the
+// native titlebar ✕ (OnBeforeClose → dsh:close-requested → tray-or-quit
+// chooser). The frameless window's custom close button calls this so the
+// behaviour is identical to the removed native button.
+func (a *App) RequestClose() {
+	if a.ctx != nil {
+		a.emit("dsh:close-requested", nil)
+	}
+}
+
 // SetAutoStart toggles an instance's "随启动器自动启动" flag straight from
 // its card on the main page, without opening the edit form. Returns the
 // updated instance list; the tray submenu is refreshed to stay in sync.

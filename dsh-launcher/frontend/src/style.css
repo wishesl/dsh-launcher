@@ -113,6 +113,15 @@ html, body, #root {
   padding: 0 16px 0 20px;
   border-bottom: 1px solid var(--border);
   background: linear-gradient(180deg, #ffffff, #f8fafd);
+  /* Frameless 窗口：整个 header 作为拖拽区域，可拖动窗口 */
+  --wails-draggable: drag;
+  user-select: none;
+}
+/* header 内的可交互元素恢复为不可拖拽 */
+.app-header button,
+.app-header .dsh-chip,
+.app-header .latest-chip {
+  --wails-draggable: no-drag;
 }
 .brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .brand-logo {
@@ -136,6 +145,29 @@ html, body, #root {
 .brand-text h1 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: .2px; }
 .brand-sub { margin: 1px 0 0; font-size: 11.5px; color: var(--text-3); }
 .header-right { margin-left: auto; display: flex; align-items: center; gap: 10px; min-width: 0; }
+
+/* 自定义窗口控制（替代原生标题栏的最小化/最大化/关闭），贴合 header 右侧边缘 */
+.win-controls {
+  flex: none;
+  align-self: stretch;
+  display: flex;
+  align-items: stretch;
+  margin: 0 -16px 0 2px; /* 贴到窗口右边缘 */
+}
+.win-btn {
+  width: 46px;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 0;
+  transition: background .12s, color .12s;
+}
+.win-btn:hover { background: rgba(30, 41, 59, .08); color: var(--text); }
+.win-close:hover { background: #e81123; color: #fff; }
+.win-close:active { background: #b90d1b; }
 
 .latest-chip {
   display: inline-flex; align-items: center; gap: 8px;

@@ -1,3 +1,5 @@
+import { useCallback, useEffect, useState } from 'react';
+import { WindowIsMaximised, WindowMinimise, WindowToggleMaximise } from '../../wailsjs/runtime/runtime';
 import type { Instance, RegistryInfo } from '../types';
 import appicon from '../../../build/appicon.png';
 
@@ -14,6 +16,8 @@ interface Props {
   logsOpen: boolean;
   logsLive: boolean;
   onToggleLogs: () => void;
+  // Frameless 窗口右上角自定义关闭按钮 → 与原生 ✕ 相同的关闭流程。
+  onCloseRequest: () => void;
 }
 
 export default function Header({
@@ -27,9 +31,45 @@ export default function Header({
   logsOpen,
   logsLive,
   onToggleLogs,
+  onCloseRequest,
 }: Props) {
   const ready = dshLive?.status === 'ready' && !!dshLive.webUrl;
   const running = !!dshLive && dshLive.status !== 'stopped' && dshLive.status !== 'crashed';
+
+  // 自定义窗口控制：最小化 / 最大化-还原 / 关闭（替代被去掉的原生标题栏按钮）。
+  const [maximized, setMaximized] = useState(false);
+
+  const syncMaximized = useCallback(async () => {
+    try {
+      setMaximized(await WindowIsMaximised());
+    } catch {
+      /* 浏览器预览时无 runtime，忽略 */
+    }
+  }, []);
+
+  useEffect(() => {
+    syncMaximized();
+    window.addEventListener('resize', syncMaximized);
+    return () => window.removeEventListener('resize', syncMaximized);
+  }, [syncMaximized]);
+
+  const onMin = useCallback(() => {
+    try {
+      WindowMinimise();
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const onMax = useCallback(() => {
+    try {
+      WindowToggleMaximise();
+      // 切完刷新图标状态（最大化也会触发 resize，双保险）。
+      window.setTimeout(() => syncMaximized(), 100);
+    } catch {
+      /* ignore */
+    }
+  }, [syncMaximized]);
 
   return (
     <header className="app-header">
@@ -100,6 +140,37 @@ export default function Header({
           {logsLive && <span className="live-dot" title="有实例正在启动或有任务运行中" />}
           {logsOpen ? '收起日志' : '运行日志'}
         </button>
+
+        {/* 自定义窗口控制：最小化 / 最大化-还原 / 关闭（替代原生标题栏按钮） */}
+        <div className="win-controls">
+          <button className="win-btn" onClick={onMin} title="最小化" aria-label="最小化">
+            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+              <path d="M0 5h10" stroke="currentColor" strokeWidth="1" />
+            </svg>
+          </button>
+          <button
+            className="win-btn"
+            onClick={onMax}
+            title={maximized ? '还原' : '最大化'}
+            aria-label={maximized ? '还原' : '最大化'}
+          >
+            {maximized ? (
+              <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                <rect x="0.5" y="2.5" width="7" height="7" fill="none" stroke="currentColor" />
+                <path d="M2.5 2.5v-2h7v7h-2" fill="none" stroke="currentColor" />
+              </svg>
+            ) : (
+              <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                <rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" />
+              </svg>
+            )}
+          </button>
+          <button className="win-btn win-close" onClick={onCloseRequest} title="关闭" aria-label="关闭">
+            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+              <path d="M0.5 0.5l9 9M9.5 0.5l-9 9" stroke="currentColor" strokeWidth="1" />
+            </svg>
+          </button>
+        </div>
       </div>
     </header>
   );

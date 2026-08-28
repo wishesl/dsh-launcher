@@ -22,6 +22,9 @@ func main() {
 		Height:    820,
 		MinWidth:  1000,
 		MinHeight: 640,
+		// 去掉原生标题栏（含系统自带的最小化/最大化/关闭），窗口控制改由
+		// Header 右上角自定义按钮实现（见 Header.tsx 的 win-controls）。
+		Frameless: true,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
