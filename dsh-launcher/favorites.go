@@ -122,7 +122,7 @@ func readFavorites() ([]FavoritePlugin, error) {
 	data, err := os.ReadFile(favoritesFilePath())
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return []FavoritePlugin{}, nil
 		}
 		return nil, err
 	}
@@ -138,6 +138,11 @@ func readFavorites() ([]FavoritePlugin, error) {
 	}
 	return doc.Favorites, nil
 }
+
+// emptyFavorites guards every Wails return: a nil slice serializes as JSON
+// `null`, and the frontend calls .map() on the result — a null crash. All
+// favorite-list returns must be non-nil arrays.
+func emptyFavorites() []FavoritePlugin { return []FavoritePlugin{} }
 
 func writeFavorites(list []FavoritePlugin) error {
 	data, err := json.MarshalIndent(struct {
@@ -173,6 +178,9 @@ func (a *App) ListFavorites() ([]FavoritePlugin, error) {
 	list, err := readFavorites()
 	if err != nil {
 		return nil, err
+	}
+	if list == nil {
+		list = emptyFavorites()
 	}
 	sortFavorites(list)
 	return list, nil

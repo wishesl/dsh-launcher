@@ -160,7 +160,7 @@ export default function MarketView({
 
   const loadFavorites = useCallback(async () => {
     try {
-      setFavorites(await api.listFavorites());
+      setFavorites((await api.listFavorites()) ?? []);
     } catch (e) {
       showToast('读取收藏失败: ' + errMsg(e), 'error');
     }
@@ -415,14 +415,14 @@ export default function MarketView({
   const toggleFavorite = async (draft: FavoriteDraft, id: string, displayName: string) => {
     if (favIDSet.has(id.toLowerCase())) {
       try {
-        setFavorites(await api.removeFavorite(id));
+        setFavorites((await api.removeFavorite(id)) ?? []);
         showToast(`已取消收藏 ${displayName}`);
       } catch (e) {
         showToast('取消失败: ' + errMsg(e), 'error');
       }
     } else {
       try {
-        setFavorites(await api.addFavorite(draft));
+        setFavorites((await api.addFavorite(draft)) ?? []);
         showToast(`已收藏 ${displayName}`);
       } catch (e) {
         showToast('收藏失败: ' + errMsg(e), 'error');
@@ -432,7 +432,7 @@ export default function MarketView({
 
   const removeFavoriteClick = async (f: FavoritePlugin) => {
     try {
-      setFavorites(await api.removeFavorite(f.id));
+      setFavorites((await api.removeFavorite(f.id)) ?? []);
       showToast(`已取消收藏 ${f.name}`);
     } catch (e) {
       showToast('取消失败: ' + errMsg(e), 'error');
@@ -495,7 +495,7 @@ export default function MarketView({
     if (!importPreview) return;
     try {
       const res = await api.importShareCode(importText.trim());
-      setFavorites(await api.listFavorites());
+      setFavorites((await api.listFavorites()) ?? []);
       showToast(`已添加 ${res.imported.length} 个收藏`);
       setSharePanel(null);
       setImportText('');

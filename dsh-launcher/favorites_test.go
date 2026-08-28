@@ -198,6 +198,39 @@ func TestShareCodeRoundTrip(t *testing.T) {
 	}
 }
 
+func TestListFavoritesEmptyIsArray(t *testing.T) {
+	// Regression: ListFavorites on a missing file must return a non-nil
+	// slice — Wails serializes a nil slice as JSON `null`, and the frontend
+	// crashes calling .map() on it (MarketView "Cannot read properties of
+	// null (reading 'map')" on first launch).
+	withFavoritesFile(t)
+	a := &App{}
+	list, err := a.ListFavorites()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list == nil {
+		t.Fatal("ListFavorites must never return a nil slice")
+	}
+	data, _ := json.Marshal(list)
+	if string(data) != "[]" {
+		t.Fatalf("ListFavorites must serialize to [], got %s", data)
+	}
+
+	// removing from an empty store must also yield a JSON array, not null
+	list, err = a.RemoveFavorite("whatever")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list == nil {
+		t.Fatal("RemoveFavorite must never return a nil slice")
+	}
+	data, _ = json.Marshal(list)
+	if string(data) != "[]" {
+		t.Fatalf("RemoveFavorite must serialize to [], got %s", data)
+	}
+}
+
 func TestImportShareCodeErrors(t *testing.T) {
 	withFavoritesFile(t)
 	a := &App{}
