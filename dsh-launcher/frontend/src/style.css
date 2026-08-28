@@ -148,27 +148,32 @@ html, body, #root {
 .header-right { margin-left: auto; display: flex; align-items: center; gap: 10px; min-width: 0; }
 
 /* 自定义窗口控制（替代原生标题栏的最小化/最大化/关闭），贴合 header 右侧边缘 */
+/* macOS 风格交通灯窗口控制：红(关闭)/黄(最小化)/绿(最大化) 小圆点，
+   静止无图标，hover 显示符号并轻微变暗。位置仍在顶部右侧。 */
 .win-controls {
   flex: none;
-  align-self: stretch;
   display: flex;
-  align-items: stretch;
-  margin: 0 -16px 0 2px; /* 贴到窗口右边缘 */
+  align-items: center;
+  gap: 9px;
+  margin: 0 2px 0 10px;
 }
 .win-btn {
-  width: 46px;
+  width: 13px;
+  height: 13px;
   border: none;
-  background: transparent;
-  color: var(--text-2);
+  border-radius: 50%;
+  padding: 0;
+  cursor: pointer;
   display: grid;
   place-items: center;
-  cursor: pointer;
-  padding: 0;
-  transition: background .12s, color .12s;
+  transition: filter .12s;
 }
-.win-btn:hover { background: rgba(30, 41, 59, .08); color: var(--text); }
-.win-close:hover { background: #e81123; color: #fff; }
-.win-close:active { background: #b90d1b; }
+.win-btn svg { width: 7px; height: 7px; opacity: 0; color: rgba(20, 27, 46, .7); transition: opacity .12s; }
+.win-btn:hover svg { opacity: 1; }
+.win-btn:hover { filter: brightness(.9); }
+.win-min { background: #febc2e; }
+.win-max { background: #28c840; }
+.win-close { background: #ff5f57; }
 
 .latest-chip {
   display: inline-flex; align-items: center; gap: 8px;

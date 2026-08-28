@@ -142,13 +142,13 @@ export default function Header({
 
         {/* 自定义窗口控制：最小化 / 最大化-还原 / 关闭（替代原生标题栏按钮） */}
         <div className="win-controls">
-          <button className="win-btn" onClick={onMin} title="最小化" aria-label="最小化">
+          <button className="win-btn win-min" onClick={onMin} title="最小化" aria-label="最小化">
             <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
               <path d="M0 5h10" stroke="currentColor" strokeWidth="1" />
             </svg>
           </button>
           <button
-            className="win-btn"
+            className="win-btn win-max"
             onClick={onMax}
             title={maximized ? '还原' : '最大化'}
             aria-label={maximized ? '还原' : '最大化'}
