@@ -246,6 +246,18 @@ export namespace main {
 	        this.profile = source["profile"];
 	    }
 	}
+	export class ProxySettings {
+	    proxy: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProxySettings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.proxy = source["proxy"];
+	    }
+	}
 	export class RegistryInfo {
 	    package: string;
 	    latest: string;

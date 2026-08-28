@@ -90,6 +90,11 @@ func (a *App) InstallPnpm() error {
 	envLog("执行: npm install -g pnpm")
 	cmd := exec.Command("cmd", "/c", "npm install -g pnpm")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	// Route npm's registry download through the configured proxy (if any).
+	a.applyProxyToCmd(cmd)
+	if pl := a.proxyLogLine(); pl != "" {
+		envLog(pl)
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

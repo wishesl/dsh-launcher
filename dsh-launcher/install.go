@@ -105,9 +105,14 @@ func (a *App) InstallToDirectory(id string) ([]Instance, error) {
 // output line to the frontend log panel.
 func (a *App) runStreamed(snapshot Instance, cmdStr string) error {
 	a.systemLog(snapshot.ID, 0, "执行: "+cmdStr)
+	if pl := a.proxyLogLine(); pl != "" {
+		a.systemLog(snapshot.ID, 0, pl)
+	}
 	cmd := exec.Command("cmd", "/c", cmdStr)
 	cmd.Dir = snapshot.Directory
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	// Route pnpm/npm downloads through the configured proxy (if any).
+	a.applyProxyToCmd(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

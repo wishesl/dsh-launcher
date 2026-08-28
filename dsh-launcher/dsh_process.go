@@ -159,6 +159,9 @@ func (a *App) LaunchInstance(id string) error {
 
 	a.emitStatus(snapshot.ID, "starting", 0)
 	a.systemLog(snapshot.ID, 0, fmt.Sprintf("正在启动 DSH %s (目录: %s)", versionLabel(snapshot.Version), snapshot.Directory))
+	if pl := a.proxyLogLine(); pl != "" {
+		a.systemLog(snapshot.ID, 0, pl)
+	}
 	if snapshot.PkgMgr == "local" && snapshot.LocalVersion == "" {
 		a.systemLog(snapshot.ID, 0, "提示: 目录内未检测到本地副本，npx 可能回退到 registry 下载。建议先「安装到目录」。")
 	}
@@ -175,6 +178,10 @@ func (a *App) LaunchInstance(id string) error {
 	// Auto-answer prompts (e.g. pnpm asking whether to build native modules
 	// like node-pty/koffi: "a" = select all, then "y" = confirm).
 	cmd.Stdin = strings.NewReader("a\na\ny\ny\n")
+	// First-run npx/pnpm-dlx downloads hit the registry too; route them
+	// through the configured proxy (if any) so they don't hang like plugin
+	// installs do on a restricted network.
+	a.applyProxyToCmd(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

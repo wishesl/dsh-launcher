@@ -42,6 +42,10 @@ export function GetMarketSettings() {
   return window['go']['main']['App']['GetMarketSettings']();
 }
 
+export function GetProxySettings() {
+  return window['go']['main']['App']['GetProxySettings']();
+}
+
 export function HideToTray() {
   return window['go']['main']['App']['HideToTray']();
 }
@@ -104,6 +108,10 @@ export function SetAutoStart(arg1, arg2) {
 
 export function SetMarketRegistryURL(arg1) {
   return window['go']['main']['App']['SetMarketRegistryURL'](arg1);
+}
+
+export function SetProxy(arg1) {
+  return window['go']['main']['App']['SetProxy'](arg1);
 }
 
 export function SortInstances() {

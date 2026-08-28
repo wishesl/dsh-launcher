@@ -38,6 +38,8 @@ export default function SettingsView({ showToast, appDataPath }: Props) {
   const [market, setMarket] = useState<MarketSettings | null>(null);
   const [marketUrl, setMarketUrl] = useState('');
   const [savingMarket, setSavingMarket] = useState(false);
+  const [proxy, setProxy] = useState('');
+  const [savingProxy, setSavingProxy] = useState(false);
 
   const check = useCallback(async () => {
     setChecking(true);
@@ -59,6 +61,10 @@ export default function SettingsView({ showToast, appDataPath }: Props) {
       setMarket(m);
       setMarketUrl(m.registryUrl);
     }).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    api.getProxy().then((p) => setProxy(p.proxy)).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -98,6 +104,18 @@ export default function SettingsView({ showToast, appDataPath }: Props) {
     }
   };
 
+  const saveProxy = async () => {
+    setSavingProxy(true);
+    try {
+      await api.setProxy(proxy.trim());
+      showToast('代理设置已保存');
+    } catch (e) {
+      showToast('保存失败: ' + errMsg(e), 'error');
+    } finally {
+      setSavingProxy(false);
+    }
+  };
+
   return (
     <div className="settings-view">
       <div className="settings-section">
@@ -124,6 +142,30 @@ export default function SettingsView({ showToast, appDataPath }: Props) {
           <pre className="env-output" ref={outRef}>
             {lines.join('\n')}
           </pre>
+        )}
+      </div>
+
+      <div className="settings-section">
+        <h3>网络代理</h3>
+        <p className="desc">
+          安装到目录、插件安装、pnpm 安装等下载超时或网络受限时，可填写 HTTP/HTTPS/SOCKS 代理地址（如
+          http://127.0.0.1:20171）。留空则走直连。
+        </p>
+        <div className="row">
+          <input
+            type="text"
+            value={proxy}
+            onChange={(e) => setProxy(e.target.value)}
+            placeholder="http://127.0.0.1:20171"
+          />
+          <button className="btn btn-accent" onClick={saveProxy} disabled={savingProxy}>
+            {savingProxy ? '保存中…' : '保存'}
+          </button>
+        </div>
+        {proxy.trim() && (
+          <p className="desc">
+            当前代理：<b className="mono">{proxy.trim()}</b>（将对新启动的安装/下载任务生效）
+          </p>
         )}
       </div>
 

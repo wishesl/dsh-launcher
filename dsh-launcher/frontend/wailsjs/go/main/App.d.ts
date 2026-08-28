@@ -22,6 +22,8 @@ export function GetInstances():Promise<Array<main.Instance>>;
 
 export function GetMarketSettings():Promise<main.MarketSettings>;
 
+export function GetProxySettings():Promise<main.ProxySettings>;
+
 export function HideToTray():Promise<void>;
 
 export function InstallPlugin(arg1:string,arg2:string):Promise<main.MarketOpResult>;
@@ -53,6 +55,8 @@ export function SelectDirectory():Promise<string>;
 export function SetAutoStart(arg1:string,arg2:boolean):Promise<Array<main.Instance>>;
 
 export function SetMarketRegistryURL(arg1:string):Promise<void>;
+
+export function SetProxy(arg1:string):Promise<void>;
 
 export function SortInstances():Promise<void>;
 

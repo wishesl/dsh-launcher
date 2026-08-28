@@ -156,12 +156,15 @@ func (a *App) marketRegistryURL() string {
 
 // FetchMarketCatalog returns the plugin catalog. When force is true the
 // conditional-request validators are dropped so the origin always answers
-// fresh (used by the manual refresh button).
+// fresh (used by the manual refresh button). Downloads route through the
+// configured proxy (if any), which also fixes slow/timeout catalog fetches on
+// restricted networks.
 func (a *App) FetchMarketCatalog(force bool) (*MarketCatalog, error) {
 	url := a.marketRegistryURL()
+	client := a.proxyHTTPClient(marketFetchTimeout)
 	var lastErr error
 	for attempt := 0; attempt < marketFetchAttempts; attempt++ {
-		catalog, err := fetchMarketCatalogOnce(url, force)
+		catalog, err := fetchMarketCatalogOnce(client, url, force)
 		if err == nil {
 			return catalog, nil
 		}
@@ -170,7 +173,7 @@ func (a *App) FetchMarketCatalog(force bool) (*MarketCatalog, error) {
 	return nil, fmt.Errorf("获取插件目录失败: %w", lastErr)
 }
 
-func fetchMarketCatalogOnce(url string, force bool) (*MarketCatalog, error) {
+func fetchMarketCatalogOnce(client *http.Client, url string, force bool) (*MarketCatalog, error) {
 	marketCacheMu.Lock()
 	if marketCache == nil {
 		loadDiskCacheLocked()
@@ -195,7 +198,7 @@ func fetchMarketCatalogOnce(url string, force bool) (*MarketCatalog, error) {
 		}
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

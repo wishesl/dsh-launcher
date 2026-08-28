@@ -8,6 +8,7 @@ import {
   GetAppDataPath,
   GetInstances,
   GetMarketSettings,
+  GetProxySettings,
   HideToTray,
   InstallPnpm,
   InstallPlugin,
@@ -23,6 +24,7 @@ import {
   SelectDirectory,
   SetAutoStart,
   SetMarketRegistryURL,
+  SetProxy,
   StopInstance,
   TogglePlugin,
   UninstallPlugin,
@@ -40,6 +42,7 @@ import type {
   MarketSettings,
   MarketStatusEvent,
   NoticeEvent,
+  ProxySettings,
   RegistryInfo,
   StatusEvent,
 } from './types';
@@ -69,6 +72,10 @@ export const api = {
   // prerequisite environment (Settings)
   checkEnvironment: (): Promise<EnvReport> => CheckEnvironment(),
   installPnpm: (): Promise<void> => InstallPnpm(),
+
+  // network proxy (Settings)
+  getProxy: (): Promise<ProxySettings> => GetProxySettings(),
+  setProxy: (url: string): Promise<void> => SetProxy(url),
 
   // plugin market
   fetchMarketCatalog: (force: boolean): Promise<MarketCatalog> => FetchMarketCatalog(force),

@@ -125,6 +125,11 @@ export interface MarketSettings {
   profile: string;
 }
 
+// --- network proxy (Settings panel) ---
+export interface ProxySettings {
+  proxy: string; // "" = direct (no proxy)
+}
+
 export interface MarketLogEvent {
   line: string;
 }

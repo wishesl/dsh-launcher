@@ -19,6 +19,9 @@ type settings struct {
 	WinH int `json:"winH"`
 	// Plugin-market registry mirror (empty = official curated catalog).
 	MarketRegistryURL string `json:"marketRegistryURL"`
+	// Network proxy routed to launcher-run downloads (pnpm/npm/git installs,
+	// catalog & registry fetches). Empty = direct (no proxy).
+	Proxy string `json:"proxy"`
 }
 
 // settingsStore persists launcher preferences next to instances.json.
@@ -91,6 +94,14 @@ func (s *settingsStore) setWindowGeometry(x, y, w, h int) {
 func (s *settingsStore) setMarketRegistryURL(url string) {
 	s.mu.Lock()
 	s.data.MarketRegistryURL = url
+	s.saveLocked()
+	s.mu.Unlock()
+}
+
+// setProxy persists the network proxy (empty clears it).
+func (s *settingsStore) setProxy(url string) {
+	s.mu.Lock()
+	s.data.Proxy = url
 	s.saveLocked()
 	s.mu.Unlock()
 }

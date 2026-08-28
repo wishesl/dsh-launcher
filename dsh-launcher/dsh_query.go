@@ -40,8 +40,7 @@ type registryDoc struct {
 	Time     map[string]string `json:"time"`
 }
 
-func fetchRegistry(ctx context.Context, url, source string) (*registryDoc, error) {
-	client := &http.Client{Timeout: 15 * time.Second}
+func fetchRegistry(ctx context.Context, url, source string, client *http.Client) (*registryDoc, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -83,8 +82,10 @@ func (a *App) QueryRegistry() (*RegistryInfo, error) {
 	}
 
 	var lastErr error
+	// Route the registry fetch through the configured proxy (if any).
+	client := a.proxyHTTPClient(15 * time.Second)
 	for _, s := range sources {
-		doc, err := fetchRegistry(ctx, s.url, s.source)
+		doc, err := fetchRegistry(ctx, s.url, s.source, client)
 		if err != nil {
 			lastErr = err
 			continue

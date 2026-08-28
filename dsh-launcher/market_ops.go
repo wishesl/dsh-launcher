@@ -211,6 +211,9 @@ func (a *App) runMarketCommand(dir, cmdStr string) (output string, cancelled boo
 		cmd.Dir = "."
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	// Route pnpm's registry downloads through the configured proxy (if any);
+	// without this, plugin installs on a restricted network time out.
+	a.applyProxyToCmd(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -361,6 +364,9 @@ func (a *App) InstallPlugin(instanceID, entryURL string) (*MarketOpResult, error
 	a.emitMarketStatus(MarketOpStatus{State: "running", Kind: "install", Target: target})
 	cmdStr := pluginCommand(*inst, "add", target)
 	a.emit("dsh:market-log", map[string]string{"line": "执行: " + cmdStr})
+	if pl := a.proxyLogLine(); pl != "" {
+		a.emit("dsh:market-log", map[string]string{"line": pl})
+	}
 
 	output, cancelled, runErr := a.runMarketCommand(inst.Directory, cmdStr)
 	blocked := parseIgnoredBuilds(output)
@@ -423,6 +429,9 @@ func (a *App) UninstallPlugin(instanceID, name string) (*MarketOpResult, error) 
 	a.emitMarketStatus(MarketOpStatus{State: "running", Kind: "uninstall", Target: name})
 	cmdStr := pluginCommand(*inst, "remove", name)
 	a.emit("dsh:market-log", map[string]string{"line": "执行: " + cmdStr})
+	if pl := a.proxyLogLine(); pl != "" {
+		a.emit("dsh:market-log", map[string]string{"line": pl})
+	}
 
 	output, cancelled, runErr := a.runMarketCommand(inst.Directory, cmdStr)
 	if runErr != nil && !cancelled {
