@@ -18,7 +18,7 @@ export function EnsureConfigDir():Promise<void>;
 
 export function FetchMarketCatalog(arg1:boolean):Promise<main.MarketCatalog>;
 
-export function GenerateShareCode():Promise<string>;
+export function GenerateShareCode(arg1:Array<string>):Promise<string>;
 
 export function GetAppDataPath():Promise<string>;
 
@@ -30,7 +30,7 @@ export function GetProxySettings():Promise<main.ProxySettings>;
 
 export function HideToTray():Promise<void>;
 
-export function ImportShareCode(arg1:string):Promise<main.ShareImportResult>;
+export function ImportShareCode(arg1:string,arg2:Array<string>):Promise<main.ShareImportResult>;
 
 export function InstallFavorite(arg1:string,arg2:main.FavoritePlugin):Promise<main.MarketOpResult>;
 

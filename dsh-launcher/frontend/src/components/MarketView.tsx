@@ -8,9 +8,9 @@ import type {
   MarketCatalog,
   MarketOpState,
   MarketPlugin,
-  ShareImportResult,
 } from '../types';
 import Switch from './Switch';
+import ShareCodeDialog from './ShareCodeDialog';
 import './market.css';
 
 interface Props {
@@ -127,11 +127,8 @@ export default function MarketView({
   const [favorites, setFavorites] = useState<FavoritePlugin[]>([]);
   const [targetId, setTargetId] = useState('');
   const [pendingApprove, setPendingApprove] = useState<{ names: string[]; retry: () => void } | null>(null);
-  // share-code panel state
-  const [sharePanel, setSharePanel] = useState<'gen' | 'import' | null>(null);
-  const [shareCode, setShareCode] = useState('');
-  const [importText, setImportText] = useState('');
-  const [importPreview, setImportPreview] = useState<ShareImportResult | null>(null);
+  // Share-code flows open as a modal (pick subset to share / preview before import).
+  const [shareDialog, setShareDialog] = useState<'gen' | 'import' | null>(null);
   const wasRunningRef = useRef(false);
   // Local busy flag: disables install/uninstall the instant it's clicked, so
   // there is immediate feedback even before the backend's "running" status
@@ -452,60 +449,6 @@ export default function MarketView({
   const installedForFavorite = (f: FavoritePlugin): InstalledPlugin | undefined =>
     installed.find((i) => i.name.toLowerCase() === (f.npm || f.name).toLowerCase());
 
-  // --- share code ---
-  const genShare = async () => {
-    try {
-      setShareCode(await api.generateShareCode());
-    } catch (e) {
-      showToast('生成分享码失败: ' + errMsg(e), 'error');
-    }
-  };
-
-  const copyShare = async () => {
-    if (!shareCode) {
-      showToast('请先生成分享码', 'error');
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(shareCode);
-      showToast('分享码已复制');
-    } catch (e) {
-      showToast('复制失败，请手动选择复制: ' + errMsg(e), 'error');
-    }
-  };
-
-  const parseShare = async () => {
-    const code = importText.trim();
-    if (!code) {
-      showToast('请先粘贴分享码', 'error');
-      return;
-    }
-    try {
-      const res = await api.parseShareCode(code);
-      setImportPreview(res);
-      if (res.imported.length === 0) {
-        showToast(res.skipped.length > 0 ? '分享码中的插件都已收藏过' : '分享码中没有可添加的插件', 'error');
-      }
-    } catch (e) {
-      showToast('解析失败: ' + errMsg(e), 'error');
-    }
-  };
-
-  const confirmImport = async () => {
-    if (!importPreview) return;
-    try {
-      const res = await api.importShareCode(importText.trim());
-      setFavorites((await api.listFavorites()) ?? []);
-      showToast(`已添加 ${res.imported.length} 个收藏`);
-      setSharePanel(null);
-      setImportText('');
-      setImportPreview(null);
-      setShareCode('');
-    } catch (e) {
-      showToast('导入失败: ' + errMsg(e), 'error');
-    }
-  };
-
   const categories = catalog?.categories ?? {};
   const categoryEntries = Object.entries(categories);
 
@@ -747,82 +690,10 @@ export default function MarketView({
         <div className="market-favorites">
           <div className="market-toolbar">
             <button className="btn btn-ghost" onClick={loadFavorites}>刷新</button>
-            <button
-              className="btn btn-ghost"
-              onClick={() => {
-                setSharePanel(sharePanel === 'gen' ? null : 'gen');
-                setImportPreview(null);
-              }}
-            >
-              生成分享码
-            </button>
-            <button
-              className="btn btn-ghost"
-              onClick={() => {
-                setSharePanel(sharePanel === 'import' ? null : 'import');
-                setImportPreview(null);
-              }}
-            >
-              解析分享码
-            </button>
+            <button className="btn btn-ghost" onClick={() => setShareDialog('gen')}>生成分享码</button>
+            <button className="btn btn-ghost" onClick={() => setShareDialog('import')}>解析分享码</button>
             <span className="field-hint">收藏保存在本机（favorites.json），断网也能查看和安装</span>
           </div>
-
-          {sharePanel === 'gen' && (
-            <div className="log-hint">
-              <div className="row" style={{ marginBottom: 6 }}>
-                <strong>收藏分享码</strong>
-                <span className="field-hint">分享给其他设备，或在「解析分享码」中粘贴导入</span>
-              </div>
-              <textarea
-                className="share-code"
-                readOnly
-                rows={3}
-                value={shareCode}
-                placeholder="点击「生成」获取分享码…"
-                onFocus={(e) => e.currentTarget.select()}
-              />
-              <div className="row" style={{ marginTop: 6 }}>
-                <button className="btn btn-accent btn-sm" onClick={genShare}>生成</button>
-                <button className="btn btn-ghost btn-sm" onClick={copyShare}>复制</button>
-                <button className="btn btn-ghost btn-sm" onClick={() => setSharePanel(null)}>收起</button>
-              </div>
-            </div>
-          )}
-
-          {sharePanel === 'import' && (
-            <div className="log-hint">
-              <div className="row" style={{ marginBottom: 6 }}>
-                <strong>解析分享码</strong>
-                <span className="field-hint">粘贴 DSH-FAV:v1:… 开头的分享码</span>
-              </div>
-              <textarea
-                className="share-code"
-                rows={3}
-                value={importText}
-                placeholder="粘贴分享码…"
-                onChange={(e) => {
-                  setImportText(e.target.value);
-                  setImportPreview(null);
-                }}
-              />
-              {!importPreview ? (
-                <div className="row" style={{ marginTop: 6 }}>
-                  <button className="btn btn-accent btn-sm" onClick={parseShare}>解析</button>
-                  <button className="btn btn-ghost btn-sm" onClick={() => setSharePanel(null)}>收起</button>
-                </div>
-              ) : (
-                <div className="row" style={{ marginTop: 6 }}>
-                  <span className="field-hint">
-                    可添加 {importPreview.imported.length} 个
-                    {importPreview.skipped.length > 0 ? `，已存在跳过 ${importPreview.skipped.length} 个` : ''}
-                  </span>
-                  <button className="btn btn-accent btn-sm" onClick={confirmImport}>确认添加</button>
-                  <button className="btn btn-ghost btn-sm" onClick={() => setImportPreview(null)}>重新解析</button>
-                </div>
-              )}
-            </div>
-          )}
 
           {favorites.length === 0 && (
             <div className="empty"><p>还没有收藏的插件，可在「发现」或「已安装」页点击 ☆ 收藏</p></div>
@@ -898,6 +769,29 @@ export default function MarketView({
           <button className="btn btn-ghost btn-sm" onClick={onCancelMarket}>取消</button>
           <button className="btn btn-ghost btn-sm" onClick={onShowMarketLogs}>查看进度</button>
         </div>
+      )}
+
+      {/* Share-code flows open as a modal (pick subset / preview before import). */}
+      {shareDialog === 'gen' && (
+        <ShareCodeDialog
+          mode="gen"
+          favorites={favorites}
+          showToast={showToast}
+          onImported={() => setShareDialog(null)}
+          onClose={() => setShareDialog(null)}
+        />
+      )}
+      {shareDialog === 'import' && (
+        <ShareCodeDialog
+          mode="import"
+          favorites={favorites}
+          showToast={showToast}
+          onImported={() => {
+            loadFavorites();
+            setShareDialog(null);
+          }}
+          onClose={() => setShareDialog(null)}
+        />
       )}
     </main>
   );

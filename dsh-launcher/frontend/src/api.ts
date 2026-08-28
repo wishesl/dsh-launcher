@@ -107,9 +107,10 @@ export const api = {
   listFavorites: (): Promise<FavoritePlugin[]> => ListFavorites(),
   addFavorite: (d: FavoriteDraft): Promise<FavoritePlugin[]> => AddFavorite(d as any),
   removeFavorite: (id: string): Promise<FavoritePlugin[]> => RemoveFavorite(id),
-  generateShareCode: (): Promise<string> => GenerateShareCode(),
+  generateShareCode: (ids: string[]): Promise<string> => GenerateShareCode(ids),
   parseShareCode: (code: string): Promise<ShareImportResult> => ParseShareCode(code),
-  importShareCode: (code: string): Promise<ShareImportResult> => ImportShareCode(code),
+  importShareCode: (code: string, ids: string[]): Promise<ShareImportResult> =>
+    ImportShareCode(code, ids),
   installFavorite: (instanceId: string, fav: FavoritePlugin): Promise<MarketOpResult> =>
     InstallFavorite(instanceId, fav as any),
 

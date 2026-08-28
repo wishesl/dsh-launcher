@@ -34,8 +34,8 @@ export function FetchMarketCatalog(arg1) {
   return window['go']['main']['App']['FetchMarketCatalog'](arg1);
 }
 
-export function GenerateShareCode() {
-  return window['go']['main']['App']['GenerateShareCode']();
+export function GenerateShareCode(arg1) {
+  return window['go']['main']['App']['GenerateShareCode'](arg1);
 }
 
 export function GetAppDataPath() {
@@ -58,8 +58,8 @@ export function HideToTray() {
   return window['go']['main']['App']['HideToTray']();
 }
 
-export function ImportShareCode(arg1) {
-  return window['go']['main']['App']['ImportShareCode'](arg1);
+export function ImportShareCode(arg1, arg2) {
+  return window['go']['main']['App']['ImportShareCode'](arg1, arg2);
 }
 
 export function InstallFavorite(arg1, arg2) {

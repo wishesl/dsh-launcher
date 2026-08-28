@@ -320,7 +320,9 @@ func computeShareImport(payload *sharePayload, current []FavoritePlugin) *ShareI
 	for _, f := range current {
 		have[f.ID] = true
 	}
-	res := &ShareImportResult{}
+	// Non-nil slices: nil serializes as JSON `null`, and the frontend reads
+	// .length on both — a null here crashes the import panel.
+	res := &ShareImportResult{Imported: []FavoritePlugin{}, Skipped: []string{}}
 	for _, p := range payload.Plugins {
 		if !validateInstallSpec(p.Install) {
 			continue // skip entries whose target failed re-validation
@@ -343,8 +345,30 @@ func computeShareImport(payload *sharePayload, current []FavoritePlugin) *ShareI
 	return res
 }
 
-// GenerateShareCode encodes all favorites into a shareable DSH-FAV code.
-func (a *App) GenerateShareCode() (string, error) {
+// pickFavorites returns the favorites whose id is in ids (empty ids = all).
+func pickFavorites(list []FavoritePlugin, ids []string) []FavoritePlugin {
+	if len(ids) == 0 {
+		return list
+	}
+	want := map[string]bool{}
+	for _, id := range ids {
+		if id = strings.TrimSpace(id); id != "" {
+			want[id] = true
+		}
+	}
+	out := []FavoritePlugin{}
+	for _, f := range list {
+		if want[f.ID] {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// GenerateShareCode encodes the SELECTED favorites (by identity id) into a
+// shareable DSH-FAV code — the user may share only part of their collection.
+// An empty ids slice includes every favorite.
+func (a *App) GenerateShareCode(ids []string) (string, error) {
 	favMu.Lock()
 	list, err := readFavorites()
 	favMu.Unlock()
@@ -355,7 +379,7 @@ func (a *App) GenerateShareCode() (string, error) {
 		App:       "dsh-launcher",
 		V:         1,
 		CreatedAt: time.Now().Format(time.RFC3339Nano),
-		Plugins:   list,
+		Plugins:   pickFavorites(list, ids),
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -380,12 +404,19 @@ func (a *App) ParseShareCode(code string) (*ShareImportResult, error) {
 	return computeShareImport(payload, list), nil
 }
 
-// ImportShareCode parses a share code and merges the new favorites into the
-// store (deduped by identity).
-func (a *App) ImportShareCode(code string) (*ShareImportResult, error) {
+// ImportShareCode parses a share code and merges the SELECTED parsed
+// favorites (by identity id) into the store. An empty ids slice imports every
+// valid new entry. Skipped reports entries already present (never imported).
+func (a *App) ImportShareCode(code string, ids []string) (*ShareImportResult, error) {
 	payload, err := parseSharePayload(code)
 	if err != nil {
 		return nil, err
+	}
+	sel := map[string]bool{}
+	for _, id := range ids {
+		if id = strings.TrimSpace(id); id != "" {
+			sel[id] = true
+		}
 	}
 	favMu.Lock()
 	defer favMu.Unlock()
@@ -394,6 +425,14 @@ func (a *App) ImportShareCode(code string) (*ShareImportResult, error) {
 		return nil, err
 	}
 	res := computeShareImport(payload, list)
+	// Filter to the user's selection (empty selection = import all).
+	picked := []FavoritePlugin{}
+	for _, p := range res.Imported {
+		if len(sel) == 0 || sel[p.ID] {
+			picked = append(picked, p)
+		}
+	}
+	res.Imported = picked
 	now := time.Now().Format(time.RFC3339Nano)
 	for i := range res.Imported {
 		if res.Imported[i].AddedAt == "" {

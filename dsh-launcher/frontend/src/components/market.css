@@ -286,3 +286,37 @@
 .share-code:focus { border-color: var(--accent); }
 
 .market-favorites { overflow-y: auto; }
+
+/* share-code modal: pick-subset (gen) / preview (import) lists */
+.share-dialog { width: min(520px, calc(100vw - 48px)); }
+.share-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  max-height: 42vh;
+}
+.share-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--panel-2);
+  cursor: pointer;
+  user-select: none;
+}
+.share-row:hover { border-color: var(--border); }
+.share-row.checked { border-color: var(--accent); background: var(--accent-soft); }
+.share-row input[type="checkbox"] { accent-color: var(--accent); margin: 0; flex: none; }
+.share-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.share-row-name { font-size: 13px; font-weight: 600; }
+.share-row-sub {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

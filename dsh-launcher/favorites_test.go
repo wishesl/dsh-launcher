@@ -154,7 +154,7 @@ func TestShareCodeRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	code, err := a.GenerateShareCode()
+	code, err := a.GenerateShareCode(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestShareCodeRoundTrip(t *testing.T) {
 	}
 
 	// import writes
-	res, err = a2.ImportShareCode(code)
+	res, err = a2.ImportShareCode(code, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestShareCodeRoundTrip(t *testing.T) {
 	}
 
 	// importing again → all skipped, no duplicates on disk
-	res, err = a2.ImportShareCode(code)
+	res, err = a2.ImportShareCode(code, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestImportShareCodeErrors(t *testing.T) {
 	withFavoritesFile(t)
 	a := &App{}
 	for _, c := range []string{"", "garbage", "DSH-FAV:v2:AAAA", "DSH-FAV:v1:!!!notbase64!!!"} {
-		if _, err := a.ImportShareCode(c); err == nil {
+		if _, err := a.ImportShareCode(c, nil); err == nil {
 			t.Errorf("ImportShareCode(%q) should error", c)
 		}
 	}
@@ -247,11 +247,122 @@ func TestImportShareCodeErrors(t *testing.T) {
 	}}
 	data, _ := json.Marshal(payload)
 	code := shareCodePrefix + base64.RawURLEncoding.EncodeToString(data)
-	res, err := a.ImportShareCode(code)
+	res, err := a.ImportShareCode(code, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(res.Imported) != 1 || res.Imported[0].Name != "ok" {
 		t.Fatalf("import = %+v", res)
+	}
+}
+
+func TestShareImportResultNeverNull(t *testing.T) {
+	// Regression: ShareImportResult must serialize BOTH slices as JSON arrays
+	// even when empty — a nil slice becomes `null` and the frontend import
+	// panel crashes reading .length on it ("Cannot read properties of null
+	// (reading 'length')").
+	withFavoritesFile(t)
+	a := &App{}
+	payload := sharePayload{V: 1, Plugins: []FavoritePlugin{
+		{Name: "a", Install: "pkg-a"},
+		{Name: "b", Install: "pkg-b"},
+	}}
+	data, _ := json.Marshal(payload)
+	code := shareCodePrefix + base64.RawURLEncoding.EncodeToString(data)
+
+	// first import: Imported 2, Skipped 0 — skipped must be [] not null
+	res, err := a.ImportShareCode(code, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(res)
+	if strings.Contains(string(raw), `"skipped":null`) || strings.Contains(string(raw), `"imported":null`) {
+		t.Fatalf("empty slices must serialize as [], got %s", raw)
+	}
+
+	// re-import: Imported 0, Skipped 2 — imported must be [] not null
+	res, err = a.ImportShareCode(code, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = json.Marshal(res)
+	if strings.Contains(string(raw), `"skipped":null`) || strings.Contains(string(raw), `"imported":null`) {
+		t.Fatalf("empty slices must serialize as [], got %s", raw)
+	}
+}
+
+func TestGenerateShareCodeSubset(t *testing.T) {
+	// GenerateShareCode(ids) must encode ONLY the selected favorites.
+	withFavoritesFile(t)
+	a := &App{}
+	if _, err := a.AddFavorite(FavoriteDraft{
+		Name: "modlens", URL: "https://github.com/liustack/modlens",
+		NPM: strp("@liustack/modlens"), Source: "catalog",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.AddFavorite(FavoriteDraft{Name: "dsh-x", Source: "installed", Spec: "github:owner/dsh-x"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// subset → only dsh-x
+	code, err := a.GenerateShareCode([]string{"dsh-x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(code, shareCodePrefix))
+	var payload sharePayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Plugins) != 1 || payload.Plugins[0].Name != "dsh-x" {
+		t.Fatalf("subset share code plugins = %+v, want only dsh-x", payload.Plugins)
+	}
+
+	// empty ids → all
+	code, err = a.GenerateShareCode(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = base64.RawURLEncoding.DecodeString(strings.TrimPrefix(code, shareCodePrefix))
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Plugins) != 2 {
+		t.Fatalf("all share code plugins = %d, want 2", len(payload.Plugins))
+	}
+}
+
+func TestImportShareCodeSelective(t *testing.T) {
+	// ImportShareCode(code, ids) must import ONLY the selected ids.
+	withFavoritesFile(t)
+	a := &App{}
+	payload := sharePayload{V: 1, Plugins: []FavoritePlugin{
+		{Name: "a", Install: "pkg-a"},
+		{Name: "b", Install: "pkg-b"},
+	}}
+	data, _ := json.Marshal(payload)
+	code := shareCodePrefix + base64.RawURLEncoding.EncodeToString(data)
+
+	// import only pkg-b's favorite (id = install npm name "pkg-b")
+	res, err := a.ImportShareCode(code, []string{"pkg-b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Imported) != 1 || res.Imported[0].Name != "b" {
+		t.Fatalf("selective import = %+v, want only b", res.Imported)
+	}
+	list, _ := a.ListFavorites()
+	if len(list) != 1 || list[0].Name != "b" {
+		t.Fatalf("favorites after selective import = %+v", list)
+	}
+
+	// importing the other one now adds only it
+	res, err = a.ImportShareCode(code, []string{"pkg-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Imported) != 1 || res.Imported[0].Name != "a" {
+		t.Fatalf("second selective import = %+v", res.Imported)
 	}
 }
