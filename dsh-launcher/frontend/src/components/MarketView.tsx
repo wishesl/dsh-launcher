@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api, errMsg } from '../api';
+import { githubRepoOf, githubURLFromSpec, specRepoOf } from '../util';
 import type {
   FavoriteDraft,
   FavoritePlugin,
@@ -125,12 +126,6 @@ function PluginDesc({ text }: { text: string }) {
       )}
     </>
   );
-}
-
-// githubRepoOf extracts `owner/repo` from a catalog entry URL.
-function githubRepoOf(url: string): string | null {
-  const m = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:[/?#].*)?$/.exec(url);
-  return m ? m[1].toLowerCase() : null;
 }
 
 // findCatalogEntry matches an installed package back to its catalog entry by
@@ -423,16 +418,22 @@ export default function MarketView({
   const favIDForInstalled = (p: InstalledPlugin): string => {
     const cat = findCatalogEntry(p, catalog);
     if (cat) return favIDForEntry(cat);
-    return p.name.toLowerCase();
+    // Mirrors favoriteID() in Go: a github-sourced install gets the repo as
+    // its identity (the backend records the GitHub URL from the spec).
+    return specRepoOf(p.spec) || p.name.toLowerCase();
   };
 
   const favDraftFromInstalled = (p: InstalledPlugin): FavoriteDraft => {
     const cat = findCatalogEntry(p, catalog);
     if (cat) return favDraftFromEntry(cat);
+    // Record the GitHub address even when package.json has no homepage: a
+    // `github:` spec maps straight back to its canonical repo URL. Favorites
+    // without a GitHub URL cannot be shared.
+    const repo = specRepoOf(p.spec);
     return {
       name: p.name,
-      owner: '',
-      url: p.homepage || '',
+      owner: repo ? repo.split('/')[0] : '',
+      url: githubURLFromSpec(p.spec) || p.homepage || '',
       npm: p.kind === 'npm' ? p.name : null,
       category: '',
       description: p.description ? { en: p.description } : {},
@@ -451,7 +452,7 @@ export default function MarketView({
   const isFavoriteInstalled = (p: InstalledPlugin): boolean => {
     const cat = findCatalogEntry(p, catalog);
     if (cat) return isFavoriteEntry(cat);
-    return isFavorite([p.name]);
+    return isFavorite([p.name, specRepoOf(p.spec)]);
   };
 
   const toggleFavorite = async (draft: FavoriteDraft, id: string, displayName: string) => {
@@ -786,6 +787,9 @@ export default function MarketView({
                         </button>
                       )}
                       <button className="btn btn-ghost btn-sm" onClick={() => removeFavoriteClick(f)}>取消收藏</button>
+                      {f.url && (
+                        <a className="link-btn" href={f.url} target="_blank" rel="noreferrer">GitHub ↗</a>
+                      )}
                     </div>
                   </div>
                 );

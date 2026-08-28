@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api, errMsg } from '../api';
+import { githubRepoOf } from '../util';
 import type { FavoritePlugin, ShareImportResult } from '../types';
 
 interface Props {
@@ -16,7 +17,10 @@ interface Props {
 //  - import: paste → 解析 → preview list (checkbox per plugin) → 添加收藏
 // Nothing is added to favorites automatically on parse — the user confirms.
 export default function ShareCodeDialog({ mode, favorites, showToast, onImported, onClose }: Props) {
-  const [picked, setPicked] = useState<Set<string>>(() => new Set(favorites.map((f) => f.id)));
+  // Only favorites carrying a GitHub URL can be shared (the share code must
+  // stay re-findable by repo); the rest are shown greyed-out and excluded.
+  const shareable = favorites.filter((f) => githubRepoOf(f.url));
+  const [picked, setPicked] = useState<Set<string>>(() => new Set(shareable.map((f) => f.id)));
   const [code, setCode] = useState('');
   const [generating, setGenerating] = useState(false);
   const [text, setText] = useState('');
@@ -136,22 +140,34 @@ export default function ShareCodeDialog({ mode, favorites, showToast, onImported
               ) : (
                 <>
                   <div className="row" style={{ marginBottom: 8 }}>
-                    <span className="field-label">勾选要分享的收藏（{picked.size}/{favorites.length}）</span>
+                    <span className="field-label">勾选要分享的收藏（{picked.size}/{shareable.length}）</span>
                     <span style={{ marginLeft: 'auto' }}>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPicked(new Set(favorites.map((f) => f.id)))}>全选</button>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPicked(new Set(shareable.map((f) => f.id)))}>全选</button>
                       <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPicked(new Set())}>清空</button>
                     </span>
                   </div>
+                  <p className="field-hint" style={{ marginTop: -2 }}>
+                    无 GitHub 地址的收藏不可分享（已置灰）
+                  </p>
                   <div className="share-list">
-                    {favorites.map((f) => (
-                      <label key={f.id} className={`share-row ${picked.has(f.id) ? 'checked' : ''}`}>
-                        <input type="checkbox" checked={picked.has(f.id)} onChange={() => togglePicked(f.id)} />
-                        <span className="share-row-main">
-                          <span className="share-row-name">{f.name}</span>
-                          <span className="share-row-sub">{f.npm || f.install}{f.owner ? ' · ' + f.owner : ''}</span>
-                        </span>
-                      </label>
-                    ))}
+                    {favorites.map((f) => {
+                      const ok = githubRepoOf(f.url) != null;
+                      return (
+                        <label
+                          key={f.id}
+                          className={`share-row ${picked.has(f.id) ? 'checked' : ''} ${ok ? '' : 'disabled'}`}
+                          title={ok ? undefined : '无 GitHub 地址，不可分享'}
+                        >
+                          <input type="checkbox" checked={picked.has(f.id)} disabled={!ok} onChange={() => togglePicked(f.id)} />
+                          <span className="share-row-main">
+                            <span className="share-row-name">{f.name}</span>
+                            <span className="share-row-sub">
+                              {ok ? (f.npm || f.url) : '无 GitHub 地址，不可分享'}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
                   </div>
                 </>
               )}

@@ -118,6 +118,23 @@ func validateInstallSpec(spec string) bool {
 	return false
 }
 
+// githubURLFromSpec maps a `github:owner/repo[#path:/sub]` install spec back
+// to its canonical GitHub URL ("" when the spec is not a github source).
+func githubURLFromSpec(spec string) string {
+	m := githubSpecRe.FindStringSubmatch(strings.TrimSpace(spec))
+	if m == nil {
+		return ""
+	}
+	return "https://github.com/" + m[1]
+}
+
+// isShareableFavorite reports whether a favorite carries a GitHub address.
+// Share codes must stay re-findable/verifiable by their repo URL, so favorites
+// without one are excluded from sharing.
+func isShareableFavorite(f FavoritePlugin) bool {
+	return repoOf(f.URL) != ""
+}
+
 func readFavorites() ([]FavoritePlugin, error) {
 	data, err := os.ReadFile(favoritesFilePath())
 	if err != nil {
@@ -222,6 +239,14 @@ func (a *App) AddFavorite(d FavoriteDraft) ([]FavoritePlugin, error) {
 			return nil, fmt.Errorf("非法安装来源: %s", spec)
 		}
 		f.Install = spec
+		// Record the GitHub address even when the client sent none (e.g. a
+		// `github:` spec whose package.json has no homepage): favorites
+		// without a GitHub URL cannot be shared.
+		if repoOf(f.URL) == "" {
+			if u := githubURLFromSpec(spec); u != "" {
+				f.URL = u
+			}
+		}
 	}
 	f.ID = favoriteID(f)
 	if f.ID == "" {
@@ -367,7 +392,9 @@ func pickFavorites(list []FavoritePlugin, ids []string) []FavoritePlugin {
 
 // GenerateShareCode encodes the SELECTED favorites (by identity id) into a
 // shareable DSH-FAV code — the user may share only part of their collection.
-// An empty ids slice includes every favorite.
+// An empty ids slice includes every favorite. Favorites WITHOUT a GitHub URL
+// are never included (a share code must stay re-findable by repo); if nothing
+// shareable remains this is an error.
 func (a *App) GenerateShareCode(ids []string) (string, error) {
 	favMu.Lock()
 	list, err := readFavorites()
@@ -375,11 +402,20 @@ func (a *App) GenerateShareCode(ids []string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	sel := []FavoritePlugin{}
+	for _, f := range pickFavorites(list, ids) {
+		if isShareableFavorite(f) {
+			sel = append(sel, f)
+		}
+	}
+	if len(sel) == 0 {
+		return "", fmt.Errorf("所选收藏均无 GitHub 地址，无法分享")
+	}
 	payload := sharePayload{
 		App:       "dsh-launcher",
 		V:         1,
 		CreatedAt: time.Now().Format(time.RFC3339Nano),
-		Plugins:   pickFavorites(list, ids),
+		Plugins:   sel,
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {

@@ -95,7 +95,7 @@ func TestAddRemoveFavorite(t *testing.T) {
 		t.Fatalf("addedAt should be kept on re-favorite (got %q want %q)", list[0].AddedAt, first)
 	}
 
-	// installed-source favorite (spec validated)
+	// installed-source favorite (spec validated; GitHub URL recorded from spec)
 	d2 := FavoriteDraft{Name: "dsh-x", Source: "installed", Spec: "github:owner/dsh-x"}
 	list, err = a.AddFavorite(d2)
 	if err != nil {
@@ -104,7 +104,7 @@ func TestAddRemoveFavorite(t *testing.T) {
 	if len(list) != 2 {
 		t.Fatalf("after second add: %d favorites", len(list))
 	}
-	if list[0].ID != "dsh-x" || list[0].Install != "github:owner/dsh-x" {
+	if list[0].ID != "owner/dsh-x" || list[0].Install != "github:owner/dsh-x" || list[0].URL != "https://github.com/owner/dsh-x" {
 		t.Fatalf("installed favorite = %+v", list[0])
 	}
 
@@ -121,7 +121,7 @@ func TestAddRemoveFavorite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 1 || list[0].ID != "dsh-x" {
+	if len(list) != 1 || list[0].ID != "owner/dsh-x" {
 		t.Fatalf("after remove: %+v", list)
 	}
 
@@ -136,7 +136,7 @@ func TestAddRemoveFavorite(t *testing.T) {
 	if err := json.Unmarshal(data, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if len(doc.Favorites) != 1 || doc.Favorites[0].ID != "dsh-x" {
+	if len(doc.Favorites) != 1 || doc.Favorites[0].ID != "owner/dsh-x" {
 		t.Fatalf("disk favorites = %+v", doc.Favorites)
 	}
 }
@@ -305,8 +305,8 @@ func TestGenerateShareCodeSubset(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// subset → only dsh-x
-	code, err := a.GenerateShareCode([]string{"dsh-x"})
+	// subset → only dsh-x (its identity is now the github repo)
+	code, err := a.GenerateShareCode([]string{"owner/dsh-x"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,6 +330,53 @@ func TestGenerateShareCodeSubset(t *testing.T) {
 	}
 	if len(payload.Plugins) != 2 {
 		t.Fatalf("all share code plugins = %d, want 2", len(payload.Plugins))
+	}
+}
+
+func TestGenerateShareCodeExcludesNoGithub(t *testing.T) {
+	// Favorites without a GitHub URL must never be shared: selecting only them
+	// errors, and mixed selections silently exclude them.
+	withFavoritesFile(t)
+	a := &App{}
+	// npm-only installed favorite — valid spec, but no GitHub address derivable
+	if _, err := a.AddFavorite(FavoriteDraft{Name: "local-pkg", Source: "installed", Spec: "local-pkg"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := a.ListFavorites()
+	if len(got) != 1 || got[0].URL != "" {
+		t.Fatalf("local-pkg favorite = %+v, want empty URL", got)
+	}
+	if isShareableFavorite(got[0]) {
+		t.Fatal("npm-only favorite without homepage must not be shareable")
+	}
+
+	// selecting only the non-shareable one → error
+	if _, err := a.GenerateShareCode([]string{"local-pkg"}); err == nil {
+		t.Fatal("GenerateShareCode for a no-github favorite should error")
+	}
+	// only favorite in the store is non-shareable → error too
+	if _, err := a.GenerateShareCode(nil); err == nil {
+		t.Fatal("GenerateShareCode with only non-shareable favorites should error")
+	}
+
+	// add a shareable one → mixed share excludes the non-shareable
+	if _, err := a.AddFavorite(FavoriteDraft{
+		Name: "modlens", URL: "https://github.com/liustack/modlens",
+		NPM: strp("@liustack/modlens"), Source: "catalog",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	code, err := a.GenerateShareCode(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(code, shareCodePrefix))
+	var payload sharePayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Plugins) != 1 || payload.Plugins[0].Name != "modlens" {
+		t.Fatalf("mixed share code plugins = %+v, want only modlens", payload.Plugins)
 	}
 }
 

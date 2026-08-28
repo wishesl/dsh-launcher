@@ -32,3 +32,24 @@ const SEMVER_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 export function isValidVersion(v: string): boolean {
   return SEMVER_RE.test(v.trim());
 }
+
+// Extract `owner/repo` (lowercased) from a GitHub URL, or null.
+export function githubRepoOf(url: string): string | null {
+  const m = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:[/?#].*)?$/.exec(url);
+  return m ? m[1].toLowerCase() : null;
+}
+
+// Extract `owner/repo` (lowercased) from a `github:owner/repo[#path:/…]` pnpm
+// spec, or null.
+export function specRepoOf(spec: string): string | null {
+  const m = /^github:([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:#path:.*)?$/.exec(spec.trim());
+  return m ? m[1].toLowerCase() : null;
+}
+
+// Build the canonical GitHub URL from a `github:` spec ("" when not a github
+// source) — lets an installed-source favorite record its GitHub address even
+// when the package.json has no homepage.
+export function githubURLFromSpec(spec: string): string {
+  const repo = specRepoOf(spec);
+  return repo ? `https://github.com/${repo}` : '';
+}

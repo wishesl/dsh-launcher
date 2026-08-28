@@ -330,6 +330,8 @@
 }
 .share-row:hover { border-color: var(--border); }
 .share-row.checked { border-color: var(--accent); background: var(--accent-soft); }
+.share-row.disabled { opacity: 0.55; cursor: not-allowed; }
+.share-row.disabled:hover { border-color: var(--border-soft); }
 .share-row input[type="checkbox"] { accent-color: var(--accent); margin: 0; flex: none; }
 .share-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .share-row-name { font-size: 13px; font-weight: 600; }
