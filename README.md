@@ -6,6 +6,8 @@
 DSH 的启动方式本质是一条 `npx -y @deepseek-ai/dsh@<版本> web` 命令（在某个工作目录里运行）。
 启动器把「选目录 + 选版本 + 启动/停止 + 看版本」封装成开箱即用的图形界面。
 
+[![Release](https://img.shields.io/github/v/release/wishesl/dsh-launcher?style=flat-square&label=Release)](https://github.com/wishesl/dsh-launcher/releases)
+
 ## 界面预览
 
 **版本历史页**（首页默认打开：npm latest / next、全部版本与发布时间、本地副本对照）：
@@ -122,6 +124,20 @@ wails build
 ```
 
 > 生成的应用名为 `dsh-launcher`（见 `wails.json`）。
+
+### 发布新版本（GitHub Actions 自动编译 + Releases）
+
+推送 `v*` 标签即触发 GitHub Actions 自动构建 Windows 版并发布到
+[Releases](https://github.com/wishesl/dsh-launcher/releases)：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+构建产物 `dsh-launcher.exe`（绿色免安装）与 zip 压缩包会自动上传，并附自动生成的更新说明。
+
+> 提示：exe 未做代码签名，Windows SmartScreen 首次运行可能提示「未知发布者」，点「更多信息 → 仍要运行」即可。
 
 ## 数据与配置位置
 
