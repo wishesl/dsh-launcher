@@ -796,6 +796,8 @@ html, body, #root {
 .spec-version { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
 .field-check { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
 .field-check input { width: auto; }
+.form-autostart { display: flex; align-items: center; gap: 10px; margin-top: 4px; font-size: 13px; cursor: pointer; }
+.form-autostart .muted { font-size: 12px; }
 .form-error {
   background: var(--red-soft);
   border: 1px solid var(--red);

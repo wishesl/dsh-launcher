@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, errMsg } from '../api';
 import type { DSHVersion, Instance, RegistryInfo } from '../types';
 import { isValidVersion } from '../util';
+import Switch from './Switch';
 
 interface Props {
   registry: RegistryInfo | null;
@@ -387,15 +388,16 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
             </div>
           </div>
 
-          <label className="field field-check">
-            <input
-              type="checkbox"
+          <div className="form-autostart">
+            <Switch
               checked={form.autoStart}
-              onChange={(e) => set({ autoStart: e.target.checked })}
+              onChange={(v) => set({ autoStart: v })}
             />
-            随启动器自动启动此实例
-            <span className="muted">（打开 DSH Launcher 时自动拉起）</span>
-          </label>
+            <span>
+              随启动器自动启动此实例
+              <span className="muted">（打开 DSH Launcher 时自动拉起）</span>
+            </span>
+          </div>
 
           {error && <div className="form-error">{error}</div>}
         </div>
