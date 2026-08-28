@@ -11,12 +11,12 @@
 |---|---|
 | **本机实际运行的 DSH 版本** | **`0.1.0-rc.6`** |
 | **npm 最新版（latest）** | **`0.1.1-rc.2`** |
-| 启动方式 | `npx @deepseek-ai/dsh web`（从 `D:\Users\Tony\Desktop` 启动） |
-| npm 镜像源 | `https://registry.npmmirror.com/`（`C:\Users\Tony\.npmrc`） |
-| 全局 npm 前缀 | `C:\Users\Tony\AppData\Roaming\npm` |
+| 启动方式 | `npx @deepseek-ai/dsh web`（从 `D:\Users\<用户名>\Desktop` 启动） |
+| npm 镜像源 | `https://registry.npmmirror.com/`（`C:\Users\<用户名>\.npmrc`） |
+| 全局 npm 前缀 | `C:\Users\<用户名>\AppData\Roaming\npm` |
 
 **为什么本机是旧版**：npx 会优先命中启动目录里的本地 `node_modules` 副本
-（`D:\Users\Tony\Desktop\node_modules\@deepseek-ai\dsh@0.1.0-rc.6`），
+（`D:\Users\<用户名>\Desktop\node_modules\@deepseek-ai\dsh@0.1.0-rc.6`），
 所以无论 npm 上发了几版新版，`npx @deepseek-ai/dsh web` 都一直跑旧版。
 
 **结论**：你的记忆没错——最新版确实是 **0.1.1-rc.2**；本机之所以是 rc.6，是因为 npx 解析到了本地副本而非 registry。
@@ -29,19 +29,19 @@
 
 ```powershell
 # ① 项目根 package.json 声明的依赖范围
-Get-Content 'D:\Users\Tony\Desktop\package.json'
+Get-Content 'D:\Users\<用户名>\Desktop\package.json'
 #    → "dependencies": { "@deepseek-ai/dsh": "^0.1.0-rc.6" }
 
 # ② 实际安装的包版本
-Get-Content 'D:\Users\Tony\Desktop\node_modules\@deepseek-ai\dsh\package.json'
+Get-Content 'D:\Users\<用户名>\Desktop\node_modules\@deepseek-ai\dsh\package.json'
 #    → "version": "0.1.0-rc.6"
 
 # ③ 运行中 CLI 自报版本（最可靠）
-node 'D:\Users\Tony\Desktop\node_modules\@deepseek-ai\dsh\lib\bin.js' --version
+node 'D:\Users\<用户名>\Desktop\node_modules\@deepseek-ai\dsh\lib\bin.js' --version
 #    → 0.1.0-rc.6
 
 # ④ 全部 @deepseek-ai/* 子包版本（180+ 个全为 0.1.0-rc.6）
-Get-ChildItem 'D:\Users\Tony\Desktop\node_modules\@deepseek-ai' -Directory |
+Get-ChildItem 'D:\Users\<用户名>\Desktop\node_modules\@deepseek-ai' -Directory |
   ForEach-Object {
     $j = Get-Content (Join-Path $_.FullName 'package.json') -Raw | ConvertFrom-Json
     [PSCustomObject]@{ pkg = $_.Name; ver = $j.version }
@@ -53,18 +53,18 @@ Get-ChildItem 'D:\Users\Tony\Desktop\node_modules\@deepseek-ai' -Directory |
 当前 shell 里存在这些环境变量，证明 DSH 是从 Desktop 用 npx 拉起的：
 
 ```
-npm_config_local_prefix = D:\Users\Tony\Desktop
-npm_package_json        = D:\Users\Tony\Desktop\package.json
+npm_config_local_prefix = D:\Users\<用户名>\Desktop
+npm_package_json        = D:\Users\<用户名>\Desktop\package.json
 npm_config_registry     = https://registry.npmmirror.com/
-npm_config_prefix       = C:\Users\Tony\AppData\Roaming\npm
-npm_config_cache        = C:\Users\Tony\AppData\Local\npm-cache
+npm_config_prefix       = C:\Users\<用户名>\AppData\Roaming\npm
+npm_config_cache        = C:\Users\<用户名>\AppData\Local\npm-cache
 ```
 
 ### 1.3 遇到的坑（记录，避免下次重复踩）
 
 | 现象 | 原因 |
 |---|---|
-| `npm` / `npx` 命令直接报错 `StandardOutputEncoding is only supported when standard output is redirected` | 全局 `C:\Users\Tony\AppData\Roaming\npm\npm.ps1` 包装脚本通过管道捕获子进程输出，被沙箱限制拦截（**仅沙箱内如此，正常终端不受影响**） |
+| `npm` / `npx` 命令直接报错 `StandardOutputEncoding is only supported when standard output is redirected` | 全局 `C:\Users\<用户名>\AppData\Roaming\npm\npm.ps1` 包装脚本通过管道捕获子进程输出，被沙箱限制拦截（**仅沙箱内如此，正常终端不受影响**） |
 | `Invoke-RestMethod https://registry.npmjs.org/...` 报 `Authentication failed` | 本机网络经代理/镜像，直连官方 registry 被拦 |
 | `Invoke-RestMethod https://registry.npmmirror.com/...` 同样报 `Authentication failed` | 同上，沙箱内网络请求也被代理拦截 |
 
@@ -73,7 +73,7 @@ npm_config_cache        = C:\Users\Tony\AppData\Local\npm-cache
 
 ### 1.4 全局安装目录现状
 
-- 全局前缀：`C:\Users\Tony\AppData\Roaming\npm`
+- 全局前缀：`C:\Users\<用户名>\AppData\Roaming\npm`
 - 该目录已全局装过：npm、pnpm、mcporter、opencode-ai、reasonix、uipro-cli、
   @anthropic-ai、@openai、@qwen-code、@musistudio 等
 - **尚未全局安装 dsh**（没有 `dsh.cmd`，`node_modules` 里也没有 `@deepseek-ai`）
@@ -144,7 +144,7 @@ Tavily / 任意搜索引擎 查询："@deepseek-ai/dsh" npm version latest
 
 ```bash
 # ① 正在跑的进程（启动目录内的本地副本）
-node D:\Users\Tony\Desktop\node_modules\@deepseek-ai\dsh\lib\bin.js --version
+node D:\Users\<用户名>\Desktop\node_modules\@deepseek-ai\dsh\lib\bin.js --version
 
 # ② npx 会用到的那份（加 -v）
 npx @deepseek-ai/dsh --version
@@ -173,7 +173,7 @@ npx -y @deepseek-ai/dsh@0.1.1-rc.2 web
 ### 方案 B：把本地安装也升上去（一劳永逸）
 
 ```bash
-cd D:\Users\Tony\Desktop
+cd D:\Users\<用户名>\Desktop
 npm install @deepseek-ai/dsh@latest
 npx @deepseek-ai/dsh web
 ```
@@ -191,8 +191,8 @@ dsh web
 
 | 内容 | 路径 |
 |---|---|
-| 包本体 | `C:\Users\Tony\AppData\Roaming\npm\node_modules\@deepseek-ai\dsh\` |
-| 命令入口 | `C:\Users\Tony\AppData\Roaming\npm\dsh`、`dsh.cmd`、`dsh.ps1` |
+| 包本体 | `C:\Users\<用户名>\AppData\Roaming\npm\node_modules\@deepseek-ai\dsh\` |
+| 命令入口 | `C:\Users\<用户名>\AppData\Roaming\npm\dsh`、`dsh.cmd`、`dsh.ps1` |
 
 安装时 npm 会把该目录加进 PATH，之后**任意目录**敲 `dsh web` 即可。
 
@@ -222,7 +222,7 @@ pnpm dlx @deepseek-ai/dsh@latest web
 
 ```bash
 # 我本机是多少
-node D:\Users\Tony\Desktop\node_modules\@deepseek-ai\dsh\lib\bin.js --version
+node D:\Users\<用户名>\Desktop\node_modules\@deepseek-ai\dsh\lib\bin.js --version
 # npm 最新是多少
 npm view @deepseek-ai/dsh version
 # 升级并启动（最新）

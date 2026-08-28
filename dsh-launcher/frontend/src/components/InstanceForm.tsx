@@ -224,7 +224,7 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
                 ref={dirInputRef}
                 value={form.directory}
                 onChange={(e) => set({ directory: e.target.value })}
-                placeholder="选择/输入 DSH 启动目录，如 D:\Users\Tony\Desktop"
+                placeholder="选择/输入 DSH 启动目录，如 D:\Users\<用户名>\Desktop"
               />
               <button type="button" className="btn btn-ghost" onClick={pickDir}>浏览…</button>
             </div>

@@ -13,7 +13,9 @@ func TestInstallToDirectoryLive(t *testing.T) {
 	if testing.Short() {
 		t.Skip("live test")
 	}
-	poc := `E:\gopackage2\2026-8\dsh-start\dsh-launcher\build\bin\dsh-vsn\poc-0.1.1-rc2`
+	// Tests run with CWD = the package dir, so a repo-relative path works and
+	// keeps machine-specific absolute paths out of the repo.
+	poc := filepath.Join("build", "bin", "dsh-vsn", "poc-0.1.1-rc2")
 	if _, err := os.Stat(filepath.Join(poc, "node_modules")); err != nil {
 		t.Skip("poc dir not installed, skipping live install test")
 	}
