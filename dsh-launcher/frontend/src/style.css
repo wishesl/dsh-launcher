@@ -86,6 +86,7 @@ html, body, #root {
 }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn-sm { padding: 6px 11px; font-size: 12.5px; border-radius: 7px; }
+.btn-icon { width: 30px; height: 30px; padding: 0; display: inline-grid; place-items: center; line-height: 0; }
 .btn-primary { background: linear-gradient(180deg, #2b3142, var(--accent-strong)); color: #fff; box-shadow: 0 2px 8px rgba(20, 27, 46, .22); }
 .btn-primary:hover:not(:disabled) { filter: brightness(1.08); box-shadow: 0 3px 12px rgba(20, 27, 46, .28); }
 .btn-danger { background: var(--red); color: #fff; }

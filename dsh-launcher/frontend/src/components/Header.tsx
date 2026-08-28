@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { WindowIsMaximised, WindowMinimise, WindowToggleMaximise } from '../../wailsjs/runtime/runtime';
 import type { Instance, RegistryInfo } from '../types';
 import dshLogo from '../assets/dsh.svg';
+import { RotateCw } from 'lucide-react';
 
 interface Props {
   registry: RegistryInfo | null;
@@ -94,14 +95,6 @@ export default function Header({
             <span className="chip-label">DSH 未运行</span>
           )}
         </div>
-        <button
-          className="btn btn-ghost btn-sm"
-          onClick={onRestartDsh}
-          disabled={!dshLive}
-          title={dshLive ? `重启「${dshLive.name}」的 DSH web` : '没有运行中的实例可重启'}
-        >
-          重启
-        </button>
 
         <div className="latest-chip" title={`npm 最新版本（来源: ${registry?.source ?? '-'}）`}>
           <span className={`dot ${registry ? 'dot-live' : ''}`} />
@@ -122,6 +115,15 @@ export default function Header({
             <span className="chip-label">无法获取版本</span>
           )}
         </div>
+        <button
+          className="btn btn-ghost btn-icon"
+          onClick={onRestartDsh}
+          disabled={!dshLive}
+          title={dshLive ? `重启「${dshLive.name}」的 DSH web` : '没有运行中的实例可重启'}
+          aria-label="重启"
+        >
+          <RotateCw size={16} strokeWidth={1.75} aria-hidden />
+        </button>
         <button
           className={`btn btn-sm log-toggle-btn ${logsOpen ? 'btn-accent' : 'btn-ghost'}`}
           onClick={onToggleLogs}
