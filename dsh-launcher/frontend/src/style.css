@@ -52,7 +52,8 @@
 html, body, #root {
   margin: 0;
   height: 100%;
-  background: var(--bg);
+  /* 圆角窗口：根节点透明，四角透出桌面；背景色与圆角由 .app 呈现 */
+  background: transparent;
   color: var(--text);
   font-family: 'Segoe UI', system-ui, -apple-system, Roboto, 'Helvetica Neue', Arial, sans-serif;
   font-size: 14px;
@@ -63,6 +64,8 @@ html, body, #root {
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
+  background: var(--bg);
+  border-radius: var(--radius-sm); /* 8px，配合 Frameless + 透明窗口实现圆角 */
 }
 
 /* ---------- Buttons ---------- */

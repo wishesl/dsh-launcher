@@ -6,6 +6,7 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/windows"
 )
 
 //go:embed all:frontend/dist
@@ -28,7 +29,14 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 247, G: 248, B: 252, A: 1},
+		// 透明背景 + WebView 透明：让 .app 的 border-radius 圆角真正透出桌面。
+		// BackdropType 用 None 保持纯色，不启用 Mica/Acrylic 磨砂效果。
+		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 0},
+		Windows: &windows.Options{
+			WebviewIsTransparent: true,
+			WindowIsTranslucent:  true,
+			BackdropType:         windows.None,
+		},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
 		OnBeforeClose:    app.onBeforeClose,
