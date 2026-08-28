@@ -150,3 +150,41 @@ export interface MarketOpState {
   kind: string;   // install | uninstall
   target: string; // plugin / package name
 }
+
+// --- plugin favorites (local, offline, independent of the catalog) ---
+// Field shapes mirror the Wails-generated models (Go pointers → optional):
+// npm/stars/downloads are `?` + nullable.
+export interface FavoritePlugin {
+  id: string;             // identity key: npm name (preferred) or owner/repo
+  name: string;
+  owner: string;
+  url: string;            // github url ("" when favorited from installed w/o catalog)
+  npm?: string | null;
+  install: string;        // pnpm install target (server-validated)
+  source: string;         // "catalog" | "installed"
+  category: string;
+  description: Record<string, string>; // zh / en snapshot
+  stars?: number | null;
+  downloads?: number | null;
+  addedAt: string;        // local favorite time (RFC3339)
+}
+
+// Payload for AddFavorite — display metadata only; id/install are derived
+// server-side.
+export interface FavoriteDraft {
+  name: string;
+  owner: string;
+  url: string;
+  npm?: string | null;
+  category: string;
+  description: Record<string, string>;
+  stars?: number | null;
+  downloads?: number | null;
+  source: string;         // "catalog" | "installed"
+  spec?: string;          // installed-source pnpm spec from package.json
+}
+
+export interface ShareImportResult {
+  imported: FavoritePlugin[];
+  skipped: string[];      // ids already present (deduped)
+}

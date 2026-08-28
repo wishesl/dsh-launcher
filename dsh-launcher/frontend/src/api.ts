@@ -1,23 +1,30 @@
 import {
+  AddFavorite,
   ApproveBuilds,
   CancelMarketOp,
   CheckEnvironment,
   DetectLocalVersion,
   DirectoryExists,
   FetchMarketCatalog,
+  GenerateShareCode,
   GetAppDataPath,
   GetInstances,
   GetMarketSettings,
   GetProxySettings,
   HideToTray,
+  ImportShareCode,
   InstallPnpm,
   InstallPlugin,
+  InstallFavorite,
   InstallToDirectory,
   LaunchInstance,
+  ListFavorites,
   ListInstalledPlugins,
   MarketOpRunning,
+  ParseShareCode,
   QueryRegistry,
   QuitApp,
+  RemoveFavorite,
   RemoveInstance,
   RequestClose,
   RunAutoStartInstances,
@@ -34,6 +41,8 @@ import { EventsOff, EventsOn } from '../wailsjs/runtime/runtime';
 import type {
   EnvLogEvent,
   EnvReport,
+  FavoriteDraft,
+  FavoritePlugin,
   Instance,
   InstalledPlugin,
   LogEvent,
@@ -45,6 +54,7 @@ import type {
   NoticeEvent,
   ProxySettings,
   RegistryInfo,
+  ShareImportResult,
   StatusEvent,
 } from './types';
 
@@ -92,6 +102,16 @@ export const api = {
   approveBuilds: (names: string[]): Promise<void> => ApproveBuilds(names),
   getMarketSettings: (): Promise<MarketSettings> => GetMarketSettings(),
   setMarketRegistryURL: (url: string): Promise<void> => SetMarketRegistryURL(url),
+
+  // plugin favorites (local, offline)
+  listFavorites: (): Promise<FavoritePlugin[]> => ListFavorites(),
+  addFavorite: (d: FavoriteDraft): Promise<FavoritePlugin[]> => AddFavorite(d as any),
+  removeFavorite: (id: string): Promise<FavoritePlugin[]> => RemoveFavorite(id),
+  generateShareCode: (): Promise<string> => GenerateShareCode(),
+  parseShareCode: (code: string): Promise<ShareImportResult> => ParseShareCode(code),
+  importShareCode: (code: string): Promise<ShareImportResult> => ImportShareCode(code),
+  installFavorite: (instanceId: string, fav: FavoritePlugin): Promise<MarketOpResult> =>
+    InstallFavorite(instanceId, fav as any),
 
   onMarketLog(cb: (e: MarketLogEvent) => void): void {
     EventsOn('dsh:market-log', cb);

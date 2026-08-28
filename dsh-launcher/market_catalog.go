@@ -143,6 +143,18 @@ func persistDiskCache() {
 	_ = os.WriteFile(marketCacheFile(), data, 0o644)
 }
 
+// cachedCatalogData returns the catalog already held in memory (nil when it
+// was never fetched this session). Read-only and non-blocking — for optional
+// cross-checks that must never trigger a network fetch.
+func cachedCatalogData() *MarketCatalog {
+	marketCacheMu.Lock()
+	defer marketCacheMu.Unlock()
+	if marketCache != nil && marketCache.Data != nil {
+		return marketCache.Data
+	}
+	return nil
+}
+
 // marketRegistryURL returns the configured mirror, falling back to the
 // official curated catalog.
 func (a *App) marketRegistryURL() string {

@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, errMsg } from '../api';
-import type { Instance, InstalledPlugin, MarketCatalog, MarketOpState, MarketPlugin } from '../types';
+import type {
+  FavoriteDraft,
+  FavoritePlugin,
+  Instance,
+  InstalledPlugin,
+  MarketCatalog,
+  MarketOpState,
+  MarketPlugin,
+  ShareImportResult,
+} from '../types';
 import Switch from './Switch';
 import './market.css';
 
@@ -20,6 +29,7 @@ const PAGE_SIZE = 60;
 const LANG = navigator.language?.toLowerCase().startsWith('zh') ? 'zh' : 'en';
 
 type SortKey = 'downloads-desc' | 'stars-desc' | 'added-desc' | 'name-asc';
+type MarketTab = 'discover' | 'installed' | 'favorites';
 
 // Port of dsh-market's visiblePlugins(): category → query → sort, matching
 // name / owner / localized description, case-insensitive.
@@ -64,6 +74,14 @@ function fmtCount(n: number | null | undefined): string {
   return String(n);
 }
 
+function fmtDate(s: string): string {
+  if (!s) return '';
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 // githubRepoOf extracts `owner/repo` from a catalog entry URL.
 function githubRepoOf(url: string): string | null {
   const m = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:[/?#].*)?$/.exec(url);
@@ -97,7 +115,7 @@ export default function MarketView({
   onShowMarketLogs,
   onMarketRunning,
 }: Props) {
-  const [tab, setTab] = useState<'discover' | 'installed'>('discover');
+  const [tab, setTab] = useState<MarketTab>('discover');
   const [catalog, setCatalog] = useState<MarketCatalog | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState('');
@@ -106,8 +124,14 @@ export default function MarketView({
   const [sort, setSort] = useState<SortKey>('downloads-desc');
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [installed, setInstalled] = useState<InstalledPlugin[]>([]);
+  const [favorites, setFavorites] = useState<FavoritePlugin[]>([]);
   const [targetId, setTargetId] = useState('');
-  const [pendingApprove, setPendingApprove] = useState<{ entry: MarketPlugin; names: string[] } | null>(null);
+  const [pendingApprove, setPendingApprove] = useState<{ names: string[]; retry: () => void } | null>(null);
+  // share-code panel state
+  const [sharePanel, setSharePanel] = useState<'gen' | 'import' | null>(null);
+  const [shareCode, setShareCode] = useState('');
+  const [importText, setImportText] = useState('');
+  const [importPreview, setImportPreview] = useState<ShareImportResult | null>(null);
   const wasRunningRef = useRef(false);
   // Local busy flag: disables install/uninstall the instant it's clicked, so
   // there is immediate feedback even before the backend's "running" status
@@ -134,11 +158,20 @@ export default function MarketView({
     }
   }, [showToast]);
 
+  const loadFavorites = useCallback(async () => {
+    try {
+      setFavorites(await api.listFavorites());
+    } catch (e) {
+      showToast('读取收藏失败: ' + errMsg(e), 'error');
+    }
+  }, [showToast]);
+
   useEffect(() => {
     loadCatalog(false);
     loadInstalled();
+    loadFavorites();
     api.marketOpRunning().then((running) => onMarketRunning(running)).catch(() => undefined);
-  }, [loadCatalog, loadInstalled, onMarketRunning]);
+  }, [loadCatalog, loadInstalled, loadFavorites, onMarketRunning]);
 
   // When an operation settles (running → done/failed/cancelled), refresh the
   // installed list. marketOp is driven by dsh:market-status (subscribed in App).
@@ -167,6 +200,8 @@ export default function MarketView({
   const hasMore = filtered.length > visibleCount;
   const targetInstance = instances.find((i) => i.id === targetId) ?? null;
   const installedNames = useMemo(() => new Set(installed.map((i) => i.name)), [installed]);
+  const installedNamesLower = useMemo(() => new Set(installed.map((i) => i.name.toLowerCase())), [installed]);
+  const favIDSet = useMemo(() => new Set(favorites.map((f) => f.id.toLowerCase())), [favorites]);
 
   // Stop the target instance (returns whether it was running) so plugin files
   // are never replaced under a live process; the caller relaunches afterwards.
@@ -212,7 +247,48 @@ export default function MarketView({
       } else if (r.cancelled) {
         showToast('已取消安装', 'error');
       } else if (r.blockedBuilds && r.blockedBuilds.length > 0) {
-        setPendingApprove({ entry, names: r.blockedBuilds });
+        setPendingApprove({ names: r.blockedBuilds, retry: () => install(entry) });
+        showToast(`构建脚本被拦截（${r.blockedBuilds.join(', ')}），请放行后重试`, 'error');
+      } else {
+        showToast(r.error || '安装失败，详见输出', 'error');
+      }
+    } catch (e) {
+      showToast('安装失败: ' + errMsg(e), 'error');
+    } finally {
+      setBusy(false);
+      loadInstalled();
+    }
+  };
+
+  // Install straight from the favorites tab — reuses the same marketOp flow
+  // (right-drawer auto-pop, single-flight, toast) but via InstallFavorite so
+  // it works offline / when the catalog entry vanished.
+  const installFavorite = async (f: FavoritePlugin) => {
+    if (!targetInstance) {
+      showToast('请先在主界面添加实例，再选择安装目标', 'error');
+      return;
+    }
+    const wasRunning = await stopIfRunning();
+    if (targetInstance.status !== 'stopped' && targetInstance.status !== 'crashed' && !wasRunning) return;
+    onClearMarketLogs();
+    setPendingApprove(null);
+    onShowMarketLogs();
+    setBusy(true);
+    try {
+      const r = await api.installFavorite(targetId, f);
+      if (r.already) {
+        showToast(r.error || '该插件已安装');
+      } else if (r.ok) {
+        const names = r.installed.length ? r.installed.join(', ') : f.name;
+        showToast(`已安装 ${names}，重启实例后生效`);
+        if (wasRunning) {
+          showToast('正在重新启动实例…');
+          await api.launchInstance(targetId);
+        }
+      } else if (r.cancelled) {
+        showToast('已取消安装', 'error');
+      } else if (r.blockedBuilds && r.blockedBuilds.length > 0) {
+        setPendingApprove({ names: r.blockedBuilds, retry: () => installFavorite(f) });
         showToast(`构建脚本被拦截（${r.blockedBuilds.join(', ')}），请放行后重试`, 'error');
       } else {
         showToast(r.error || '安装失败，详见输出', 'error');
@@ -227,10 +303,12 @@ export default function MarketView({
 
   const approveAndRetry = async () => {
     if (!pendingApprove) return;
+    const { names, retry } = pendingApprove;
     try {
-      await api.approveBuilds(pendingApprove.names);
-      showToast(`已放行: ${pendingApprove.names.join(', ')}，正在重试安装`);
-      await install(pendingApprove.entry);
+      await api.approveBuilds(names);
+      showToast(`已放行: ${names.join(', ')}，正在重试安装`);
+      setPendingApprove(null);
+      await retry();
     } catch (e) {
       showToast('放行构建脚本失败: ' + errMsg(e), 'error');
     }
@@ -278,6 +356,156 @@ export default function MarketView({
     }
   };
 
+  // --- favorites ---
+
+  // Identity key used for removal must match favoriteID() in Go: npm name
+  // (preferred), else lowercased owner/repo, else lowercased name.
+  const favIDForEntry = (p: MarketPlugin): string => {
+    const npm = p.npm;
+    const repo = githubRepoOf(p.url);
+    return (npm || repo || p.name).toLowerCase();
+  };
+
+  const favDraftFromEntry = (p: MarketPlugin): FavoriteDraft => ({
+    name: p.name,
+    owner: p.owner,
+    url: p.url,
+    npm: p.npm ?? null,
+    category: p.category,
+    description: p.description,
+    stars: p.stars ?? null,
+    downloads: p.downloads ?? null,
+    source: 'catalog',
+  });
+
+  const favIDForInstalled = (p: InstalledPlugin): string => {
+    const cat = findCatalogEntry(p, catalog);
+    if (cat) return favIDForEntry(cat);
+    return p.name.toLowerCase();
+  };
+
+  const favDraftFromInstalled = (p: InstalledPlugin): FavoriteDraft => {
+    const cat = findCatalogEntry(p, catalog);
+    if (cat) return favDraftFromEntry(cat);
+    return {
+      name: p.name,
+      owner: '',
+      url: p.homepage || '',
+      npm: p.kind === 'npm' ? p.name : null,
+      category: '',
+      description: p.description ? { en: p.description } : {},
+      stars: null,
+      downloads: null,
+      source: 'installed',
+      spec: p.spec,
+    };
+  };
+
+  const isFavorite = (candidates: Array<string | null | undefined>): boolean =>
+    candidates.some((c) => c && favIDSet.has(c.toLowerCase()));
+
+  const isFavoriteEntry = (p: MarketPlugin): boolean => isFavorite([p.npm, githubRepoOf(p.url), p.name]);
+
+  const isFavoriteInstalled = (p: InstalledPlugin): boolean => {
+    const cat = findCatalogEntry(p, catalog);
+    if (cat) return isFavoriteEntry(cat);
+    return isFavorite([p.name]);
+  };
+
+  const toggleFavorite = async (draft: FavoriteDraft, id: string, displayName: string) => {
+    if (favIDSet.has(id.toLowerCase())) {
+      try {
+        setFavorites(await api.removeFavorite(id));
+        showToast(`已取消收藏 ${displayName}`);
+      } catch (e) {
+        showToast('取消失败: ' + errMsg(e), 'error');
+      }
+    } else {
+      try {
+        setFavorites(await api.addFavorite(draft));
+        showToast(`已收藏 ${displayName}`);
+      } catch (e) {
+        showToast('收藏失败: ' + errMsg(e), 'error');
+      }
+    }
+  };
+
+  const removeFavoriteClick = async (f: FavoritePlugin) => {
+    try {
+      setFavorites(await api.removeFavorite(f.id));
+      showToast(`已取消收藏 ${f.name}`);
+    } catch (e) {
+      showToast('取消失败: ' + errMsg(e), 'error');
+    }
+  };
+
+  const favoriteInstalled = (f: FavoritePlugin): boolean => {
+    const name = (f.npm || f.name).toLowerCase();
+    if (installedNamesLower.has(name)) return true;
+    const repo = githubRepoOf(f.url);
+    if (repo) {
+      return installed.some((i) => i.spec.toLowerCase().includes(repo));
+    }
+    return false;
+  };
+
+  const installedForFavorite = (f: FavoritePlugin): InstalledPlugin | undefined =>
+    installed.find((i) => i.name.toLowerCase() === (f.npm || f.name).toLowerCase());
+
+  // --- share code ---
+  const genShare = async () => {
+    try {
+      setShareCode(await api.generateShareCode());
+    } catch (e) {
+      showToast('生成分享码失败: ' + errMsg(e), 'error');
+    }
+  };
+
+  const copyShare = async () => {
+    if (!shareCode) {
+      showToast('请先生成分享码', 'error');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(shareCode);
+      showToast('分享码已复制');
+    } catch (e) {
+      showToast('复制失败，请手动选择复制: ' + errMsg(e), 'error');
+    }
+  };
+
+  const parseShare = async () => {
+    const code = importText.trim();
+    if (!code) {
+      showToast('请先粘贴分享码', 'error');
+      return;
+    }
+    try {
+      const res = await api.parseShareCode(code);
+      setImportPreview(res);
+      if (res.imported.length === 0) {
+        showToast(res.skipped.length > 0 ? '分享码中的插件都已收藏过' : '分享码中没有可添加的插件', 'error');
+      }
+    } catch (e) {
+      showToast('解析失败: ' + errMsg(e), 'error');
+    }
+  };
+
+  const confirmImport = async () => {
+    if (!importPreview) return;
+    try {
+      const res = await api.importShareCode(importText.trim());
+      setFavorites(await api.listFavorites());
+      showToast(`已添加 ${res.imported.length} 个收藏`);
+      setSharePanel(null);
+      setImportText('');
+      setImportPreview(null);
+      setShareCode('');
+    } catch (e) {
+      showToast('导入失败: ' + errMsg(e), 'error');
+    }
+  };
+
   const categories = catalog?.categories ?? {};
   const categoryEntries = Object.entries(categories);
 
@@ -309,6 +537,9 @@ export default function MarketView({
         </button>
         <button className={`market-tab ${tab === 'installed' ? 'active' : ''}`} onClick={() => setTab('installed')}>
           已安装{installed.length > 0 ? ` (${installed.length})` : ''}
+        </button>
+        <button className={`market-tab ${tab === 'favorites' ? 'active' : ''}`} onClick={() => setTab('favorites')}>
+          收藏{favorites.length > 0 ? ` (${favorites.length})` : ''}
         </button>
       </div>
 
@@ -379,6 +610,7 @@ export default function MarketView({
             <div className="market-grid">
               {visible.map((p) => {
                   const isInstalled = installedNames.has(p.name) || installedNames.has(p.npm || '');
+                  const isFav = isFavoriteEntry(p);
                   return (
                     <div key={p.url} className="plugin-card">
                       <div className="plugin-card-head">
@@ -400,6 +632,13 @@ export default function MarketView({
                         </div>
                       )}
                       <div className="plugin-actions">
+                        <button
+                          className={`star-btn ${isFav ? 'on' : ''}`}
+                          title={isFav ? '取消收藏' : '收藏'}
+                          onClick={() => toggleFavorite(favDraftFromEntry(p), favIDForEntry(p), p.name)}
+                        >
+                          {isFav ? '★' : '☆'}
+                        </button>
                         {isInstalled ? (
                           <span className="btn btn-ghost btn-sm" style={{ opacity: 0.55, cursor: 'default' }}>
                             已安装
@@ -457,6 +696,7 @@ export default function MarketView({
               (cat && catalog?.categories?.[cat.category]?.en) ||
               cat?.category ||
               '';
+            const isFav = isFavoriteInstalled(p);
             return (
               <div key={p.name} className="installed-row">
                 <div className="installed-info">
@@ -476,6 +716,13 @@ export default function MarketView({
                   </div>
                 </div>
                 <div className="installed-actions">
+                  <button
+                    className={`star-btn ${isFav ? 'on' : ''}`}
+                    title={isFav ? '取消收藏' : '收藏'}
+                    onClick={() => toggleFavorite(favDraftFromInstalled(p), favIDForInstalled(p), p.name)}
+                  >
+                    {isFav ? '★' : '☆'}
+                  </button>
                   <label className="installed-toggle" title="写入 cordis.patch.yml 的 disabled 开关">
                     <Switch
                       checked={p.state !== 'disabled'}
@@ -493,6 +740,142 @@ export default function MarketView({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {tab === 'favorites' && (
+        <div className="market-favorites">
+          <div className="market-toolbar">
+            <button className="btn btn-ghost" onClick={loadFavorites}>刷新</button>
+            <button
+              className="btn btn-ghost"
+              onClick={() => {
+                setSharePanel(sharePanel === 'gen' ? null : 'gen');
+                setImportPreview(null);
+              }}
+            >
+              生成分享码
+            </button>
+            <button
+              className="btn btn-ghost"
+              onClick={() => {
+                setSharePanel(sharePanel === 'import' ? null : 'import');
+                setImportPreview(null);
+              }}
+            >
+              解析分享码
+            </button>
+            <span className="field-hint">收藏保存在本机（favorites.json），断网也能查看和安装</span>
+          </div>
+
+          {sharePanel === 'gen' && (
+            <div className="log-hint">
+              <div className="row" style={{ marginBottom: 6 }}>
+                <strong>收藏分享码</strong>
+                <span className="field-hint">分享给其他设备，或在「解析分享码」中粘贴导入</span>
+              </div>
+              <textarea
+                className="share-code"
+                readOnly
+                rows={3}
+                value={shareCode}
+                placeholder="点击「生成」获取分享码…"
+                onFocus={(e) => e.currentTarget.select()}
+              />
+              <div className="row" style={{ marginTop: 6 }}>
+                <button className="btn btn-accent btn-sm" onClick={genShare}>生成</button>
+                <button className="btn btn-ghost btn-sm" onClick={copyShare}>复制</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setSharePanel(null)}>收起</button>
+              </div>
+            </div>
+          )}
+
+          {sharePanel === 'import' && (
+            <div className="log-hint">
+              <div className="row" style={{ marginBottom: 6 }}>
+                <strong>解析分享码</strong>
+                <span className="field-hint">粘贴 DSH-FAV:v1:… 开头的分享码</span>
+              </div>
+              <textarea
+                className="share-code"
+                rows={3}
+                value={importText}
+                placeholder="粘贴分享码…"
+                onChange={(e) => {
+                  setImportText(e.target.value);
+                  setImportPreview(null);
+                }}
+              />
+              {!importPreview ? (
+                <div className="row" style={{ marginTop: 6 }}>
+                  <button className="btn btn-accent btn-sm" onClick={parseShare}>解析</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setSharePanel(null)}>收起</button>
+                </div>
+              ) : (
+                <div className="row" style={{ marginTop: 6 }}>
+                  <span className="field-hint">
+                    可添加 {importPreview.imported.length} 个
+                    {importPreview.skipped.length > 0 ? `，已存在跳过 ${importPreview.skipped.length} 个` : ''}
+                  </span>
+                  <button className="btn btn-accent btn-sm" onClick={confirmImport}>确认添加</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setImportPreview(null)}>重新解析</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {favorites.length === 0 && (
+            <div className="empty"><p>还没有收藏的插件，可在「发现」或「已安装」页点击 ☆ 收藏</p></div>
+          )}
+
+          {favorites.length > 0 && (
+            <div className="market-grid">
+              {favorites.map((f) => {
+                const isInstalled = favoriteInstalled(f);
+                return (
+                  <div key={f.id} className="plugin-card">
+                    <div className="plugin-card-head">
+                      <span className="plugin-name" title={f.name}>{f.name}</span>
+                      <span className="pill">{f.category || f.source}</span>
+                    </div>
+                    <div className="plugin-owner">{f.owner || '—'}</div>
+                    <div className="plugin-desc">
+                      {(f.description && (f.description[LANG] || f.description.en)) || '暂无描述'}
+                    </div>
+                    <div className="plugin-meta">
+                      {f.stars != null && <span title="Star">★ {fmtCount(f.stars)}</span>}
+                      {f.downloads != null && <span title="npm 30天下载量">⬇ {fmtCount(f.downloads)}</span>}
+                      <span className="pill pill-soft">{f.source === 'catalog' ? '收藏自目录' : '收藏自已装'}</span>
+                      {f.addedAt && <span className="field-hint" title={f.addedAt}>{fmtDate(f.addedAt)}</span>}
+                    </div>
+                    <div className="plugin-actions">
+                      {isInstalled ? (
+                        <button
+                          className="btn btn-ghost btn-sm danger-text"
+                          disabled={marketOp.running || busy}
+                          onClick={() => {
+                            const ip = installedForFavorite(f);
+                            if (ip) uninstall(ip);
+                          }}
+                        >
+                          卸载
+                        </button>
+                      ) : (
+                        <button
+                          className="btn btn-accent btn-sm"
+                          disabled={marketOp.running || busy}
+                          onClick={() => installFavorite(f)}
+                        >
+                          {busy && !marketOp.running ? '准备中…' : '安装'}
+                        </button>
+                      )}
+                      <button className="btn btn-ghost btn-sm" onClick={() => removeFavoriteClick(f)}>取消收藏</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

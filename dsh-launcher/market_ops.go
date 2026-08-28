@@ -331,6 +331,64 @@ func (a *App) requireStoppedInstance(id string) error {
 	return nil
 }
 
+// preflightMarketOp is the shared guard for install/uninstall: the instance
+// must exist, be stopped (plugin files must not be replaced under a live
+// process), and its pinned dsh version must be usable.
+func (a *App) preflightMarketOp(instanceID string) (*Instance, error) {
+	if err := a.requireStoppedInstance(instanceID); err != nil {
+		return nil, err
+	}
+	a.mu.Lock()
+	inst := a.store.find(instanceID)
+	a.mu.Unlock()
+	if inst == nil {
+		return nil, fmt.Errorf("实例不存在: %s", instanceID)
+	}
+	if err := validateVersion(inst.PkgMgr, inst.Version); err != nil {
+		return nil, err
+	}
+	return inst, nil
+}
+
+// runInstall executes the shared install flow for an already-validated target:
+// fast-start status → streamed command output → blocked-builds / failure /
+// cancel / done handling. Callers own the marketBusy single-flight flag and
+// the target derivation/validation.
+func (a *App) runInstall(inst *Instance, target string) (*MarketOpResult, error) {
+	before, _ := readInstalledPlugins()
+	a.emitMarketStatus(MarketOpStatus{State: "running", Kind: "install", Target: target})
+	cmdStr := pluginCommand(*inst, "add", target)
+	a.emit("dsh:market-log", map[string]string{"line": "执行: " + cmdStr})
+	if pl := a.proxyLogLine(); pl != "" {
+		a.emit("dsh:market-log", map[string]string{"line": pl})
+	}
+
+	output, cancelled, runErr := a.runMarketCommand(inst.Directory, cmdStr)
+	blocked := parseIgnoredBuilds(output)
+	if runErr != nil && !cancelled {
+		if len(blocked) > 0 {
+			a.emitMarketStatus(MarketOpStatus{
+				State: "failed", Kind: "install", Target: target,
+				Error:   fmt.Sprintf("构建脚本被拦截: %s", strings.Join(blocked, ", ")),
+				Blocked: blocked,
+			})
+			return &MarketOpResult{OK: false, BlockedBuilds: blocked, Output: output,
+				Error: fmt.Sprintf("构建脚本被 pnpm 默认拦截（%s），请放行后重试", strings.Join(blocked, ", "))}, nil
+		}
+		msg := fmt.Sprintf("安装失败: %v\n%s", runErr, tailLines(output, 8))
+		a.emitMarketStatus(MarketOpStatus{State: "failed", Kind: "install", Target: target, Error: msg})
+		return &MarketOpResult{OK: false, Output: output, Error: msg}, nil
+	}
+	if cancelled {
+		a.emitMarketStatus(MarketOpStatus{State: "cancelled", Kind: "install", Target: target})
+		return &MarketOpResult{OK: false, Cancelled: true, Output: output}, nil
+	}
+
+	newNames := diffInstalled(before)
+	a.emitMarketStatus(MarketOpStatus{State: "done", Kind: "install", Target: target})
+	return &MarketOpResult{OK: true, Installed: newNames, Output: output}, nil
+}
+
 // InstallPlugin installs the curated registry entry (by its url) into the
 // profile used by the given instance. The instance must be stopped first.
 func (a *App) InstallPlugin(instanceID, entryURL string) (*MarketOpResult, error) {
@@ -339,17 +397,8 @@ func (a *App) InstallPlugin(instanceID, entryURL string) (*MarketOpResult, error
 	}
 	defer marketBusy.Store(false)
 
-	if err := a.requireStoppedInstance(instanceID); err != nil {
-		return nil, err
-	}
-
-	a.mu.Lock()
-	inst := a.store.find(instanceID)
-	a.mu.Unlock()
-	if inst == nil {
-		return nil, fmt.Errorf("实例不存在: %s", instanceID)
-	}
-	if err := validateVersion(inst.PkgMgr, inst.Version); err != nil {
+	inst, err := a.preflightMarketOp(instanceID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -389,37 +438,46 @@ func (a *App) InstallPlugin(instanceID, entryURL string) (*MarketOpResult, error
 		return &MarketOpResult{OK: false, Already: true, Error: msg}, nil
 	}
 
-	a.emitMarketStatus(MarketOpStatus{State: "running", Kind: "install", Target: target})
-	cmdStr := pluginCommand(*inst, "add", target)
-	a.emit("dsh:market-log", map[string]string{"line": "执行: " + cmdStr})
-	if pl := a.proxyLogLine(); pl != "" {
-		a.emit("dsh:market-log", map[string]string{"line": pl})
+	return a.runInstall(inst, target)
+}
+
+// InstallFavorite installs a locally-favorited plugin. Unlike InstallPlugin it
+// does NOT require the entry to still be in the curated catalog (favorites
+// must keep working offline and after an entry is unpublished/renamed): the
+// stored install target is re-validated against the shell-safe whitelist, and
+// the catalog (when reachable) is used only for an informational cross-check.
+func (a *App) InstallFavorite(instanceID string, fav FavoritePlugin) (*MarketOpResult, error) {
+	if !marketBusy.CompareAndSwap(false, true) {
+		return nil, fmt.Errorf("已有插件操作正在进行，请稍候或取消")
+	}
+	defer marketBusy.Store(false)
+
+	inst, err := a.preflightMarketOp(instanceID)
+	if err != nil {
+		return nil, err
 	}
 
-	output, cancelled, runErr := a.runMarketCommand(inst.Directory, cmdStr)
-	blocked := parseIgnoredBuilds(output)
-	if runErr != nil && !cancelled {
-		if len(blocked) > 0 {
-			a.emitMarketStatus(MarketOpStatus{
-				State: "failed", Kind: "install", Target: target,
-				Error:   fmt.Sprintf("构建脚本被拦截: %s", strings.Join(blocked, ", ")),
-				Blocked: blocked,
+	fav.Install = strings.TrimSpace(fav.Install)
+	if !validateInstallSpec(fav.Install) {
+		return nil, fmt.Errorf("收藏的安装来源无效: %s", fav.Install)
+	}
+
+	// Fast-start feedback (same as InstallPlugin) before any catalog work.
+	a.emitMarketStatus(MarketOpStatus{State: "running", Kind: "install", Target: fav.Install})
+	a.emit("dsh:market-log", map[string]string{"line": "正在校验插件来源…"})
+
+	// Informational cross-check only, and only against the ALREADY-CACHED
+	// catalog (never a network fetch — an offline install must start
+	// immediately, not wait out a fetch timeout). No cache → no hint.
+	if fav.URL != "" {
+		if c := cachedCatalogData(); c != nil && findRegistryEntry(c, fav.URL) == nil {
+			a.emit("dsh:market-log", map[string]string{
+				"line": "该插件已不在社区目录中，仍按收藏快照安装",
 			})
-			return &MarketOpResult{OK: false, BlockedBuilds: blocked, Output: output,
-				Error: fmt.Sprintf("构建脚本被 pnpm 默认拦截（%s），请放行后重试", strings.Join(blocked, ", "))}, nil
 		}
-		msg := fmt.Sprintf("安装失败: %v\n%s", runErr, tailLines(output, 8))
-		a.emitMarketStatus(MarketOpStatus{State: "failed", Kind: "install", Target: target, Error: msg})
-		return &MarketOpResult{OK: false, Output: output, Error: msg}, nil
-	}
-	if cancelled {
-		a.emitMarketStatus(MarketOpStatus{State: "cancelled", Kind: "install", Target: target})
-		return &MarketOpResult{OK: false, Cancelled: true, Output: output}, nil
 	}
 
-	newNames := diffInstalled(installed)
-	a.emitMarketStatus(MarketOpStatus{State: "done", Kind: "install", Target: target})
-	return &MarketOpResult{OK: true, Installed: newNames, Output: output}, nil
+	return a.runInstall(inst, fav.Install)
 }
 
 // UninstallPlugin removes an installed plugin via `dsh plugin … remove`.
