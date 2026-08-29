@@ -137,7 +137,6 @@ export namespace main {
 	    description: string;
 	    homepage: string;
 	    github: string;
-	    scope: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new InstalledPlugin(source);
@@ -153,7 +152,6 @@ export namespace main {
 	        this.description = source["description"];
 	        this.homepage = source["homepage"];
 	        this.github = source["github"];
-	        this.scope = source["scope"];
 	    }
 	}
 	export class Instance {

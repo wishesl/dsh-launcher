@@ -123,7 +123,6 @@ export interface InstalledPlugin {
   description: string;
   homepage: string;
   github?: string; // GitHub URL when derivable (spec `github:` or homepage)
-  scope?: string[] | null; // 适用实例 ID；空/缺省 = 全部实例（默认）
 }
 
 export interface MarketOpResult {

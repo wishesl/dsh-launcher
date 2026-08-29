@@ -33,7 +33,6 @@ import {
   SelectDirectory,
   SetAutoStart,
   SetMarketRegistryURL,
-  SetPluginScope,
   SetProxy,
   StopInstance,
   TogglePlugin,
@@ -102,8 +101,6 @@ export const api = {
   cancelMarketOp: (): Promise<boolean> => CancelMarketOp(),
   marketOpRunning: (): Promise<boolean> => MarketOpRunning(),
   listInstalledPlugins: (): Promise<InstalledPlugin[]> => ListInstalledPlugins(),
-  setPluginScope: (name: string, instanceIDs: string[]): Promise<InstalledPlugin[]> =>
-    SetPluginScope(name, instanceIDs),
   togglePlugin: (name: string, enabled: boolean): Promise<void> => TogglePlugin(name, enabled),
   approveBuilds: (names: string[]): Promise<void> => ApproveBuilds(names),
   getMarketSettings: (): Promise<MarketSettings> => GetMarketSettings(),
