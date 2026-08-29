@@ -146,6 +146,10 @@ export function SetMarketRegistryURL(arg1) {
   return window['go']['main']['App']['SetMarketRegistryURL'](arg1);
 }
 
+export function SetPluginScope(arg1, arg2) {
+  return window['go']['main']['App']['SetPluginScope'](arg1, arg2);
+}
+
 export function SetProxy(arg1) {
   return window['go']['main']['App']['SetProxy'](arg1);
 }

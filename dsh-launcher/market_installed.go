@@ -41,6 +41,9 @@ type InstalledPlugin struct {
 	// spec (`github:owner/repo`) or the package homepage. Empty = no remote
 	// repo (e.g. a locally-linked dev plugin), used to tell local from remote.
 	Github string `json:"github"`
+	// Scope 是插件适用的实例 ID 列表；nil/空 = 全部实例（默认）。设置了
+	// 适用实例的插件，在实例启动时由启动器按适用自动启用/屏蔽。
+	Scope []string `json:"scope"`
 }
 
 // readInstalledPlugins returns profile manifest dependencies (in-box bundles
@@ -140,6 +143,10 @@ func (a *App) ListInstalledPlugins() ([]InstalledPlugin, error) {
 			state = "disabled"
 		}
 		description, homepage := readInstalledMeta(name)
+		var scope []string
+		if a.scope != nil {
+			scope = a.scope.scopeFor(name)
+		}
 		out = append(out, InstalledPlugin{
 			Name:        name,
 			Spec:        spec,
@@ -149,6 +156,7 @@ func (a *App) ListInstalledPlugins() ([]InstalledPlugin, error) {
 			Description: description,
 			Homepage:    homepage,
 			Github:      installedGithub(spec, homepage),
+			Scope:       scope,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })

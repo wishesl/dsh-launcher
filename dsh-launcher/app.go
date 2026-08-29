@@ -22,6 +22,7 @@ type App struct {
 	store    *instanceStore
 	settings *settingsStore
 	logs     *logStore
+	scope    *pluginScopeStore // 插件「适用」实例配置（plugin-scope.json）
 
 	mu        sync.Mutex
 	processes map[string]*managedProcess // instanceID -> running process
@@ -50,6 +51,7 @@ func NewApp() *App {
 		store:      newInstanceStore(),
 		settings:   newSettingsStore(),
 		logs:       newLogStore(),
+		scope:      newPluginScopeStore(),
 		processes:  make(map[string]*managedProcess),
 		svcKnown:   make(map[string]ServiceState),
 		svcTrigger: make(chan struct{}, 1),
@@ -324,6 +326,7 @@ func (a *App) RemoveInstance(id string) ([]Instance, error) {
 
 	a.store.remove(id)
 	a.store.saveAll()
+	a.scope.removeInstance(id) // 清理插件「适用」里已删除的实例
 	a.svcMu.Lock()
 	delete(a.svcKnown, id)
 	a.svcMu.Unlock()

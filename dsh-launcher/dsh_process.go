@@ -201,6 +201,10 @@ func (a *App) LaunchInstance(id string) error {
 		a.systemLog(snapshot.ID, 0, "提示: 目录内未检测到本地副本，npx 可能回退到 registry 下载。建议先「安装到目录」。")
 	}
 
+	// 插件「适用」scope：启动前把不适用于本实例的插件屏蔽、适用的启用，
+	// 保证该实例按配置加载插件（仅影响设置了适用实例的插件）。
+	a.reconcilePluginScope(snapshot.ID)
+
 	// buildCommandFn is a var (not a direct call) so tests can substitute the
 	// command without spawning real npx.
 	cmdStr := buildCommandFn(snapshot.Version, snapshot.ExtraArgs, snapshot.PkgMgr)

@@ -128,6 +128,95 @@ function PluginDesc({ text }: { text: string }) {
   );
 }
 
+// ScopeEditor lets the user pick which instances an installed plugin applies
+// to ("适用"). 全部实例 (default) or a multi-select of instances; plugins with
+// an explicit scope are auto-enabled/masked when an instance starts.
+function ScopeEditor({
+  pluginName,
+  instances,
+  initial,
+  onSave,
+  onCancel,
+}: {
+  pluginName: string;
+  instances: Instance[];
+  initial: string[]; // 已有适用实例 ID（空 = 全部）
+  onSave: (ids: string[]) => void;
+  onCancel: () => void;
+}) {
+  const [all, setAll] = useState(initial.length === 0);
+  const [sel, setSel] = useState<Set<string>>(() => new Set(initial));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const toggle = (id: string) => {
+    setAll(false);
+    setError('');
+    setSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const save = async () => {
+    if (!all && sel.size === 0) {
+      setError('至少勾选一个实例，或选择「全部实例」');
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(all ? [] : [...sel]);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="scope-editor">
+      <div className="scope-editor-title">
+        插件「{pluginName}」适用于：
+        <span className="muted"> 设置了适用实例的插件，实例启动时自动启用/屏蔽</span>
+      </div>
+      <label className="scope-opt">
+        <input
+          type="checkbox"
+          checked={all}
+          onChange={(e) => {
+            setAll(e.target.checked);
+            setError('');
+          }}
+        />
+        <span className="scope-inst-name">全部实例</span>
+        <span className="muted">（默认）</span>
+      </label>
+      {instances.map((inst) => (
+        <label key={inst.id} className="scope-opt">
+          <input
+            type="checkbox"
+            checked={!all && sel.has(inst.id)}
+            disabled={all}
+            onChange={() => toggle(inst.id)}
+          />
+          <span className="scope-inst-name">{inst.name}</span>
+          <span className="muted mono scope-inst-dir" title={inst.directory}>{inst.directory}</span>
+        </label>
+      ))}
+      {instances.length === 0 && (
+        <div className="scope-empty">还没有实例，可在主界面「添加实例」后回来设置</div>
+      )}
+      {error && <div className="scope-error">{error}</div>}
+      <div className="scope-actions">
+        <button className="btn btn-primary btn-sm" disabled={saving} onClick={save}>
+          {saving ? '保存中…' : '保存'}
+        </button>
+        <button className="btn btn-ghost btn-sm" onClick={onCancel}>取消</button>
+      </div>
+    </div>
+  );
+}
+
 // findCatalogEntry matches an installed package back to its catalog entry by
 // npm name, catalog display name, or GitHub repo — so the Installed tab can
 // show the recognizable name / category / owner / description.
@@ -174,6 +263,8 @@ export default function MarketView({
   // there is immediate feedback even before the backend's "running" status
   // event arrives (it first revalidates the catalog, which can take seconds).
   const [busy, setBusy] = useState(false);
+  // 正在编辑「适用」实例的插件名（null = 未在编辑）。
+  const [scopeEdit, setScopeEdit] = useState<string | null>(null);
 
   const loadCatalog = useCallback(async (force: boolean) => {
     setCatalogLoading(true);
@@ -390,6 +481,25 @@ export default function MarketView({
       loadInstalled();
     } catch (e) {
       showToast('切换失败: ' + errMsg(e), 'error');
+    }
+  };
+
+  // 「适用」标签文案：空 scope = 全部实例，否则列出实例名（最多 2 个 + 等 N 个）。
+  const scopeText = (p: InstalledPlugin): string => {
+    const ids = p.scope ?? [];
+    if (ids.length === 0) return '全部';
+    const names = ids.map((id) => instances.find((i) => i.id === id)?.name || id);
+    if (names.length <= 2) return names.join('、');
+    return `${names.slice(0, 2).join('、')} 等 ${names.length} 个`;
+  };
+
+  const saveScope = async (name: string, ids: string[]) => {
+    try {
+      setInstalled(await api.setPluginScope(name, ids));
+      showToast(ids.length === 0 ? `「${name}」已设为适用于全部实例` : `已更新「${name}」的适用实例`);
+      setScopeEdit(null);
+    } catch (e) {
+      showToast('设置适用实例失败: ' + errMsg(e), 'error');
     }
   };
 
@@ -669,7 +779,7 @@ export default function MarketView({
           <div className="market-toolbar">
             <button className="btn btn-ghost" onClick={loadInstalled}>刷新</button>
             <span className="field-hint">
-              开关写入 profile 的 cordis.patch.yml，约 1 秒内生效（HMR），重启后保持
+              开关写入 profile 的 cordis.patch.yml，约 1 秒内生效（HMR），重启后保持；「适用」设置后，实例启动时自动启用/屏蔽不适用的插件
             </span>
           </div>
           {installed.length === 0 && <div className="empty"><p>暂无已装社区插件</p></div>}
@@ -703,6 +813,14 @@ export default function MarketView({
                     </span>
                     {p.version && <span className="installed-version mono">v{p.version}</span>}
                     {p.state === 'disabled' && <span className="pill tag-warn">已停用</span>}
+                    <button
+                      type="button"
+                      className={`scope-tag ${scopeEdit === p.name ? 'active' : ''}`}
+                      onClick={() => setScopeEdit(scopeEdit === p.name ? null : p.name)}
+                      title="设置该插件适用于哪些实例：实例启动时自动启用/屏蔽不适用的插件"
+                    >
+                      适用: {scopeText(p)}
+                    </button>
                   </div>
                   <div className="installed-desc">{desc}</div>
                   <div className="installed-sub">
@@ -715,6 +833,15 @@ export default function MarketView({
                     {cat?.stars != null && <span> · ★ {fmtCount(cat.stars)}</span>}
                     {cat?.downloads != null && <span> · ⬇ {fmtCount(cat.downloads)}</span>}
                   </div>
+                  {scopeEdit === p.name && (
+                    <ScopeEditor
+                      pluginName={p.name}
+                      instances={instances}
+                      initial={p.scope ?? []}
+                      onSave={(ids) => saveScope(p.name, ids)}
+                      onCancel={() => setScopeEdit(null)}
+                    />
+                  )}
                 </div>
                 <div className="installed-actions">
                   <button

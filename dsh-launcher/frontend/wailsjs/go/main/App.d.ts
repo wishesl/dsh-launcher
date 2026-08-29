@@ -74,6 +74,8 @@ export function SetAutoStart(arg1:string,arg2:boolean):Promise<Array<main.Instan
 
 export function SetMarketRegistryURL(arg1:string):Promise<void>;
 
+export function SetPluginScope(arg1:string,arg2:Array<string>):Promise<Array<main.InstalledPlugin>>;
+
 export function SetProxy(arg1:string):Promise<void>;
 
 export function SortInstances():Promise<void>;
