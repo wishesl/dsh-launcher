@@ -6,36 +6,35 @@ import (
 	"strings"
 )
 
-// Self-managed restart ("dsh-restart") contract between an opted-in project
+// Self-managed restart ("dsh-restart") contract between an opted-in instance
 // and the launcher.
 //
 // Opt-in (double gate, both must hold):
-//   - the shared web profile has the plugin `dsh-self-mcp` installed, AND
-//   - the instance directory (the project) contains the checked-in marker
-//     `.dsh-self-restart.optin`.
+//   - the shared web profile has the plugin `dsh-self-mcp` installed (see
+//     self_restart_install.go for the built-in install flow), AND
+//   - the instance has SelfRestart enabled (the instance form checkbox).
 //
 // Only then does the launcher (a) generate a temporary `--patch` overlay that
 // mounts the plugin, and (b) inject DSH_LAUNCHER=1 / DSH_INSTANCE_ID=<id> so
-// the plugin knows it is supervised. Other projects/dirs never mount it → no
-// global residue: a machine-launched DSH outside this project has no row and
-// the tool does not exist.
+// the plugin knows it is supervised. Other instances never mount it → no
+// global residue: a machine-launched DSH outside an opted-in instance has no
+// row and the tool does not exist.
 //
 // Restart request: the plugin writes <dir>/.dsh-self-mcp/restart-request.json
 // and exits cleanly (exit 0). The launcher's exit reconcile sees the request
 // and relaunches the same instance.
 const (
 	selfRestartPluginName    = "dsh-self-mcp"
-	selfRestartOptInMarker   = ".dsh-self-restart.optin"
 	selfRestartStateDir      = ".dsh-self-mcp"
 	selfRestartRequestFile   = "restart-request.json"
 	selfRestartOverlayPrefix = ".dsh-self-restart-"
 )
 
 // selfRestartEnabled reports whether the launcher should mount the restart
-// plugin for an instance rooted at dir. Both gates must pass; a missing
-// profile or marker simply disables (never an error).
-func selfRestartEnabled(dir string) bool {
-	if strings.TrimSpace(dir) == "" {
+// plugin for an instance. Both gates must pass; a missing profile or a
+// disabled instance simply disables (never an error, never a launch failure).
+func selfRestartEnabled(inst Instance) bool {
+	if !inst.SelfRestart {
 		return false
 	}
 	installed, err := readInstalledPlugins()
@@ -43,9 +42,6 @@ func selfRestartEnabled(dir string) bool {
 		return false
 	}
 	if _, ok := installed[selfRestartPluginName]; !ok {
-		return false
-	}
-	if _, err := os.Stat(filepath.Join(dir, selfRestartOptInMarker)); err != nil {
 		return false
 	}
 	return true

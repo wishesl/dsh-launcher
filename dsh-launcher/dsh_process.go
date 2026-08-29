@@ -188,10 +188,10 @@ func (a *App) LaunchInstance(id string) error {
 	snapshot := *inst
 	a.mu.Unlock()
 
-	// 自管理重启（dsh-restart）：项目显式 opt-in + 插件已装 → 本次启动挂载插件
-	// 并注入监督者环境（DSH_LAUNCHER=1 / DSH_INSTANCE_ID）。其他项目目录无标记 →
+	// 自管理重启（dsh-restart）：实例勾选启用 + 插件已装 → 本次启动挂载插件
+	// 并注入监督者环境（DSH_LAUNCHER=1 / DSH_INSTANCE_ID）。未勾选的实例 →
 	// 不挂载、不注入，零残留。
-	selfRestart := selfRestartEnabled(snapshot.Directory)
+	selfRestart := selfRestartEnabled(snapshot)
 
 	a.emitStatus(snapshot.ID, "starting", 0)
 	if snapshot.Source {

@@ -18,6 +18,7 @@ import {
   InstallPnpm,
   InstallPlugin,
   InstallFavorite,
+  InstallSelfRestartPlugin,
   InstallToDirectory,
   LaunchInstance,
   ListFavorites,
@@ -33,6 +34,7 @@ import {
   RunAutoStartInstances,
   SaveInstance,
   SelectDirectory,
+  SelfRestartPluginInstalled,
   SetAutoStart,
   SetInstanceMasks,
   SetLayout,
@@ -41,6 +43,7 @@ import {
   StopInstance,
   TogglePlugin,
   UninstallPlugin,
+  UninstallSelfRestartPlugin,
 } from '../wailsjs/go/main/App';
 import { EventsOff, EventsOn } from '../wailsjs/runtime/runtime';
 import type {
@@ -106,6 +109,12 @@ export const api = {
     InstallPlugin(instanceId, entryUrl),
   uninstallPlugin: (instanceId: string, name: string): Promise<MarketOpResult> =>
     UninstallPlugin(instanceId, name),
+  // 内置插件 dsh-self-mcp（自管理重启）
+  selfRestartPluginInstalled: (): Promise<boolean> => SelfRestartPluginInstalled(),
+  installSelfRestartPlugin: (instanceId: string): Promise<MarketOpResult> =>
+    InstallSelfRestartPlugin(instanceId),
+  uninstallSelfRestartPlugin: (instanceId: string): Promise<MarketOpResult> =>
+    UninstallSelfRestartPlugin(instanceId),
   cancelMarketOp: (): Promise<boolean> => CancelMarketOp(),
   marketOpRunning: (): Promise<boolean> => MarketOpRunning(),
   listInstalledPlugins: (): Promise<InstalledPlugin[]> => ListInstalledPlugins(),

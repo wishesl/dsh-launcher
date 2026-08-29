@@ -24,6 +24,7 @@ export interface Instance {
   buildCmd?: string;    // 构建命令（源码启动，「安装到目录」第二步，默认 "pnpm run build"）
   startCmd?: string;    // 启动命令（源码启动，「启动」时执行，默认 "pnpm dsh web"）
   autoStart: boolean;
+  selfRestart?: boolean; // 自管理重启（dsh-restart）：启动时挂载 dsh-self-mcp 插件（需已安装）
   createdAt: any;       // RFC3339 string
   pid: number;
   status: InstanceStatus | string; // union kept loose for forward compat

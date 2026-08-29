@@ -22,26 +22,30 @@ dsh-launcher（监督者）
      → 成功即删除 pending.json；失败保留待下次启动重试（进程内退避重试，不无限循环）
 ```
 
-## 装配（零残留）
+## 装配（内置 + 按实例勾选，零残留）
 
-- **opt-in 双重门控**（dsh-launcher 侧 `selfRestartEnabled`）：
-  1. profile 已安装 `dsh-self-mcp`；
-  2. **实例目录**存在标记文件 `.dsh-self-restart.optin`（launcher 以每个实例的
-     `directory` 为门控锚点，不是仓库根）。
-- 两者都满足时，launcher 才在本次启动生成项目级临时覆盖层 `.dsh-self-restart-<id>.yml`
-  （必须是 `insert:` 块新增条目——loader 补丁语义里裸行只按 id 覆盖已有条目、找不到会跳过）：
-  ```yaml
-  - insert:
-      - id: self-restart
-        name: 'dsh-self-mcp'
-  ```
-  并注入 `DSH_LAUNCHER=1`、`DSH_INSTANCE_ID=<id>`。
-- 本仓库 launcher 实例的目录是 `dsh-vsn\0.1.1-rc2`（本地模式）与
-  `dsh-vsn\v0.1.2-alpha.1`（源码模式），两个目录内均已放置 `.dsh-self-restart.optin`
-  （vendored/gitignored，机器本地 opt-in；仓库根的 `.dsh-self-restart.optin` 用于
-  实例目录=仓库根的通用场景）。
-- **不改 `cordis.patch.yml`**；**不用本项目启动（别的实例 / 别的目录 / 控制台直启）→ 无行引用 → 工具不存在、状态不碰**。
-- 放弃项目时清理：`dsh plugin --profile web remove dsh-self-mcp`（或直接删除该实例）；`.dsh-self-mcp/` 状态目录在实例目录内、已 gitignore、重启完成后自动清空。
+插件源码内置于 dsh-launcher（`dsh-launcher/embed/dsh-self-mcp/`，`embeddata.go` 用
+`//go:embed` 打进 exe）。装配分两步，都由 launcher UI 完成：
+
+1. **安装到全局**（插件市场 → 已安装页签 → dsh-self-mcp 面板「安装到全局」）：
+   解出内置源码到 `<profile>/.dsh-builtin/dsh-self-mcp/`，再用常规 pnpm 命令
+   （`pnpm add file:<该目录>`）装进全局 profile —— 走命令、不纯 copy，依赖照常解析；
+   `.dsh-builtin` 是稳定路径，package.json 里的 `file:` spec 在后续 pnpm rebuild 中不会失效。
+2. **实例勾选**（实例表单「启用自管理重启」→ `Instance.SelfRestart`）：
+   双重门控 = 插件已装 **&&** 实例勾选 → 本次启动生成临时覆盖层 `.dsh-self-restart-<id>.yml`
+   （`insert:` 块新增条目——loader 补丁语义里裸行只按 id 覆盖已有条目、找不到会跳过）：
+   ```yaml
+   - insert:
+       - id: self-restart
+         name: 'dsh-self-mcp'
+   ```
+   并注入 `DSH_LAUNCHER=1`、`DSH_INSTANCE_ID=<id>`。
+
+- **不改 `cordis.patch.yml`**；未勾选的实例（含别的项目/控制台直启）→ 无行引用 →
+  工具不存在、状态不碰，零残留。
+- 插件未安装时 UI 置灰提示先安装；即使误配也绝不生成覆盖层（fail-soft，实例照常启动）。
+- 放弃时：插件市场卸载（`pnpm remove dsh-self-mcp`）即可；`.dsh-self-mcp/` 状态目录
+  在实例目录内、已 gitignore、重启完成后自动清空。
 
 ## 护栏
 

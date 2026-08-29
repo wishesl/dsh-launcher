@@ -26,31 +26,54 @@ func newSelfRestartTestApp(t *testing.T) (*App, string) {
 	return &App{store: store, masks: newInstanceMaskStore()}, dir
 }
 
-func writeOptInMarker(dir string) {
-	_ = os.WriteFile(filepath.Join(dir, selfRestartOptInMarker), []byte("# opt-in\n"), 0o644)
-}
-
 func TestSelfRestartEnabled(t *testing.T) {
-	_, dir := newSelfRestartTestApp(t)
+	app, dir := newSelfRestartTestApp(t)
+	inst := app.store.find("inst-a")
+	*inst = Instance{ID: "inst-a", Name: "A", Directory: dir}
 
-	// 已装插件但无 opt-in 标记 → 不启用（零残留的核心：其他项目目录没有标记）。
-	if selfRestartEnabled(dir) {
-		t.Fatal("installed plugin without opt-in marker must NOT enable self-restart")
+	// 已装插件但实例未勾选 → 不启用（零残留的核心：其他实例默认关闭）。
+	if selfRestartEnabled(*inst) {
+		t.Fatal("installed plugin without instance SelfRestart must NOT enable self-restart")
 	}
-	writeOptInMarker(dir)
-	if !selfRestartEnabled(dir) {
-		t.Fatal("installed plugin + opt-in marker must enable self-restart")
-	}
-	if selfRestartEnabled("") {
-		t.Fatal("empty dir must never enable self-restart")
+	inst.SelfRestart = true
+	if !selfRestartEnabled(*inst) {
+		t.Fatal("installed plugin + instance SelfRestart must enable self-restart")
 	}
 
-	// 插件被卸载 → 即使有标记也不启用（fail-soft：不生成覆盖层，实例照常启动）。
+	// 插件被卸载 → 即使勾选也不启用（fail-soft：不生成覆盖层，实例照常启动）。
 	if err := os.Remove(filepath.Join(marketProfileDir(), "package.json")); err != nil {
 		t.Fatal(err)
 	}
-	if selfRestartEnabled(dir) {
-		t.Fatal("uninstalled plugin must disable self-restart even with marker present")
+	if selfRestartEnabled(*inst) {
+		t.Fatal("uninstalled plugin must disable self-restart even when the instance opted in")
+	}
+}
+
+func TestExtractEmbeddedSelfRestart(t *testing.T) {
+	t.Setenv("DSH_HOME", t.TempDir())
+	profile := marketProfileDir()
+	dir, err := extractEmbeddedSelfRestart(profile)
+	if err != nil {
+		t.Fatalf("extractEmbeddedSelfRestart: %v", err)
+	}
+	if dir != filepath.Join(profile, selfRestartBuiltinRel) {
+		t.Fatalf("materialized dir = %q, want %q", dir, filepath.Join(profile, selfRestartBuiltinRel))
+	}
+	for _, rel := range []string{"package.json", "lib/index.js", "README.md"} {
+		data, err := os.ReadFile(filepath.Join(dir, rel))
+		if err != nil {
+			t.Fatalf("embedded file %s missing: %v", rel, err)
+		}
+		if strings.TrimSpace(string(data)) == "" {
+			t.Fatalf("embedded file %s is empty", rel)
+		}
+	}
+	pkg, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(pkg), `"name": "dsh-self-mcp"`) {
+		t.Fatalf("materialized package.json wrong: %s", string(pkg))
 	}
 }
 

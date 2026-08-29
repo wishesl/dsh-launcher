@@ -166,6 +166,7 @@ export default function MarketView({
   const [installed, setInstalled] = useState<InstalledPlugin[]>([]);
   const [favorites, setFavorites] = useState<FavoritePlugin[]>([]);
   const [targetId, setTargetId] = useState('');
+  const [selfRestartInstalled, setSelfRestartInstalled] = useState(false);
   const [pendingApprove, setPendingApprove] = useState<{ names: string[]; retry: () => void } | null>(null);
   // Share-code flows open as a modal (pick subset to share / preview before import).
   const [shareDialog, setShareDialog] = useState<'gen' | 'import' | null>(null);
@@ -190,6 +191,7 @@ export default function MarketView({
   const loadInstalled = useCallback(async () => {
     try {
       setInstalled(await api.listInstalledPlugins());
+      setSelfRestartInstalled(await api.selfRestartPluginInstalled());
     } catch (e) {
       showToast('读取已装插件失败: ' + errMsg(e), 'error');
     }
@@ -348,6 +350,72 @@ export default function MarketView({
       await retry();
     } catch (e) {
       showToast('放行构建脚本失败: ' + errMsg(e), 'error');
+    }
+  };
+
+  // 内置插件 dsh-self-mcp（自管理重启）：安装到全局 profile。
+  const installSelfRestart = async () => {
+    if (!targetInstance) {
+      showToast('请先在主界面添加实例，再选择安装目标', 'error');
+      return;
+    }
+    const wasRunning = await stopIfRunning();
+    if (targetInstance.status !== 'stopped' && targetInstance.status !== 'crashed' && !wasRunning) return;
+    onClearMarketLogs();
+    onShowMarketLogs();
+    setBusy(true);
+    try {
+      const r = await api.installSelfRestartPlugin(targetId);
+      if (r.already) {
+        showToast(r.error || '该插件已安装');
+      } else if (r.ok) {
+        showToast('已安装 dsh-self-mcp，重启实例后生效（实例表单可勾选「启用自管理重启」）');
+        if (wasRunning) {
+          showToast('正在重新启动实例…');
+          await api.launchInstance(targetId);
+        }
+      } else if (r.cancelled) {
+        showToast('已取消安装', 'error');
+      } else {
+        showToast(r.error || '安装失败，详见输出', 'error');
+      }
+    } catch (e) {
+      showToast('安装失败: ' + errMsg(e), 'error');
+    } finally {
+      setBusy(false);
+      loadInstalled();
+    }
+  };
+
+  const uninstallSelfRestart = async () => {
+    if (!targetInstance) {
+      showToast('请先添加实例', 'error');
+      return;
+    }
+    if (!window.confirm('确定卸载内置插件 dsh-self-mcp？相关实例的「自管理重启」勾选将失效。')) return;
+    const wasRunning = await stopIfRunning();
+    if (targetInstance.status !== 'stopped' && targetInstance.status !== 'crashed' && !wasRunning) return;
+    onClearMarketLogs();
+    onShowMarketLogs();
+    setBusy(true);
+    try {
+      const r = await api.uninstallSelfRestartPlugin(targetId);
+      if (r.ok) {
+        showToast('已卸载 dsh-self-mcp');
+        if (wasRunning) {
+          showToast('正在重新启动实例…');
+          await api.launchInstance(targetId);
+        }
+      } else if (r.cancelled) {
+        showToast('已取消卸载', 'error');
+      } else {
+        showToast(r.error || '卸载失败，详见输出', 'error');
+      }
+    } catch (e) {
+      showToast('卸载失败: ' + errMsg(e), 'error');
+    } finally {
+      setBusy(false);
+      loadInstalled();
     }
   };
 
@@ -666,6 +734,35 @@ export default function MarketView({
 
       {tab === 'installed' && (
         <div className="market-installed">
+          {/* 内置插件：dsh-self-mcp（自管理重启） */}
+          <div className="installed-row self-restart-panel">
+            <div className="installed-info">
+              <div className="installed-head">
+                <span className="installed-name">dsh-self-mcp</span>
+                <span className="pill tag-local">launcher 内置</span>
+                <span className="installed-version mono">v0.1.0</span>
+              </div>
+              <div className="installed-desc">
+                自管理重启：启动后各实例可在表单勾选「启用自管理重启」，模型获得 dsh-restart 工具；
+                重启完成后自动向发起会话注入「重启完成」并继续，用于调试需要重启才生效的插件。
+              </div>
+              <div className="installed-sub">
+                <span className="mono">{selfRestartInstalled ? '已安装到全局 profile' : '未安装'}</span>
+                <span> · 未勾选的实例不挂载，无残留</span>
+              </div>
+            </div>
+            <div className="installed-actions">
+              {selfRestartInstalled ? (
+                <button className="btn btn-danger" onClick={uninstallSelfRestart} disabled={marketOp.running || busy}>
+                  卸载
+                </button>
+              ) : (
+                <button className="btn btn-primary" onClick={installSelfRestart} disabled={marketOp.running || busy}>
+                  安装到全局
+                </button>
+              )}
+            </div>
+          </div>
           <div className="market-toolbar">
             <button className="btn btn-ghost" onClick={loadInstalled}>刷新</button>
             <span className="field-hint">

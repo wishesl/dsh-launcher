@@ -212,6 +212,13 @@
   padding: 12px 14px;
 }
 .installed-row:hover { border-color: var(--border); }
+/* 内置插件 dsh-self-mcp 面板：与普通已装行区分 */
+.self-restart-panel {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 35%, var(--panel));
+  margin-bottom: 10px;
+}
+.self-restart-panel:hover { border-color: var(--accent); }
 .installed-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .installed-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .installed-name { font-weight: 700; font-size: 14px; }

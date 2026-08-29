@@ -296,6 +296,7 @@ func (a *App) SaveInstance(inst Instance) ([]Instance, error) {
 		existing.BuildCmd = inst.BuildCmd
 		existing.StartCmd = inst.StartCmd
 		existing.AutoStart = inst.AutoStart
+		existing.SelfRestart = inst.SelfRestart
 		a.store.saveAll()
 		go a.refreshTrayInstances()
 		a.triggerServiceProbe() // config (port/args) may have changed

@@ -42,6 +42,8 @@ export function InstallPlugin(arg1:string,arg2:string):Promise<main.MarketOpResu
 
 export function InstallPnpm():Promise<void>;
 
+export function InstallSelfRestartPlugin(arg1:string):Promise<main.MarketOpResult>;
+
 export function InstallToDirectory(arg1:string):Promise<Array<main.Instance>>;
 
 export function LaunchInstance(arg1:string):Promise<void>;
@@ -74,6 +76,8 @@ export function SaveInstance(arg1:main.Instance):Promise<Array<main.Instance>>;
 
 export function SelectDirectory():Promise<string>;
 
+export function SelfRestartPluginInstalled():Promise<boolean>;
+
 export function SetAutoStart(arg1:string,arg2:boolean):Promise<Array<main.Instance>>;
 
 export function SetInstanceMasks(arg1:string,arg2:Array<string>):Promise<Array<string>>;
@@ -91,3 +95,5 @@ export function StopInstance(arg1:string):Promise<void>;
 export function TogglePlugin(arg1:string,arg2:boolean):Promise<void>;
 
 export function UninstallPlugin(arg1:string,arg2:string):Promise<main.MarketOpResult>;
+
+export function UninstallSelfRestartPlugin(arg1:string):Promise<main.MarketOpResult>;

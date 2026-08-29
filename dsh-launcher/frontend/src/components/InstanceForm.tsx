@@ -20,6 +20,7 @@ const DEFAULT_INSTANCE = (): Instance => ({
   extraArgs: '',
   pkgMgr: 'local', // 推荐：目录内本地副本（官方设计，agent 可读真实源码）
   autoStart: false,
+  selfRestart: false,
   createdAt: null,
   pid: 0,
   status: 'stopped',
@@ -482,6 +483,17 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
             <span>
               随启动器自动启动此实例
               <span className="muted">（打开 DSH Launcher 时自动拉起）</span>
+            </span>
+          </div>
+
+          <div className="form-autostart">
+            <Switch
+              checked={!!form.selfRestart}
+              onChange={(v) => set({ selfRestart: v })}
+            />
+            <span>
+              启用自管理重启（dsh-restart）
+              <span className="muted">（需已在全局安装 dsh-self-mcp 插件；启动时挂载 dsh-restart 工具，重启后自动注入「重启完成」并继续）</span>
             </span>
           </div>
 

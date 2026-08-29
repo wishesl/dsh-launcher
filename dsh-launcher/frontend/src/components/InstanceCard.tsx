@@ -162,6 +162,7 @@ export default function InstanceCard({
         )}
         {instance.pid > 0 && <span className="meta-item">PID {instance.pid}</span>}
         {instance.extraArgs && <span className="meta-item mono">args: {instance.extraArgs}</span>}
+        {instance.selfRestart && <span className="meta-item mono">self-restart</span>}
       </div>
 
       <div className="instance-actions">

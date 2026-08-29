@@ -163,6 +163,7 @@ export namespace main {
 	    extraArgs: string;
 	    pkgMgr: string;
 	    autoStart: boolean;
+	    selfRestart: boolean;
 	    // Go type: time
 	    createdAt: any;
 	    source: boolean;
@@ -187,6 +188,7 @@ export namespace main {
 	        this.extraArgs = source["extraArgs"];
 	        this.pkgMgr = source["pkgMgr"];
 	        this.autoStart = source["autoStart"];
+	        this.selfRestart = source["selfRestart"];
 	        this.createdAt = this.convertValues(source["createdAt"], null);
 	        this.source = source["source"];
 	        this.initCmd = source["initCmd"];

@@ -82,6 +82,10 @@ export function InstallPnpm() {
   return window['go']['main']['App']['InstallPnpm']();
 }
 
+export function InstallSelfRestartPlugin(arg1) {
+  return window['go']['main']['App']['InstallSelfRestartPlugin'](arg1);
+}
+
 export function InstallToDirectory(arg1) {
   return window['go']['main']['App']['InstallToDirectory'](arg1);
 }
@@ -146,6 +150,10 @@ export function SelectDirectory() {
   return window['go']['main']['App']['SelectDirectory']();
 }
 
+export function SelfRestartPluginInstalled() {
+  return window['go']['main']['App']['SelfRestartPluginInstalled']();
+}
+
 export function SetAutoStart(arg1, arg2) {
   return window['go']['main']['App']['SetAutoStart'](arg1, arg2);
 }
@@ -180,4 +188,8 @@ export function TogglePlugin(arg1, arg2) {
 
 export function UninstallPlugin(arg1, arg2) {
   return window['go']['main']['App']['UninstallPlugin'](arg1, arg2);
+}
+
+export function UninstallSelfRestartPlugin(arg1) {
+  return window['go']['main']['App']['UninstallSelfRestartPlugin'](arg1);
 }
