@@ -1,6 +1,7 @@
 import type { Instance, RegistryInfo } from '../types';
 import { RotateCw, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import WinControls from './WinControls';
+import dshLogo from '../assets/dsh.svg';
 
 interface Props {
   registry: RegistryInfo | null;
@@ -44,6 +45,14 @@ export default function Header({
 
   return (
     <header className="app-header">
+      {/* win/linux 布局：logo 上移顶栏左侧（mac 布局默认隐藏） */}
+      <div className="brand header-brand">
+        <img className="brand-logo-img" src={dshLogo} alt="DSH Launcher" draggable={false} />
+        <div className="brand-text">
+          <h1>DSH Launcher</h1>
+          <p className="brand-sub">DeepSeek Harness 启动器</p>
+        </div>
+      </div>
       <WinControls onCloseRequest={onCloseRequest} />
       <button
         className="side-collapse"

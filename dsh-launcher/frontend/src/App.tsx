@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, errMsg } from './api';
-import { BrowserOpenURL } from '../wailsjs/runtime/runtime';
+import { BrowserOpenURL, Environment } from '../wailsjs/runtime/runtime';
 import type { ExitChoice, Instance, LogEvent, MarketOpState, RegistryInfo, ServiceState } from './types';
 import Header from './components/Header';
 import Sidebar, { type ViewKey } from './components/Sidebar';
@@ -32,6 +32,21 @@ export default function App() {
   const [logsOpen, setLogsOpen] = useState(false);
   // Sidebar (菜单栏) 展开/收起：收起后变为仅图标小卡片。
   const [collapsed, setCollapsed] = useState(false);
+  // 平台布局：mac 用当前布局；win/linux 把三个点移到顶栏右侧、logo 上移顶栏左侧。
+  const [os, setOs] = useState<'mac' | 'win'>('win');
+  useEffect(() => {
+    let active = true;
+    Environment()
+      .then((env) => {
+        if (active) setOs(env.platform === 'darwin' ? 'mac' : 'win');
+      })
+      .catch(() => {
+        /* 浏览器预览无 runtime，按 win 布局 */
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   const [logsTab, setLogsTab] = useState<'logs' | 'market'>('logs');
   // Plugin-market operation stream (hoisted so the drawer can show it too).
   const [marketLogs, setMarketLogs] = useState<string[]>([]);
@@ -362,7 +377,7 @@ export default function App() {
   };
 
   return (
-    <div className="app">
+    <div className={`app ${os === 'mac' ? 'os-mac' : 'os-win'}`}>
       <Header
         registry={registry}
         registryLoading={registryLoading}

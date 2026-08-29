@@ -85,6 +85,18 @@ html, body, #root {
   user-select: none;
 }
 
+/* 默认（mac 布局）：logo 不在顶栏（在侧边栏），三个点+展开按钮在顶栏左侧 */
+.app-header .header-brand { display: none; }
+
+/* win/linux 布局：logo 上移顶栏左侧（展开按钮保持原左侧位置），三个点移到顶栏右侧 */
+.app.os-win .header-brand { display: flex; }
+.app.os-win .header-brand .brand-logo-img { width: 30px; height: 30px; padding: 2px; border-radius: 8px; }
+.app.os-win .sidebar .side-head { display: none; }
+.app.os-win .header-right { order: 2; margin-left: 0; }
+.app.os-win .side-collapse { order: 1; margin-left: 6px; }
+.app.os-win .win-controls { order: 3; margin-left: auto; margin-right: 4px; }
+.app.os-win .app-header { padding-left: 16px; }
+
 /* 右侧大卡片：中间内容 + 右侧日志，横向两列，整体为一卡 */
 .app-main {
   flex: 1;
