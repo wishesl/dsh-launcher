@@ -873,6 +873,35 @@ html, body, #root {
 .exit-modal { width: min(430px, calc(100vw - 48px)); }
 .exit-question { margin: 0; font-size: 14.5px; font-weight: 600; }
 
+/* 实例「屏蔽插件」弹窗 */
+.mask-modal { width: min(520px, calc(100vw - 48px)); }
+.mask-hint {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+.mask-hint strong { color: var(--text); }
+.mask-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 42vh;
+  overflow-y: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  padding: 6px;
+  background: var(--panel-2);
+}
+.mask-row {
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.mask-row:hover { background: var(--panel); }
+.mask-row input[type="checkbox"] { accent-color: var(--accent); }
+.mask-name { font-weight: 600; font-size: 13px; }
+
 /* ============================================================
    Toast
    ============================================================ */

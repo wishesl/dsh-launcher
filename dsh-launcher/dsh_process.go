@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -207,6 +208,16 @@ func (a *App) LaunchInstance(id string) error {
 	if snapshot.Source {
 		// 源码启动：直接执行用户配置的启动命令（默认 pnpm dsh web）。
 		cmdStr = sourceStartCommand(snapshot)
+	}
+	// 插件屏蔽：为本次启动生成临时 --patch 覆盖层（只屏蔽、不改全局
+	// cordis.patch.yml / dsh-market 状态），实例停止后自动消失。flag 必须
+	// 插在 `web` 子命令之后、应用参数之前（dsh 只解析它认识的启动器参数）；
+	// mask 用相对文件名（实例目录 = dsh 进程 cwd），避免引号经 cmd 后残留。
+	if maskRel, merr := a.writeMaskOverlay(snapshot.ID, snapshot.Directory); merr != nil {
+		a.systemLog(snapshot.ID, 0, "提示: 生成插件屏蔽层失败: "+merr.Error())
+	} else if maskRel != "" {
+		cmdStr = insertPatchFlag(cmdStr, maskRel)
+		a.systemLog(snapshot.ID, 0, "已生成临时插件屏蔽层（仅本次启动生效）: "+filepath.Join(snapshot.Directory, maskRel))
 	}
 	cmd := shellCommand(context.Background(), cmdStr)
 	cmd.Dir = snapshot.Directory
@@ -439,6 +450,7 @@ func (a *App) StopInstance(id string) error {
 		if changed {
 			a.emitStatus(id, "stopped", 0)
 		}
+		cleanupMask(id, inst.Directory)
 		a.triggerServiceProbe()
 		return nil // not running, nothing to do
 	}
@@ -459,6 +471,7 @@ func (a *App) StopInstance(id string) error {
 	delete(a.processes, id)
 	a.mu.Unlock()
 	a.emitStatus(id, "stopped", 0)
+	cleanupMask(id, inst.Directory)
 	a.triggerServiceProbe()
 	return nil
 }

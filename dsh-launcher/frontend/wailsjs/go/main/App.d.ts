@@ -22,6 +22,8 @@ export function GenerateShareCode(arg1:Array<string>):Promise<string>;
 
 export function GetAppDataPath():Promise<string>;
 
+export function GetInstanceMasks(arg1:string):Promise<Array<string>>;
+
 export function GetInstances():Promise<Array<main.Instance>>;
 
 export function GetMarketSettings():Promise<main.MarketSettings>;
@@ -71,6 +73,8 @@ export function SaveInstance(arg1:main.Instance):Promise<Array<main.Instance>>;
 export function SelectDirectory():Promise<string>;
 
 export function SetAutoStart(arg1:string,arg2:boolean):Promise<Array<main.Instance>>;
+
+export function SetInstanceMasks(arg1:string,arg2:Array<string>):Promise<Array<string>>;
 
 export function SetMarketRegistryURL(arg1:string):Promise<void>;
 

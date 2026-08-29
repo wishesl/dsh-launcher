@@ -11,6 +11,7 @@ interface Props {
   onStart: (id: string) => void;
   onStop: (id: string) => void;
   onInstall: (id: string) => void;
+  onMask: (inst: Instance) => void;
   onOpen: (url: string) => void;
   onCopyUrl: (url: string) => void;
   onEdit: (inst: Instance) => void;
@@ -40,6 +41,7 @@ export default function InstanceCard({
   onStart,
   onStop,
   onInstall,
+  onMask,
   onOpen,
   onCopyUrl,
   onEdit,
@@ -185,6 +187,13 @@ export default function InstanceCard({
             安装到目录
           </button>
         )}
+        <button
+          className="btn btn-ghost"
+          onClick={() => onMask(instance)}
+          title="选择该实例启动时临时屏蔽的插件（仅本次启动生效，不改全局开关，停止后恢复）"
+        >
+          屏蔽插件
+        </button>
         <button
           className={`btn btn-ghost ${activeLog ? 'active-log-btn' : ''}`}
           onClick={() => onToggleLog(instance.id)}

@@ -532,6 +532,8 @@ func (a *App) UninstallPlugin(instanceID, name string) (*MarketOpResult, error) 
 	// Best-effort: drop every disable trace (entry-id rows, package-name rows,
 	// dsh-market's persisted list) so a reinstall starts enabled.
 	clearPluginDisabled(name)
+	// 从每个实例的屏蔽名单里去掉已卸载的插件（不展示、不屏蔽）。
+	a.masks.removePlugin(name)
 
 	a.emitMarketStatus(MarketOpStatus{State: "done", Kind: "uninstall", Target: name})
 	return &MarketOpResult{OK: true, Output: output}, nil

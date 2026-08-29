@@ -9,6 +9,7 @@ import InstancesView from './components/InstancesView';
 import MarketView from './components/MarketView';
 import SettingsView from './components/SettingsView';
 import InstanceForm from './components/InstanceForm';
+import MaskPluginsDialog from './components/MaskPluginsDialog';
 import ExitDialog from './components/ExitDialog';
 import LogDrawer from './components/LogDrawer';
 
@@ -36,6 +37,8 @@ export default function App() {
   const [marketLogs, setMarketLogs] = useState<string[]>([]);
   const [marketOp, setMarketOp] = useState<MarketOpState>({ running: false, kind: '', target: '' });
   const [modal, setModal] = useState<ModalState>(null);
+  // 实例「屏蔽插件」弹窗：正在选择屏蔽名单的实例。
+  const [maskFor, setMaskFor] = useState<Instance | null>(null);
   // Window ✕ pressed and the user wants to be asked (no remembered choice).
   const [exitAsk, setExitAsk] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -404,6 +407,7 @@ export default function App() {
               onStart={start}
               onStop={stop}
               onInstall={install}
+              onMask={setMaskFor}
               onOpen={openWeb}
               onCopyUrl={copyUrl}
               onEdit={(inst) => setModal({ mode: 'edit', instance: inst })}
@@ -454,6 +458,14 @@ export default function App() {
             setInstances(list);
             if (note) showToast(note);
           }}
+        />
+      )}
+
+      {maskFor && (
+        <MaskPluginsDialog
+          instance={maskFor}
+          showToast={showToast}
+          onClose={() => setMaskFor(null)}
         />
       )}
 

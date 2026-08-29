@@ -22,6 +22,7 @@ type App struct {
 	store    *instanceStore
 	settings *settingsStore
 	logs     *logStore
+	masks    *instanceMaskStore // 每实例插件屏蔽名单（instance-masks.json）
 
 	mu        sync.Mutex
 	processes map[string]*managedProcess // instanceID -> running process
@@ -50,6 +51,7 @@ func NewApp() *App {
 		store:      newInstanceStore(),
 		settings:   newSettingsStore(),
 		logs:       newLogStore(),
+		masks:      newInstanceMaskStore(),
 		processes:  make(map[string]*managedProcess),
 		svcKnown:   make(map[string]ServiceState),
 		svcTrigger: make(chan struct{}, 1),
@@ -169,6 +171,7 @@ func (a *App) shutdown(ctx context.Context) {
 	for _, p := range procs {
 		p.stop()
 	}
+	a.cleanupAllMasks() // 临时插件屏蔽层只属于进程运行期间
 	a.logs.closeAll()
 	if a.tray != nil {
 		systrayQuit()
@@ -317,13 +320,17 @@ func (a *App) RemoveInstance(id string) ([]Instance, error) {
 		delete(a.processes, id)
 	}
 	inst := a.store.find(id)
+	dir := ""
 	if inst != nil {
 		inst.Status = "stopped"
+		dir = inst.Directory
 	}
 	a.mu.Unlock()
 
 	a.store.remove(id)
 	a.store.saveAll()
+	cleanupMask(id, dir)
+	a.masks.removeInstance(id) // 删除实例的插件屏蔽名单
 	a.svcMu.Lock()
 	delete(a.svcKnown, id)
 	a.svcMu.Unlock()

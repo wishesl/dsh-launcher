@@ -42,6 +42,10 @@ export function GetAppDataPath() {
   return window['go']['main']['App']['GetAppDataPath']();
 }
 
+export function GetInstanceMasks(arg1) {
+  return window['go']['main']['App']['GetInstanceMasks'](arg1);
+}
+
 export function GetInstances() {
   return window['go']['main']['App']['GetInstances']();
 }
@@ -140,6 +144,10 @@ export function SelectDirectory() {
 
 export function SetAutoStart(arg1, arg2) {
   return window['go']['main']['App']['SetAutoStart'](arg1, arg2);
+}
+
+export function SetInstanceMasks(arg1, arg2) {
+  return window['go']['main']['App']['SetInstanceMasks'](arg1, arg2);
 }
 
 export function SetMarketRegistryURL(arg1) {

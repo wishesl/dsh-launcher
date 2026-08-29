@@ -14,6 +14,7 @@ interface Props {
   onStart: (id: string) => void;
   onStop: (id: string) => void;
   onInstall: (id: string) => void;
+  onMask: (inst: Instance) => void;
   onOpen: (url: string) => void;
   onCopyUrl: (url: string) => void;
   onEdit: (inst: Instance) => void;
@@ -35,6 +36,7 @@ export default function InstancesView({
   onStart,
   onStop,
   onInstall,
+  onMask,
   onOpen,
   onCopyUrl,
   onEdit,
@@ -77,6 +79,7 @@ export default function InstancesView({
             onStart={onStart}
             onStop={onStop}
             onInstall={onInstall}
+            onMask={onMask}
             onOpen={onOpen}
             onCopyUrl={onCopyUrl}
             onEdit={onEdit}

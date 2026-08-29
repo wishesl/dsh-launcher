@@ -8,6 +8,7 @@ import {
   FetchMarketCatalog,
   GenerateShareCode,
   GetAppDataPath,
+  GetInstanceMasks,
   GetInstances,
   GetMarketSettings,
   GetProxySettings,
@@ -32,6 +33,7 @@ import {
   SaveInstance,
   SelectDirectory,
   SetAutoStart,
+  SetInstanceMasks,
   SetMarketRegistryURL,
   SetProxy,
   StopInstance,
@@ -65,6 +67,9 @@ import type {
 // we cast to our plain-interface types since the runtime just JSON-serializes.
 export const api = {
   getInstances: (): Promise<Instance[]> => GetInstances(),
+  getInstanceMasks: (id: string): Promise<string[]> => GetInstanceMasks(id),
+  setInstanceMasks: (id: string, names: string[]): Promise<string[]> =>
+    SetInstanceMasks(id, names),
   saveInstance: (i: Instance): Promise<Instance[]> => SaveInstance(i as any),
   removeInstance: (id: string): Promise<Instance[]> => RemoveInstance(id),
   launchInstance: (id: string): Promise<void> => LaunchInstance(id),
