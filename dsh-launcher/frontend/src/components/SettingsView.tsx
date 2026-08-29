@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, errMsg } from '../api';
-import type { EnvReport, MarketSettings, ToolStatus } from '../types';
+import type { EnvReport, LayoutMode, MarketSettings, ToolStatus } from '../types';
 
 interface Props {
   showToast: (msg: string, kind?: 'ok' | 'error') => void;
   appDataPath: string;
+  layout: LayoutMode;
+  onSetLayout: (mode: LayoutMode) => Promise<void>;
 }
 
 function ToolRow({ tool, checking }: { tool: ToolStatus | undefined; checking: boolean }) {
@@ -29,7 +31,7 @@ function ToolRow({ tool, checking }: { tool: ToolStatus | undefined; checking: b
   );
 }
 
-export default function SettingsView({ showToast, appDataPath }: Props) {
+export default function SettingsView({ showToast, appDataPath, layout, onSetLayout }: Props) {
   const [env, setEnv] = useState<EnvReport | null>(null);
   const [checking, setChecking] = useState(true);
   const [installing, setInstalling] = useState(false);
@@ -40,6 +42,13 @@ export default function SettingsView({ showToast, appDataPath }: Props) {
   const [savingMarket, setSavingMarket] = useState(false);
   const [proxy, setProxy] = useState('');
   const [savingProxy, setSavingProxy] = useState(false);
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>(layout);
+  const [savingLayout, setSavingLayout] = useState(false);
+
+  // Sync local selection when the app-wide preference changes (e.g. after save).
+  useEffect(() => {
+    setLayoutMode(layout);
+  }, [layout]);
 
   const check = useCallback(async () => {
     setChecking(true);
@@ -116,6 +125,21 @@ export default function SettingsView({ showToast, appDataPath }: Props) {
     }
   };
 
+  const saveLayout = async () => {
+    setSavingLayout(true);
+    try {
+      await onSetLayout(layoutMode);
+      showToast('布局设置已保存');
+    } catch (e) {
+      showToast('保存失败: ' + errMsg(e), 'error');
+    } finally {
+      setSavingLayout(false);
+    }
+  };
+
+  const layoutLabel = (m: LayoutMode) =>
+    m === 'mac' ? 'Mac 布局' : m === 'win' ? 'Windows / Linux 布局' : '自动（按系统）';
+
   return (
     <div className="settings-view">
       <div className="settings-section">
@@ -186,6 +210,29 @@ export default function SettingsView({ showToast, appDataPath }: Props) {
           </button>
         </div>
         <p className="desc">安装目标 profile：<b className="mono">{market?.profile || 'web'}</b>（所有实例共用）</p>
+      </div>
+
+      <div className="settings-section">
+        <h3>界面布局</h3>
+        <p className="desc">
+          选择顶栏 / 菜单的布局风格。默认「自动」按当前系统：macOS 用 Mac 布局，Windows / Linux 用经典布局。
+        </p>
+        <div className="row">
+          <select
+            className="layout-select"
+            value={layoutMode}
+            onChange={(e) => setLayoutMode(e.target.value as LayoutMode)}
+            title="界面布局风格"
+          >
+            <option value="">自动（按系统）</option>
+            <option value="mac">Mac 布局</option>
+            <option value="win">Windows / Linux 布局</option>
+          </select>
+          <button className="btn btn-accent" onClick={saveLayout} disabled={savingLayout}>
+            {savingLayout ? '保存中…' : '保存'}
+          </button>
+        </div>
+        <p className="desc">当前：<b className="mono">{layoutLabel(layoutMode)}</b>（保存后立即生效）</p>
       </div>
 
       <div className="settings-section">

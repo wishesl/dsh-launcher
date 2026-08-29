@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -22,6 +23,8 @@ type settings struct {
 	// Network proxy routed to launcher-run downloads (pnpm/npm/git installs,
 	// catalog & registry fetches). Empty = direct (no proxy).
 	Proxy string `json:"proxy"`
+	// UI layout override: "" = auto per OS, "mac" = Mac 布局, "win" = Win/Linux 布局.
+	Layout string `json:"layout"`
 }
 
 // settingsStore persists launcher preferences next to instances.json.
@@ -104,4 +107,33 @@ func (s *settingsStore) setProxy(url string) {
 	s.data.Proxy = url
 	s.saveLocked()
 	s.mu.Unlock()
+}
+
+// setLayout persists the UI layout override ("" = auto per OS).
+func (s *settingsStore) setLayout(layout string) {
+	s.mu.Lock()
+	s.data.Layout = layout
+	s.saveLocked()
+	s.mu.Unlock()
+}
+
+// GetLayout returns the UI layout override ("" = auto per platform).
+func (a *App) GetLayout() string {
+	if a.settings == nil {
+		return ""
+	}
+	return a.settings.get().Layout
+}
+
+// SetLayout persists the UI layout override: "" = auto, "mac", "win".
+func (a *App) SetLayout(layout string) error {
+	switch layout {
+	case "", "mac", "win":
+	default:
+		return fmt.Errorf("未知布局: %s（可用: 自动/空、mac、win）", layout)
+	}
+	if a.settings != nil {
+		a.settings.setLayout(layout)
+	}
+	return nil
 }

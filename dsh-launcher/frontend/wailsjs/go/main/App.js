@@ -50,6 +50,10 @@ export function GetInstances() {
   return window['go']['main']['App']['GetInstances']();
 }
 
+export function GetLayout() {
+  return window['go']['main']['App']['GetLayout']();
+}
+
 export function GetMarketSettings() {
   return window['go']['main']['App']['GetMarketSettings']();
 }
@@ -148,6 +152,10 @@ export function SetAutoStart(arg1, arg2) {
 
 export function SetInstanceMasks(arg1, arg2) {
   return window['go']['main']['App']['SetInstanceMasks'](arg1, arg2);
+}
+
+export function SetLayout(arg1) {
+  return window['go']['main']['App']['SetLayout'](arg1);
 }
 
 export function SetMarketRegistryURL(arg1) {

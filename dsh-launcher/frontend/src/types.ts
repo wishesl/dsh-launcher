@@ -145,6 +145,9 @@ export interface ProxySettings {
   proxy: string; // "" = direct (no proxy)
 }
 
+// UI layout override (Settings panel): "" = auto per OS, "mac", "win".
+export type LayoutMode = '' | 'mac' | 'win';
+
 export interface MarketLogEvent {
   line: string;
 }

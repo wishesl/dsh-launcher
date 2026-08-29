@@ -10,6 +10,7 @@ import {
   GetAppDataPath,
   GetInstanceMasks,
   GetInstances,
+  GetLayout,
   GetMarketSettings,
   GetProxySettings,
   HideToTray,
@@ -34,6 +35,7 @@ import {
   SelectDirectory,
   SetAutoStart,
   SetInstanceMasks,
+  SetLayout,
   SetMarketRegistryURL,
   SetProxy,
   StopInstance,
@@ -49,6 +51,7 @@ import type {
   Instance,
   InstalledPlugin,
   LogEvent,
+  LayoutMode,
   MarketCatalog,
   MarketLogEvent,
   MarketOpResult,
@@ -110,6 +113,10 @@ export const api = {
   approveBuilds: (names: string[]): Promise<void> => ApproveBuilds(names),
   getMarketSettings: (): Promise<MarketSettings> => GetMarketSettings(),
   setMarketRegistryURL: (url: string): Promise<void> => SetMarketRegistryURL(url),
+
+  // UI layout (Settings)
+  getLayout: (): Promise<LayoutMode> => GetLayout() as any,
+  setLayout: (mode: LayoutMode): Promise<void> => SetLayout(mode),
 
   // plugin favorites (local, offline)
   listFavorites: (): Promise<FavoritePlugin[]> => ListFavorites(),

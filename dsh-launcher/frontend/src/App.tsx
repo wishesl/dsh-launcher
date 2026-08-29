@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, errMsg } from './api';
 import { BrowserOpenURL, Environment } from '../wailsjs/runtime/runtime';
-import type { ExitChoice, Instance, LogEvent, MarketOpState, RegistryInfo, ServiceState } from './types';
+import type { ExitChoice, Instance, LayoutMode, LogEvent, MarketOpState, RegistryInfo, ServiceState } from './types';
 import Header from './components/Header';
 import Sidebar, { type ViewKey } from './components/Sidebar';
 import VersionView from './components/VersionView';
@@ -32,21 +32,42 @@ export default function App() {
   const [logsOpen, setLogsOpen] = useState(false);
   // Sidebar (菜单栏) 展开/收起：收起后变为仅图标小卡片。
   const [collapsed, setCollapsed] = useState(false);
-  // 平台布局：mac 用当前布局；win/linux 把三个点移到顶栏右侧、logo 上移顶栏左侧。
+  // 布局：layoutPref 为用户显式选择（''=自动）；os 为最终生效布局。
+  // mac 用当前布局；win/linux 把三个点移到顶栏右侧、logo 上移顶栏左侧。
+  const [layoutPref, setLayoutPref] = useState<LayoutMode>('');
   const [os, setOs] = useState<'mac' | 'win'>('win');
+
+  const detectOs = useCallback(async (): Promise<'mac' | 'win'> => {
+    try {
+      const env = await Environment();
+      return env.platform === 'darwin' ? 'mac' : 'win';
+    } catch {
+      return 'win'; // 浏览器预览无 runtime，按 win 布局
+    }
+  }, []);
+
   useEffect(() => {
     let active = true;
-    Environment()
-      .then((env) => {
-        if (active) setOs(env.platform === 'darwin' ? 'mac' : 'win');
-      })
-      .catch(() => {
-        /* 浏览器预览无 runtime，按 win 布局 */
-      });
+    (async () => {
+      const pref = (await api.getLayout().catch(() => '')) as LayoutMode;
+      if (!active) return;
+      setLayoutPref(pref);
+      setOs(pref === 'mac' || pref === 'win' ? pref : await detectOs());
+    })();
     return () => {
       active = false;
     };
-  }, []);
+  }, [detectOs]);
+
+  // 用户在设置里切换布局：保存偏好并立即应用（''=自动→按系统）。
+  const onSetLayout = useCallback(
+    async (mode: LayoutMode) => {
+      await api.setLayout(mode);
+      setLayoutPref(mode);
+      setOs(mode === 'mac' || mode === 'win' ? mode : await detectOs());
+    },
+    [detectOs]
+  );
   const [logsTab, setLogsTab] = useState<'logs' | 'market'>('logs');
   // Plugin-market operation stream (hoisted so the drawer can show it too).
   const [marketLogs, setMarketLogs] = useState<string[]>([]);
@@ -442,7 +463,14 @@ export default function App() {
               onMarketRunning={setMarketRunning}
             />
           )}
-          {view === 'settings' && <SettingsView showToast={showToast} appDataPath={appDataPath} />}
+          {view === 'settings' && (
+            <SettingsView
+              showToast={showToast}
+              appDataPath={appDataPath}
+              layout={layoutPref}
+              onSetLayout={onSetLayout}
+            />
+          )}
         </div>
 
         {/* Right-side run-log pane: in-flow third column (sidebar | content | logs) */}
