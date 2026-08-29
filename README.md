@@ -18,6 +18,30 @@ DSH 的启动方式本质是一条 `npx -y @deepseek-ai/dsh@<版本> web` 命令
 
 ![插件市场](doc/20260828-222413.jpg)
 
+**插件市场 · 已安装**（可视化启用 / 禁用已安装插件，开关写入 profile 补丁层，约 1 秒 HMR 生效、重启保持）：
+
+![插件市场-已安装](doc/20260829-120036.jpg)
+
+**实例界面**（本体管理：版本安装到目录、源码启动、实例级「屏蔽插件」、启动 / 停止 / 日志）：
+
+![实例界面](doc/20260829-120011.jpg)
+
+## 核心亮点：不启动 DSH，安全地管理一切
+
+把 DSH 装好、配好、插件调好，再干干净净地启动——**整个过程不需要先打开 DSH**：
+
+- **插件管理（不开 web）**：市场里发现 / 安装 / 卸载 / 启用 / 禁用插件，操作进度实时可见；
+  开关直接写入 profile 的补丁层（约 1 秒 HMR 生效、重启保持）；还能离线收藏插件、生成 / 导入分享码。
+- **本体管理（不开 web）**：可视化查询 npm `latest` / `next` / 全部版本与发布时间；
+  「安装到目录」把指定版本真实装进目录 `node_modules`（pnpm 安装 + 自动批准原生模块构建），
+  agent 可读源码；也可以「源码启动」直接跑源码目录（初始化 / 构建 / 启动命令一键执行）。
+- **实例级插件屏蔽**：给每个实例单独勾选要屏蔽的插件——启动时注入**临时 `--patch` 覆盖层**，
+  只对这一次启动生效，**不改全局开关状态**，实例停止后自动恢复；已卸载的插件自动不展示、不屏蔽。
+- **安全第一**：插件安装 / 卸载 / 开关都要求实例处于停止状态（绝不边运行边改插件文件）；
+  屏蔽走临时覆盖层而非改写全局配置；卸载自动清理禁用痕迹。
+
+> 简单说：**选目录 → 装版本 → 配插件 → 点启动**，全程图形化，不开一条命令行，也不提前启动 DSH。
+
 ## 快速上手
 
 1. **准备环境**：运行 DSH 需要 Node.js（推荐 pnpm）；构建本应用需要 [Wails v2 CLI](https://wails.io/docs/gettingstarted/installation) + Go 1.25+。
@@ -63,6 +87,14 @@ DSH 的启动方式本质是一条 `npx -y @deepseek-ai/dsh@<版本> web` 命令
   版本来源：**官方 registry 优先，npmmirror 兜底**。
 - **启动方式**：`npx -y @deepseek-ai/dsh@<version> web`，默认/推荐「本地副本（local）」，
   并支持一键「安装到目录」，避免 npx 反复联网拉取。
+- **源码启动模式**：选择 DSH 源码目录，初始化 / 构建 / 启动命令可自定义
+  （默认 `pnpm install` / `pnpm run build` / `pnpm dsh web`），一键执行。
+- **插件市场**：发现 / 安装 / 卸载社区插件（复用官方 `dsh plugin --profile web` 通道），
+  启用 / 禁用直接写 profile 的 `cordis.patch.yml`（HMR 约 1 秒生效、重启保持）；
+  操作进度实时显示在右侧日志面板，支持镜像源配置与网络代理。
+- **插件收藏与分享**：离线收藏插件（收藏文件在本地，断网也能安装），生成 / 导入分享码批量分享。
+- **实例级插件屏蔽**：每实例勾选要屏蔽的插件，启动时注入临时 `--patch` 覆盖层，
+  不改全局开关状态、实例停止后自动恢复；已卸载插件自动不展示、不屏蔽。
 - **实时日志**：启动日志流式回显；就绪感知（自动识别 Web 地址）、崩溃与正常退出区分、
   自动启动时日志持久化、退出后清理残留的孤儿 DSH 进程。
 - **隐藏到系统托盘**：点窗口 ✕ 默认隐藏到托盘而非退出（可关闭）；托盘图标 + 菜单
@@ -90,24 +122,32 @@ dsh-launcher/
 ├── main.go            # 应用入口：窗口/托盘/单实例锁/绑定
 ├── app.go             # App 生命周期 + 实例增删改查等绑定方法
 ├── instances.go       # 实例持久化（%APPDATA%\DSHLauncher\instances.json）
+├── instance_mask.go   # 实例级插件屏蔽（名单持久化 + 临时 --patch 覆盖层生成/清理）
 ├── dsh_query.go       # 版本查询（npm registry / 本地版本探测）
-├── dsh_process.go     # 进程管理（npx 启动 / taskkill /T /F 停止 / 日志推送）
-├── dsh_job_windows.go # Windows 进程树管理
+├── dsh_process.go     # 进程管理（npx/pnpm 启动、进程树停止、日志推送、就绪探测）
+├── dsh_job_windows.go # Windows 进程树管理（Job Object / taskkill）
+├── install.go         # 「安装到目录」（pnpm 安装 + 批准原生模块构建）
+├── market_catalog.go  # 插件市场目录拉取（镜像源 / ETag 缓存）
+├── market_ops.go      # 插件安装 / 卸载（复用官方 dsh plugin CLI）
+├── market_installed.go# 已装插件读取与启用/禁用（写 cordis.patch.yml 补丁层）
+├── favorites.go       # 插件收藏与分享码
+├── service_probe.go   # 独立端口服务探测（驱动「已就绪」+ 打开按钮）
+├── proxy.go           # 网络代理（npm/pnpm/git/registry）
 ├── env.go             # 前置环境检测（npm/pnpm）与 pnpm 安装
 ├── settings.go        # 设置持久化（%APPDATA%\DSHLauncher\settings.json）
 ├── tray.go            # 系统托盘
 └── frontend/
-    ├── src/
-    │   ├── App.tsx / api.ts / types.ts / util.ts
-    │   └── components/
-    │       ├── Header.tsx          # 顶栏（最小化到托盘按钮等）
-    │       ├── InstanceList.tsx    # 实例列表（固定高度滚动）
-    │       ├── InstanceCard.tsx    # 实例卡片（状态灯 / 自启开关 / 打开网页）
-    │       ├── InstanceForm.tsx    # 添加实例表单（目录选择 + 版本选择）
-    │       ├── VersionPanel.tsx    # 最新版本 / 版本历史面板
-    │       ├── LogPanel.tsx        # 运行日志面板
-    │       ├── SettingsModal.tsx   # 设置（托盘行为 / 环境检测）
-    │       └── ExitDialog.tsx      # ✕ 退出选择弹窗
+    └── src/
+        ├── App.tsx / api.ts / types.ts / util.ts
+        └── components/
+            ├── Header.tsx / Sidebar.tsx        # 顶栏 / 左侧菜单
+            ├── InstancesView.tsx / InstanceCard.tsx / InstanceForm.tsx
+            ├── MaskPluginsDialog.tsx           # 实例「屏蔽插件」选择弹窗
+            ├── VersionView.tsx / VersionPanel.tsx  # 版本历史
+            ├── MarketView.tsx                  # 插件市场（发现 / 已安装 / 收藏）
+            ├── LogDrawer.tsx / LogPanel.tsx    # 右侧运行日志第三栏
+            ├── SettingsView.tsx                # 设置
+            └── ExitDialog.tsx / ShareCodeDialog.tsx
     └── wailsjs/                    # Wails 自动生成的前端绑定
 ```
 
@@ -156,9 +196,15 @@ git push origin v0.1.0
 |---|---|
 | 实例列表 | `%APPDATA%\DSHLauncher\instances.json` |
 | 应用设置（托盘行为、自启等） | `%APPDATA%\DSHLauncher\settings.json` |
-| 自动启动日志 | 应用日志目录（`*.log`） |
+| 插件收藏 | `%APPDATA%\DSHLauncher\favorites.json` |
+| 实例插件屏蔽名单 | `%APPDATA%\DSHLauncher\instance-masks.json` |
+| 插件市场目录缓存 | `%APPDATA%\DSHLauncher\market-catalog.json` |
+| 实例运行日志 | `%APPDATA%\DSHLauncher\logs\<实例ID>.log` |
+| 临时插件屏蔽层（运行期间） | 实例目录下 `.dsh-mask-<实例ID>.yml`（停止后自动删除） |
 
 ## 相关文档
 
 - [`需求.md`](需求.md) —— 完整需求与关键决策记录
 - [`DSH版本查询与升级指南.md`](DSH版本查询与升级指南.md) —— DSH 版本查询与升级的背景调查
+- [`插件市场实现方案.md`](插件市场实现方案.md) —— 插件市场设计决策
+- [`插件收藏功能实现方案.md`](插件收藏功能实现方案.md) —— 收藏与分享码设计决策

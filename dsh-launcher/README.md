@@ -1,19 +1,7 @@
-# README
+# DSH Launcher（源码目录）
 
-## About
+这是 **DSH Launcher**（DeepSeek Harness 桌面启动器）的 Go 后端 + React 前端源码目录。
 
-This is the official Wails React-TS template.
-
-You can configure the project by editing `wails.json`. More information about the project settings can be found
-here: https://wails.io/docs/reference/project-config
-
-## Live Development
-
-To run in live development mode, run `wails dev` in the project directory. This will run a Vite development
-server that will provide very fast hot reload of your frontend changes. If you want to develop in a browser
-and have access to your Go methods, there is also a dev server that runs on http://localhost:34115. Connect
-to this in your browser, and you can call your Go code from devtools.
-
-## Building
-
-To build a redistributable, production mode package, use `wails build`.
+- 项目介绍、功能特性、构建与发布说明见仓库根目录的 [`README.md`](../README.md)。
+- 开发约定见 [`AGENTS.md`](../agents.md)。
+- 构建：`cd dsh-launcher && wails build`（产物 `build/bin/dsh-launcher.exe`）。
