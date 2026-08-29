@@ -18,6 +18,10 @@ export interface Instance {
   localVersion: string; // detected in dir, informational
   extraArgs: string;    // optional extra CLI args after "web"
   pkgMgr: string;       // "local" (recommended) | "pnpm" | "npx"
+  source?: boolean;     // 源码启动：不用 npm 版本，直接运行目录内 DSH 源码
+  initCmd?: string;     // 初始化命令（源码启动，「安装到目录」第一步，默认 "pnpm install"）
+  buildCmd?: string;    // 构建命令（源码启动，「安装到目录」第二步，默认 "pnpm run build"）
+  startCmd?: string;    // 启动命令（源码启动，「启动」时执行，默认 "pnpm dsh web"）
   autoStart: boolean;
   createdAt: any;       // RFC3339 string
   pid: number;

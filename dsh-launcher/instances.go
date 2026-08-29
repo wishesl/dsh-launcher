@@ -22,6 +22,14 @@ type Instance struct {
 	AutoStart    bool      `json:"autoStart"`
 	CreatedAt    time.Time `json:"createdAt"`
 
+	// 源码启动 (Source=true): 不用 npm 版本，直接运行目录内的 DSH 源码。
+	// 初始化 / 构建 / 启动由下面的自定义命令控制，默认
+	// "pnpm install" / "pnpm run build" / "pnpm dsh web"，用户可在表单中自行输入。
+	Source   bool   `json:"source"`
+	InitCmd  string `json:"initCmd"`  // 初始化命令（「安装到目录」第一步）
+	BuildCmd string `json:"buildCmd"` // 构建命令（「安装到目录」第二步）
+	StartCmd string `json:"startCmd"` // 启动命令（「启动」时执行）
+
 	// Runtime fields — live process state. Persisted to disk for continuity,
 	// but always re-derived at cold start via resetRuntime: a persisted
 	// "ready"/PID must never survive a launcher restart (it previously leaked

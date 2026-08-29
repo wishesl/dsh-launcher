@@ -165,6 +165,10 @@ export namespace main {
 	    autoStart: boolean;
 	    // Go type: time
 	    createdAt: any;
+	    source: boolean;
+	    initCmd: string;
+	    buildCmd: string;
+	    startCmd: string;
 	    pid: number;
 	    status: string;
 	    webUrl: string;
@@ -184,6 +188,10 @@ export namespace main {
 	        this.pkgMgr = source["pkgMgr"];
 	        this.autoStart = source["autoStart"];
 	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.source = source["source"];
+	        this.initCmd = source["initCmd"];
+	        this.buildCmd = source["buildCmd"];
+	        this.startCmd = source["startCmd"];
 	        this.pid = source["pid"];
 	        this.status = source["status"];
 	        this.webUrl = source["webUrl"];

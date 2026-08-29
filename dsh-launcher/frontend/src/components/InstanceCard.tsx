@@ -31,12 +31,6 @@ const STATUS_META: Record<string, { label: string; cls: string; rail: string }> 
   crashed: { label: '异常退出', cls: 'sb-crashed', rail: 'rail-crashed' },
 };
 
-const PKGMGR_LABEL: Record<string, string> = {
-  local: '本地',
-  pnpm: 'pnpm',
-  npx: 'npx',
-};
-
 export default function InstanceCard({
   instance,
   service,
@@ -60,9 +54,10 @@ export default function InstanceCard({
     instance.status === 'ready';
   const isBusy = busy || instance.status === 'starting' || instance.status === 'stopping';
   const pkgMgr = instance.pkgMgr || 'local';
+  const isSource = !!instance.source; // 源码启动：目录内源码 + 自定义命令
 
-  const outdated = instance.localVersion && registry && registry.latest && instance.localVersion !== registry.latest;
-  const needsInstall = pkgMgr === 'local' && !instance.localVersion;
+  const outdated = !isSource && instance.localVersion && registry && registry.latest && instance.localVersion !== registry.latest;
+  const needsInstall = !isSource && pkgMgr === 'local' && !instance.localVersion;
 
   // Service state (decoupled from process state): only a reachable port gives
   // a usable 打开 button.
@@ -98,10 +93,17 @@ export default function InstanceCard({
           <span className="status-dot" />
           {st.label}
         </span>
-        <span className={`pill pill-version ${instance.version === 'latest' ? 'pill-accent' : ''}`}>
-          {instance.version === 'latest' ? 'latest' : instance.version}
+        {!isSource && (
+          <span className={`pill pill-version ${instance.version === 'latest' ? 'pill-accent' : ''}`}>
+            {instance.version === 'latest' ? 'latest' : instance.version}
+          </span>
+        )}
+        <span
+          className="pill"
+          title={isSource ? '源码启动：直接执行自定义命令（初始化 / 构建 / 启动）' : '版本启动：从 npm 安装 DSH 按版本启动'}
+        >
+          {isSource ? 'code' : 'npm'}
         </span>
-        <span className="pill" title="启动方式">{PKGMGR_LABEL[pkgMgr] ?? pkgMgr}</span>
         <label
           className="autostart-toggle"
           title="随启动器自动启动此实例：打开 DSH Launcher 时自动拉起"
@@ -134,7 +136,18 @@ export default function InstanceCard({
       </div>
 
       <div className="instance-meta">
-        {instance.localVersion ? (
+        {isSource ? (
+          <>
+            {instance.localVersion && (
+              <span className="meta-item" title="目录内 node_modules 中实际安装的 DSH 版本">
+                本地副本 <b>{instance.localVersion}</b>
+              </span>
+            )}
+            <span className="meta-item mono" title="启动命令（点击「启动」执行）；「安装到目录」执行初始化+构建">
+              启动: {instance.startCmd || 'pnpm dsh web'}
+            </span>
+          </>
+        ) : instance.localVersion ? (
           <span className="meta-item" title="目录内 node_modules 中实际安装的 DSH 版本（npx 优先使用它）">
             本地副本 <b>{instance.localVersion}</b>
             {outdated && <span className="tag-warn">有新版</span>}
@@ -163,7 +176,11 @@ export default function InstanceCard({
             className={`btn ${needsInstall ? 'btn-accent' : 'btn-ghost'}`}
             onClick={() => onInstall(instance.id)}
             disabled={isBusy}
-            title={needsInstall ? '把该版本真实安装进目录（生成可读源码 node_modules）' : '重新安装该版本到目录（生成可读源码）'}
+            title={isSource
+              ? '执行初始化+构建命令（默认 pnpm install + pnpm run build）'
+              : needsInstall
+                ? '把该版本真实安装进目录（生成可读源码 node_modules）'
+                : '重新安装该版本到目录（生成可读源码）'}
           >
             安装到目录
           </button>

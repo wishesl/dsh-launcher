@@ -27,10 +27,17 @@ const DEFAULT_INSTANCE = (): Instance => ({
 
 const CUSTOM_OPTION = '__custom__';
 
+// 源码启动的默认三命令：pnpm install → pnpm run build → pnpm dsh web。
+const DEFAULT_SOURCE_INIT = 'pnpm install';
+const DEFAULT_SOURCE_BUILD = 'pnpm run build';
+const DEFAULT_SOURCE_START = 'pnpm dsh web';
+
 export default function InstanceForm({ registry, editing, onClose, onSaved }: Props) {
   const [form, setForm] = useState<Instance>(() =>
     editing ? { ...DEFAULT_INSTANCE(), ...editing } : DEFAULT_INSTANCE()
   );
+  // 实例类型：版本启动（现有行为） / 源码启动（目录内源码 + 自定义命令）。
+  const [sourceMode, setSourceMode] = useState<boolean>(editing ? !!editing.source : false);
   const [versionMode, setVersionMode] = useState<'latest' | 'spec'>(
     !editing || editing.version === 'latest' ? 'latest' : 'spec'
   );
@@ -169,15 +176,25 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
       setError('请选择启动目录');
       return;
     }
-    if (versionInvalid) {
+    if (!sourceMode && versionInvalid) {
       setError('版本号格式不正确：应为 x.y.z 或 x.y.z-预发布（如 0.1.1-rc.2）');
       return;
     }
     setError(null);
     setSaving(true);
     try {
-      const finalVersion = versionMode === 'latest' ? 'latest' : (form.version.trim() || 'latest');
-      const list = await api.saveInstance({ ...form, version: finalVersion });
+      const payload: Instance = { ...form, source: sourceMode };
+      if (sourceMode) {
+        // 源码模式不使用版本号；三命令留空时回退到默认值。
+        payload.version = 'latest';
+        payload.initCmd = (form.initCmd || '').trim() || DEFAULT_SOURCE_INIT;
+        payload.buildCmd = (form.buildCmd || '').trim() || DEFAULT_SOURCE_BUILD;
+        payload.startCmd = (form.startCmd || '').trim() || DEFAULT_SOURCE_START;
+      }
+      const finalVersion = sourceMode
+        ? 'latest'
+        : (versionMode === 'latest' ? 'latest' : (form.version.trim() || 'latest'));
+      const list = await api.saveInstance({ ...payload, version: finalVersion });
       // #13: editing a live instance only takes effect on next start.
       const wasLive =
         editing && (editing.status === 'running' || editing.status === 'starting' || editing.status === 'ready');
@@ -208,6 +225,32 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
         </div>
 
         <div className="form-body">
+          <div className="field">
+            <span className="field-label">实例类型</span>
+            <div className="radio-row">
+              <label className={`radio-card ${!sourceMode ? 'selected' : ''}`}>
+                <input
+                  type="radio"
+                  name="itype"
+                  checked={!sourceMode}
+                  onChange={() => setSourceMode(false)}
+                />
+                <span className="radio-title">版本启动</span>
+                <span className="radio-sub">从 npm 安装 DSH 按版本启动</span>
+              </label>
+              <label className={`radio-card ${sourceMode ? 'selected' : ''}`}>
+                <input
+                  type="radio"
+                  name="itype"
+                  checked={sourceMode}
+                  onChange={() => setSourceMode(true)}
+                />
+                <span className="radio-title">源码启动 <span className="tag-warn">新</span></span>
+                <span className="radio-sub">目录内源码：pnpm install / build / dsh web</span>
+              </label>
+            </div>
+          </div>
+
           <label className="field">
             <span className="field-label">名称</span>
             <input
@@ -237,10 +280,16 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
                   <button type="button" className="link-btn" onClick={detectLocal}>重新检测</button>
                 </span>
               ) : form.directory ? (
-                <span>
-                  该目录没有本地 DSH 副本（启动时将按版本从 npm 拉取）
-                  <button type="button" className="link-btn" onClick={detectLocal}>检测</button>
-                </span>
+                sourceMode ? (
+                  <span>
+                    源码模式：不安装 DSH 副本，直接运行目录内源码（先点「安装到目录」执行初始化+构建）
+                  </span>
+                ) : (
+                  <span>
+                    该目录没有本地 DSH 副本（启动时将按版本从 npm 拉取）
+                    <button type="button" className="link-btn" onClick={detectLocal}>检测</button>
+                  </span>
+                )
               ) : null}
             </div>
             {/* #9: existence warning */}
@@ -251,6 +300,8 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
             )}
           </label>
 
+          {!sourceMode && (
+          <>
           <div className="field">
             <span className="field-label">DSH 版本</span>
             <div className="radio-row">
@@ -387,6 +438,41 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
               <code className="mono">{form.pkgMgr === 'local' ? 'npx @deepseek-ai/dsh' : (form.pkgMgr === 'npx' ? 'npx -y' : 'pnpm dlx')} {form.pkgMgr === 'local' ? '' : '@deepseek-ai/dsh@' + (versionMode === 'latest' ? 'latest' : (form.version || '…'))} web{form.extraArgs ? ' ' + form.extraArgs : ''}</code>
             </div>
           </div>
+          </>
+          )}
+
+          {/* 源码启动：初始化 / 构建 / 启动命令（默认 pnpm install / pnpm run build / pnpm dsh web） */}
+          {sourceMode && (
+            <>
+              <label className="field">
+                <span className="field-label">初始化命令 <span className="muted">（「安装到目录」第一步）</span></span>
+                <input
+                  value={form.initCmd || DEFAULT_SOURCE_INIT}
+                  onChange={(e) => set({ initCmd: e.target.value })}
+                  placeholder={DEFAULT_SOURCE_INIT}
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">构建命令 <span className="muted">（「安装到目录」第二步）</span></span>
+                <input
+                  value={form.buildCmd || DEFAULT_SOURCE_BUILD}
+                  onChange={(e) => set({ buildCmd: e.target.value })}
+                  placeholder={DEFAULT_SOURCE_BUILD}
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">启动命令</span>
+                <input
+                  value={form.startCmd || DEFAULT_SOURCE_START}
+                  onChange={(e) => set({ startCmd: e.target.value })}
+                  placeholder={DEFAULT_SOURCE_START}
+                />
+                <div className="field-hint">
+                  点击实例卡片的「启动」直接执行该命令（默认 <code className="mono">{DEFAULT_SOURCE_START}</code>），可自行修改。
+                </div>
+              </label>
+            </>
+          )}
 
           <div className="form-autostart">
             <Switch
@@ -404,7 +490,7 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
 
         <div className="modal-foot">
           <button type="button" className="btn btn-ghost" onClick={onClose}>取消</button>
-          <button type="submit" className="btn btn-primary" disabled={saving || versionInvalid}>
+          <button type="submit" className="btn btn-primary" disabled={saving || (!sourceMode && versionInvalid)}>
             {saving ? '保存中…' : editing ? '保存修改' : '添加并保存'}
           </button>
         </div>

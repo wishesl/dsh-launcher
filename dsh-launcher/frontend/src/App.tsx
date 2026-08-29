@@ -238,10 +238,11 @@ export default function App() {
   const install = async (id: string) => {
     setBusyId(id);
     setActiveLogId(id);
+    const inst = instances.find((i) => i.id === id);
     try {
       const list = await api.installToDirectory(id);
       setInstances(list);
-      showToast('安装完成，本地副本已生成');
+      showToast(inst?.source ? '初始化+构建完成（源码模式）' : '安装完成，本地副本已生成');
     } catch (e) {
       showToast('安装失败: ' + errMsg(e), 'error');
     } finally {

@@ -31,6 +31,19 @@ func instanceServiceURL(inst *Instance) (string, bool) {
 	if u := strings.TrimSpace(inst.WebUrl); u != "" {
 		return u, true
 	}
+	// 源码启动：端口可能写在自定义启动命令里（pnpm dsh web --port 3081），
+	// 先于 extraArgs 解析。
+	if inst.Source {
+		if m := extraPortRe.FindStringSubmatch(strings.TrimSpace(inst.StartCmd)); m != nil && m[1] != "" {
+			p, err := strconv.Atoi(m[1])
+			if err == nil {
+				if p == 0 {
+					return "", false // OS-chosen port; unknown until process output
+				}
+				return fmt.Sprintf("http://127.0.0.1:%d", p), true
+			}
+		}
+	}
 	if m := extraPortRe.FindStringSubmatch(inst.ExtraArgs); m != nil && m[1] != "" {
 		p, err := strconv.Atoi(m[1])
 		if err == nil {

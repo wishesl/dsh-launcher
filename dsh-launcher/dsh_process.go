@@ -39,6 +39,38 @@ type StatusEvent struct {
 // webURLRe matches the local web address DSH prints once it starts listening.
 var webURLRe = regexp.MustCompile(`https?://(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(?::(\d{2,5}))?`)
 
+// Source-mode default commands (源码启动). The user may override each in the
+// form; the defaults mirror the standard DSH source workflow:
+//
+//	pnpm install → pnpm run build → pnpm dsh web
+const (
+	defaultSourceInitCmd  = "pnpm install"
+	defaultSourceBuildCmd = "pnpm run build"
+	defaultSourceStartCmd = "pnpm dsh web"
+)
+
+// sourceStartCommand returns the launch command for a 源码启动 instance: its
+// user-editable 启动命令 (default "pnpm dsh web"), with any extra args appended.
+func sourceStartCommand(inst Instance) string {
+	cmd := strings.TrimSpace(inst.StartCmd)
+	if cmd == "" {
+		cmd = defaultSourceStartCmd
+	}
+	if extra := strings.TrimSpace(inst.ExtraArgs); extra != "" {
+		cmd = cmd + " " + extra
+	}
+	return cmd
+}
+
+// effectiveSourceCmd returns cmd trimmed, or def when empty — the init/build
+// commands are defaulted identically on save (app.go) and on run (install.go).
+func effectiveSourceCmd(cmd, def string) string {
+	if c := strings.TrimSpace(cmd); c != "" {
+		return c
+	}
+	return def
+}
+
 // extractWebURL returns a normalized http://127.0.0.1:<port> URL from an
 // output line, or "" if the line does not advertise one.
 func extractWebURL(line string) string {
@@ -143,9 +175,11 @@ func (a *App) LaunchInstance(id string) error {
 		return fmt.Errorf("实例已在运行: %s", inst.Name)
 	}
 
-	if err := validateVersion(inst.PkgMgr, inst.Version); err != nil {
-		a.mu.Unlock()
-		return err
+	if !inst.Source {
+		if err := validateVersion(inst.PkgMgr, inst.Version); err != nil {
+			a.mu.Unlock()
+			return err
+		}
 	}
 
 	inst.Status = "starting"
@@ -154,17 +188,26 @@ func (a *App) LaunchInstance(id string) error {
 	a.mu.Unlock()
 
 	a.emitStatus(snapshot.ID, "starting", 0)
-	a.systemLog(snapshot.ID, 0, fmt.Sprintf("正在启动 DSH %s (目录: %s)", versionLabel(snapshot.Version), snapshot.Directory))
+	if snapshot.Source {
+		a.systemLog(snapshot.ID, 0, fmt.Sprintf("正在启动 DSH（源码模式） (目录: %s)", snapshot.Directory))
+		a.systemLog(snapshot.ID, 0, fmt.Sprintf("源码模式：启动命令「%s」。首次运行请先「安装到目录」执行初始化+构建。", sourceStartCommand(snapshot)))
+	} else {
+		a.systemLog(snapshot.ID, 0, fmt.Sprintf("正在启动 DSH %s (目录: %s)", versionLabel(snapshot.Version), snapshot.Directory))
+	}
 	if pl := a.proxyLogLine(); pl != "" {
 		a.systemLog(snapshot.ID, 0, pl)
 	}
-	if snapshot.PkgMgr == "local" && snapshot.LocalVersion == "" {
+	if !snapshot.Source && snapshot.PkgMgr == "local" && snapshot.LocalVersion == "" {
 		a.systemLog(snapshot.ID, 0, "提示: 目录内未检测到本地副本，npx 可能回退到 registry 下载。建议先「安装到目录」。")
 	}
 
 	// buildCommandFn is a var (not a direct call) so tests can substitute the
 	// command without spawning real npx.
 	cmdStr := buildCommandFn(snapshot.Version, snapshot.ExtraArgs, snapshot.PkgMgr)
+	if snapshot.Source {
+		// 源码启动：直接执行用户配置的启动命令（默认 pnpm dsh web）。
+		cmdStr = sourceStartCommand(snapshot)
+	}
 	cmd := shellCommand(context.Background(), cmdStr)
 	cmd.Dir = snapshot.Directory
 	if cmd.Dir == "" {

@@ -265,6 +265,13 @@ func (a *App) SaveInstance(inst Instance) ([]Instance, error) {
 		// agent), instead of pulling from a registry cache.
 		inst.PkgMgr = "local"
 	}
+	if inst.Source {
+		// 源码启动：默认三命令（pnpm install / pnpm run build / pnpm dsh web），
+		// 用户可在表单中自行输入覆盖。
+		inst.InitCmd = effectiveSourceCmd(inst.InitCmd, defaultSourceInitCmd)
+		inst.BuildCmd = effectiveSourceCmd(inst.BuildCmd, defaultSourceBuildCmd)
+		inst.StartCmd = effectiveSourceCmd(inst.StartCmd, defaultSourceStartCmd)
+	}
 	if inst.CreatedAt.IsZero() {
 		inst.CreatedAt = time.Now()
 	}
@@ -281,6 +288,10 @@ func (a *App) SaveInstance(inst Instance) ([]Instance, error) {
 		existing.LocalVersion = inst.LocalVersion
 		existing.ExtraArgs = inst.ExtraArgs
 		existing.PkgMgr = inst.PkgMgr
+		existing.Source = inst.Source
+		existing.InitCmd = inst.InitCmd
+		existing.BuildCmd = inst.BuildCmd
+		existing.StartCmd = inst.StartCmd
 		existing.AutoStart = inst.AutoStart
 		a.store.saveAll()
 		go a.refreshTrayInstances()

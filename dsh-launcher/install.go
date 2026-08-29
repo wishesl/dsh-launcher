@@ -59,6 +59,12 @@ func (a *App) InstallToDirectory(id string) ([]Instance, error) {
 	snapshot := *inst
 	a.mu.Unlock()
 
+	// 源码启动：安装 = 初始化 + 构建（默认 pnpm install → pnpm run build），
+	// 不安装 registry 版本，直接对目录内源码操作。
+	if snapshot.Source {
+		return a.installSourceToDirectory(snapshot)
+	}
+
 	if err := validateVersion(snapshot.PkgMgr, snapshot.Version); err != nil {
 		return nil, err
 	}
@@ -97,6 +103,45 @@ func (a *App) InstallToDirectory(id string) ([]Instance, error) {
 	list := a.store.list()
 	a.mu.Unlock()
 	a.systemLog(snapshot.ID, 0, fmt.Sprintf("安装完成，本地副本: %s", displayLocal(local)))
+	return list, nil
+}
+
+// installSourceToDirectory runs the 源码启动 install flow: 初始化 + 构建
+// (defaults pnpm install / pnpm run build, user-editable). Native-module
+// builds are approved between the two so pnpm actually compiles koffi /
+// node-pty etc. during install.
+func (a *App) installSourceToDirectory(snapshot Instance) ([]Instance, error) {
+	if err := os.MkdirAll(snapshot.Directory, 0o755); err != nil {
+		return nil, err
+	}
+	initCmd := effectiveSourceCmd(snapshot.InitCmd, defaultSourceInitCmd)
+	buildCmd := effectiveSourceCmd(snapshot.BuildCmd, defaultSourceBuildCmd)
+
+	a.systemLog(snapshot.ID, 0, fmt.Sprintf("开始初始化（源码模式）: %s", snapshot.Directory))
+	if err := a.runStreamed(snapshot, initCmd); err != nil {
+		a.systemLog(snapshot.ID, 0, "初始化失败: "+err.Error())
+		return nil, err
+	}
+	a.systemLog(snapshot.ID, 0, "批准原生模块构建 (koffi / node-pty 等)...")
+	if _, err := mergeAllowBuilds(snapshot.Directory, defaultBuildPackages); err != nil {
+		return nil, err
+	}
+	a.systemLog(snapshot.ID, 0, "开始构建（源码模式）...")
+	if err := a.runStreamed(snapshot, buildCmd); err != nil {
+		a.systemLog(snapshot.ID, 0, "构建失败: "+err.Error())
+		return nil, err
+	}
+
+	// refresh the detected local version
+	local := detectLocalVersion(snapshot.Directory)
+	a.mu.Lock()
+	if cur := a.store.find(snapshot.ID); cur != nil {
+		cur.LocalVersion = local
+	}
+	a.store.saveAll()
+	list := a.store.list()
+	a.mu.Unlock()
+	a.systemLog(snapshot.ID, 0, fmt.Sprintf("初始化+构建完成，本地副本: %s", displayLocal(local)))
 	return list, nil
 }
 
