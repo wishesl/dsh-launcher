@@ -26,12 +26,17 @@ dsh-launcher（监督者）
 
 - **opt-in 双重门控**（dsh-launcher 侧 `selfRestartEnabled`）：
   1. profile 已安装 `dsh-self-mcp`；
-  2. 实例目录存在 checked-in 标记文件 `.dsh-self-restart.optin`（本项目已放）。
+  2. **实例目录**存在标记文件 `.dsh-self-restart.optin`（launcher 以每个实例的
+     `directory` 为门控锚点，不是仓库根）。
 - 两者都满足时，launcher 才在本次启动生成项目级临时覆盖层 `.dsh-self-restart-<id>.yml`
   （内容即一行 `- id: self-restart` / `name: 'dsh-self-mcp'`），并注入
   `DSH_LAUNCHER=1`、`DSH_INSTANCE_ID=<id>`。
+- 本仓库 launcher 实例的目录是 `dsh-vsn\0.1.1-rc2`（本地模式）与
+  `dsh-vsn\v0.1.2-alpha.1`（源码模式），两个目录内均已放置 `.dsh-self-restart.optin`
+  （vendored/gitignored，机器本地 opt-in；仓库根的 `.dsh-self-restart.optin` 用于
+  实例目录=仓库根的通用场景）。
 - **不改 `cordis.patch.yml`**；**不用本项目启动（别的实例 / 别的目录 / 控制台直启）→ 无行引用 → 工具不存在、状态不碰**。
-- 放弃项目时清理：`dsh plugin --profile web remove dsh-self-mcp`（或直接删除该实例）；`.dsh-self-mcp/` 状态目录在项目内、已 gitignore、重启完成后自动清空。
+- 放弃项目时清理：`dsh plugin --profile web remove dsh-self-mcp`（或直接删除该实例）；`.dsh-self-mcp/` 状态目录在实例目录内、已 gitignore、重启完成后自动清空。
 
 ## 护栏
 
