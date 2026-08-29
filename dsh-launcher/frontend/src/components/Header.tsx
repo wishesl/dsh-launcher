@@ -1,5 +1,5 @@
 import type { Instance, RegistryInfo } from '../types';
-import { RotateCw, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { RotateCw, ChevronsLeft, ChevronsRight, ScrollText } from 'lucide-react';
 import WinControls from './WinControls';
 import dshLogo from '../assets/dsh.svg';
 
@@ -114,12 +114,13 @@ export default function Header({
           <RotateCw size={16} strokeWidth={1.75} aria-hidden />
         </button>
         <button
-          className={`btn btn-sm log-toggle-btn ${logsOpen ? 'btn-accent' : 'btn-ghost'}`}
+          className={`btn btn-icon log-toggle-btn ${logsOpen ? 'btn-accent' : 'btn-ghost'}`}
           onClick={onToggleLogs}
           title={logsOpen ? '收起右侧运行日志面板' : '打开右侧运行日志面板（实例启动 / 插件安装时自动弹出）'}
+          aria-label={logsOpen ? '收起日志' : '运行日志'}
         >
           {logsLive && <span className="live-dot" title="有实例正在启动或有任务运行中" />}
-          {logsOpen ? '收起日志' : '运行日志'}
+          <ScrollText size={16} strokeWidth={1.75} aria-hidden />
         </button>
       </div>
     </header>

@@ -538,6 +538,14 @@ html, body, #root {
   box-shadow: 0 0 6px rgba(22, 163, 74, .6);
   animation: pulse 1.2s infinite;
 }
+/* 运行日志图标按钮：绿色活动点在按钮右上角作角标 */
+.log-toggle-btn { position: relative; }
+.log-toggle-btn .live-dot {
+  position: absolute;
+  top: 4px; right: 4px;
+  width: 6px; height: 6px;
+  box-shadow: 0 0 5px rgba(22, 163, 74, .55);
+}
 .active-log-btn { border-color: var(--accent) !important; color: var(--accent) !important; background: var(--accent-soft) !important; }
 
 /* log view (inside drawer / panels) */
