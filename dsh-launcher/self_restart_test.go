@@ -74,6 +74,9 @@ func TestWriteSelfRestartOverlay(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
+	if !strings.Contains(text, "- insert:") {
+		t.Fatalf("overlay must use an insert: block (bare rows only override existing entries):\n%s", text)
+	}
 	if !strings.Contains(text, "- id: self-restart") || !strings.Contains(text, "name: 'dsh-self-mcp'") {
 		t.Fatalf("overlay missing mount row:\n%s", text)
 	}

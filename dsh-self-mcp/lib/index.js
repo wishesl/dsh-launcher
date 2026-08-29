@@ -108,6 +108,8 @@ function scheduleDelivery(ctx, pending) {
 }
 
 function apply(ctx) {
+	ctx.logger.info(`[dsh-self-mcp] 已装载：dsh-restart 工具可用（launcher=${process.env.DSH_LAUNCHER === "1" ? "是" : "否"}）`);
+
 	// 1) 重启完成交付（新进程 boot 时）
 	if (existsSync(pendingPath())) {
 		try {

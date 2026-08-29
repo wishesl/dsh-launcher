@@ -64,10 +64,18 @@ func selfRestartRelName(instanceID string) string {
 // the self-restart plugin for one launch, mirroring writeMaskOverlay
 // semantics: a YAML entry list read once at dsh boot, safe to delete once the
 // process has booted. Returns the RELATIVE file name.
+//
+// The row MUST be an `insert:` block, not a bare `- id/name` row: the loader's
+// patch semantics treat a bare row as an override of an EXISTING entry (looked
+// up by id; a miss warns and skips), while `insert:` pushes a NEW entry into
+// the composed list — the same form the profile's cordis.patch.yml uses for
+// mcp-* rows.
 func writeSelfRestartOverlay(instanceID, dir string) (string, error) {
 	rel := selfRestartRelName(instanceID)
 	content := "# DSH 自管理重启覆盖层（--patch overlay，仅本次启动生效）\n" +
-		"- id: self-restart\n  name: '" + selfRestartPluginName + "'\n"
+		"- insert:\n" +
+		"    - id: self-restart\n" +
+		"      name: '" + selfRestartPluginName + "'\n"
 	if err := os.WriteFile(filepath.Join(dir, rel), []byte(content), 0o644); err != nil {
 		return "", err
 	}

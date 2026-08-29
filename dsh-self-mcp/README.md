@@ -29,8 +29,13 @@ dsh-launcher（监督者）
   2. **实例目录**存在标记文件 `.dsh-self-restart.optin`（launcher 以每个实例的
      `directory` 为门控锚点，不是仓库根）。
 - 两者都满足时，launcher 才在本次启动生成项目级临时覆盖层 `.dsh-self-restart-<id>.yml`
-  （内容即一行 `- id: self-restart` / `name: 'dsh-self-mcp'`），并注入
-  `DSH_LAUNCHER=1`、`DSH_INSTANCE_ID=<id>`。
+  （必须是 `insert:` 块新增条目——loader 补丁语义里裸行只按 id 覆盖已有条目、找不到会跳过）：
+  ```yaml
+  - insert:
+      - id: self-restart
+        name: 'dsh-self-mcp'
+  ```
+  并注入 `DSH_LAUNCHER=1`、`DSH_INSTANCE_ID=<id>`。
 - 本仓库 launcher 实例的目录是 `dsh-vsn\0.1.1-rc2`（本地模式）与
   `dsh-vsn\v0.1.2-alpha.1`（源码模式），两个目录内均已放置 `.dsh-self-restart.optin`
   （vendored/gitignored，机器本地 opt-in；仓库根的 `.dsh-self-restart.optin` 用于
