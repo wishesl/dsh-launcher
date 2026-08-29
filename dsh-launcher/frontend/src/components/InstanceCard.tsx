@@ -28,6 +28,7 @@ const STATUS_META: Record<string, { label: string; cls: string; rail: string }> 
   starting: { label: '启动中…', cls: 'sb-starting', rail: 'rail-starting' },
   ready: { label: '运行中', cls: 'sb-running', rail: 'rail-running' },
   stopping: { label: '停止中…', cls: 'sb-stopping', rail: 'rail-stopping' },
+  restarting: { label: '重启中…', cls: 'sb-restarting', rail: 'rail-restarting' },
   stopped: { label: '已停止', cls: 'sb-stopped', rail: 'rail-stopped' },
   crashed: { label: '异常退出', cls: 'sb-crashed', rail: 'rail-crashed' },
 };
@@ -54,7 +55,7 @@ export default function InstanceCard({
     instance.status === 'running' ||
     instance.status === 'starting' ||
     instance.status === 'ready';
-  const isBusy = busy || instance.status === 'starting' || instance.status === 'stopping';
+  const isBusy = busy || instance.status === 'starting' || instance.status === 'stopping' || instance.status === 'restarting';
   const pkgMgr = instance.pkgMgr || 'local';
   const isSource = !!instance.source; // 源码启动：目录内源码 + 自定义命令
 

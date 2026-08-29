@@ -337,7 +337,7 @@ html, body, #root {
 
 /* status rail colors */
 .rail-running, .rail-ready { --rail: var(--green); }
-.rail-starting, .rail-stopping { --rail: var(--amber); }
+.rail-starting, .rail-stopping, .rail-restarting { --rail: var(--amber); }
 .rail-crashed { --rail: var(--red); }
 .rail-stopped { --rail: #b6bdcc; }
 
@@ -367,7 +367,7 @@ html, body, #root {
   font-size: 12px; font-weight: 600;
 }
 .sb-running, .sb-ready { color: var(--green); background: var(--green-soft); }
-.sb-starting, .sb-stopping { color: var(--amber); background: var(--amber-soft); animation: pulse 1.2s infinite; }
+.sb-starting, .sb-stopping, .sb-restarting { color: var(--amber); background: var(--amber-soft); animation: pulse 1.2s infinite; }
 .sb-crashed { color: var(--red); background: var(--red-soft); }
 .sb-stopped { color: var(--text-3); background: var(--panel-3); }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }

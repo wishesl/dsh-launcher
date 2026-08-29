@@ -8,6 +8,7 @@ export type InstanceStatus =
   | 'running'   // process alive, web not confirmed yet
   | 'ready'     // web port reachable (URL captured from process output)
   | 'stopping'
+  | 'restarting' // dsh-restart: clean self-exit consumed, relaunching the same instance
   | 'crashed';  // process exited on its own with a non-zero code
 
 export interface Instance {

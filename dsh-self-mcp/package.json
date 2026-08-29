@@ -1,0 +1,20 @@
+{
+  "name": "dsh-self-mcp",
+  "description": "DSH 自管理重启插件：提供 dsh-restart 工具（由 dsh-launcher 监督重启），重启完成后自动向发起会话注入“重启完成”消息并继续该会话",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1"
+  }
+}

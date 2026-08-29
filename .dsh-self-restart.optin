@@ -1,0 +1,4 @@
+# DSH 自管理重启（dsh-self-mcp）项目 opt-in 标记。
+# dsh-launcher 仅当实例目录存在本文件、且 profile 已安装 dsh-self-mcp 插件时，
+# 才会生成项目级 --patch 覆盖层装载 dsh-restart 工具。
+# 删除本文件即永久关闭本项目装配（不用本项目启动的 DSH 天然没有该工具）。

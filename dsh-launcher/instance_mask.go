@@ -245,13 +245,15 @@ func (a *App) writeMaskOverlay(instanceID, dir string) (string, error) {
 	return rel, nil
 }
 
-// cleanupMask removes an instance's temporary overlay file from its directory
-// (best-effort). Safe once the process has booted: overlays are read once.
+// cleanupMask removes an instance's temporary overlay files from its directory
+// (best-effort): the plugin-disable mask and the self-restart overlay. Safe
+// once the process has booted: overlays are read once.
 func cleanupMask(instanceID, dir string) {
 	if dir == "" {
 		return
 	}
 	_ = os.Remove(filepath.Join(dir, maskRelName(instanceID)))
+	cleanupSelfRestartOverlay(instanceID, dir)
 }
 
 // cleanupAllMasks removes every instance's temporary overlay file (called on

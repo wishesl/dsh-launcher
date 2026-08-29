@@ -15,5 +15,10 @@ dsh-launcher/frontend/dist/
 # Temp
 *.tmp
 
+# DSH self-restart 插件运行时状态 / launcher 临时覆盖层（写进实例目录=项目根）
+.dsh-self-mcp/
+.dsh-self-restart-*.yml
+.dsh-mask-*.yml
+
 # Vendored DSH source checkout (local reference copy, not project source)
 dsh-vsn/

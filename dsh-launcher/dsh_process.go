@@ -188,6 +188,11 @@ func (a *App) LaunchInstance(id string) error {
 	snapshot := *inst
 	a.mu.Unlock()
 
+	// 自管理重启（dsh-restart）：项目显式 opt-in + 插件已装 → 本次启动挂载插件
+	// 并注入监督者环境（DSH_LAUNCHER=1 / DSH_INSTANCE_ID）。其他项目目录无标记 →
+	// 不挂载、不注入，零残留。
+	selfRestart := selfRestartEnabled(snapshot.Directory)
+
 	a.emitStatus(snapshot.ID, "starting", 0)
 	if snapshot.Source {
 		a.systemLog(snapshot.ID, 0, fmt.Sprintf("正在启动 DSH（源码模式） (目录: %s)", snapshot.Directory))
@@ -219,6 +224,16 @@ func (a *App) LaunchInstance(id string) error {
 		cmdStr = insertPatchFlag(cmdStr, maskRel)
 		a.systemLog(snapshot.ID, 0, "已生成临时插件屏蔽层（仅本次启动生效）: "+filepath.Join(snapshot.Directory, maskRel))
 	}
+	// 自管理重启（dsh-restart）：双门控通过时生成同样的临时 --patch 覆盖层，
+	// 在本次启动装载 dsh-self-mcp 插件。
+	if selfRestart {
+		if srRel, oerr := writeSelfRestartOverlay(snapshot.ID, snapshot.Directory); oerr != nil {
+			a.systemLog(snapshot.ID, 0, "提示: 生成自管理重启覆盖层失败: "+oerr.Error())
+		} else if srRel != "" {
+			cmdStr = insertPatchFlag(cmdStr, srRel)
+			a.systemLog(snapshot.ID, 0, "已生成自管理重启覆盖层（仅本次启动生效）: "+filepath.Join(snapshot.Directory, srRel))
+		}
+	}
 	cmd := shellCommand(context.Background(), cmdStr)
 	cmd.Dir = snapshot.Directory
 	if cmd.Dir == "" {
@@ -231,6 +246,11 @@ func (a *App) LaunchInstance(id string) error {
 	// through the configured proxy (if any) so they don't hang like plugin
 	// installs do on a restricted network.
 	a.applyProxyToCmd(cmd)
+	// 自管理重启（dsh-restart）：让 DSH 知道它由 launcher 监督。只在双门控通过时
+	// 注入，其他实例不带这两个变量（无副作用）。
+	if selfRestart {
+		cmd.Env = append(cmd.Environ(), "DSH_LAUNCHER=1", "DSH_INSTANCE_ID="+snapshot.ID)
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -319,9 +339,15 @@ func (a *App) LaunchInstance(id string) error {
 		} else {
 			a.systemLog(snapshot.ID, mp.pid, "进程已退出 "+codeText)
 		}
+		// 自重启请求（dsh-restart）：插件写 <dir>/.dsh-self-mcp/restart-request.json
+		// 后干净退出。仅在「干净退出 + 非用户停止 + 请求文件存在」时自动重新拉起；
+		// 请求文件被消费即删除，杜绝重启循环。
+		wantRestart := !crashed && !mp.stopRequested() && consumeRestartRequest(snapshot.Directory)
 		status := "stopped"
 		if crashed {
 			status = "crashed"
+		} else if wantRestart {
+			status = "restarting"
 		}
 		// Reconcile state for THIS process only. A quick stop→start may have
 		// registered a new process under the same instance id by now; the old
@@ -345,11 +371,20 @@ func (a *App) LaunchInstance(id string) error {
 			case crashed:
 				// unexpected self-exit (bad args, port conflict, broken install...)
 				a.emit("dsh:status", StatusEvent{InstanceID: snapshot.ID, Status: "crashed", PID: 0, ExitCode: code})
-			case !mp.stopRequested():
+			case mp.stopRequested():
+				// user-initiated stop: StopInstance already announced stopped
+			case wantRestart:
+				// dsh-restart：自动重新拉起同一实例（进程生命周期、端口探测、
+				// 日志流、状态事件全部复用现有启动路径）。
+				a.systemLog(snapshot.ID, 0, "收到 dsh-restart 自重启请求，正在重新拉起实例…")
+				a.emitStatus(snapshot.ID, "restarting", 0)
+				if err := a.LaunchInstance(snapshot.ID); err != nil {
+					a.systemLog(snapshot.ID, 0, "重新拉起失败: "+err.Error())
+					a.emitStatus(snapshot.ID, "stopped", 0)
+				}
+			default:
 				// clean self-exit: nothing else announced "stopped" for us
 				a.emitStatus(snapshot.ID, "stopped", 0)
-			default:
-				// user-initiated stop: StopInstance already announced stopped
 			}
 		}
 		// A process exited — the service it was serving may be gone (or a
