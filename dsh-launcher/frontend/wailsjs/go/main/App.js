@@ -46,6 +46,10 @@ export function GetAppDataPath() {
   return window['go']['main']['App']['GetAppDataPath']();
 }
 
+export function GetEmbedURL(arg1) {
+  return window['go']['main']['App']['GetEmbedURL'](arg1);
+}
+
 export function GetInstanceMasks(arg1) {
   return window['go']['main']['App']['GetInstanceMasks'](arg1);
 }

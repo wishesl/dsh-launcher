@@ -21,6 +21,31 @@ func TestExtractWebURL(t *testing.T) {
 	}
 }
 
+// 内嵌视图用的带 token 地址：只认启动日志里那行带 token= 的 URL。
+func TestExtractAuthWebURL(t *testing.T) {
+	cases := []struct {
+		line string
+		want string
+	}{
+		// DSH 启动时打印的真实行（取自 launcher 日志面板）
+		{
+			"dsh web: http://127.0.0.1:3080/?token=ONalrT9n17CHnxBJL7wpuVD1jxbkUIvzA0a9qarJ88",
+			"http://127.0.0.1:3080/?token=ONalrT9n17CHnxBJL7wpuVD1jxbkUIvzA0a9qarJ88",
+		},
+		{"listening on http://localhost:49213/?token=abc123", "http://localhost:49213/?token=abc123"},
+		// 没有 token 的行不认：普通地址已由 extractWebURL 覆盖
+		{"dsh web: http://127.0.0.1:3080/", ""},
+		{"DSH web listening on http://127.0.0.1:3080", ""},
+		{"see https://example.com/?token=x for docs", ""}, // 非本机地址
+		{"no url in this line", ""},
+	}
+	for _, c := range cases {
+		if got := extractAuthWebURL(c.line); got != c.want {
+			t.Errorf("extractAuthWebURL(%q) = %q, want %q", c.line, got, c.want)
+		}
+	}
+}
+
 func TestValidateVersion(t *testing.T) {
 	// local 模式不拼接版本号，任何值都放行
 	if err := validateVersion("local", "not-a-version"); err != nil {

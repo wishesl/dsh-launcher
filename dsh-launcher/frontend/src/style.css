@@ -92,9 +92,11 @@ html, body, #root {
 .app.os-win .header-brand { display: flex; }
 .app.os-win .header-brand .brand-logo-img { width: 30px; height: 30px; padding: 2px; border-radius: 8px; }
 .app.os-win .sidebar .side-head { display: none; }
-.app.os-win .header-right { order: 2; margin-left: 0; }
+.app.os-win .header-right { order: 2; margin-left: 0; flex: 1; }
 .app.os-win .side-collapse { order: 1; margin-left: 6px; }
-.app.os-win .win-controls { order: 3; margin-left: auto; margin-right: 4px; }
+/* 窗口按钮不再靠 auto 外边距顶到最右：那段弹性空间改由 .header-actions 吃掉，
+   于是操作按钮组贴着窗口按钮、chips 仍留在左侧。 */
+.app.os-win .win-controls { order: 3; margin-left: 0; margin-right: 4px; }
 .app.os-win .app-header { padding-left: 16px; }
 
 /* 右侧大卡片：中间内容 + 右侧日志，横向两列，整体为一卡 */
@@ -107,6 +109,56 @@ html, body, #root {
   border-radius: 14px;
   box-shadow: var(--shadow-card);
   overflow: hidden;
+}
+
+/* ---------- 内嵌 DSH 视图 ----------
+   整块下半区让给一个跨源 iframe，左右两栏（菜单 / 运行日志）同时隐藏。
+   Wails 注入的 runtime 不会进入 iframe（实测：window.go 为 undefined），
+   所以被嵌入的 DSH 页面拿不到启动器的 Go 绑定。 */
+.embed-host {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+/* 撑满大卡片：.app-main 已有 overflow:hidden + 14px 圆角，iframe 会被裁到圆角内 */
+.embed-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: none;
+  background: #fff;
+}
+.embed-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+}
+.embed-note { margin: 0; font-size: 13px; color: var(--text-2); }
+/* 顶部工具条：当前地址（只读展示）+ 刷新 / 退出 */
+.embed-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.embed-url {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---------- Buttons ---------- */
@@ -177,6 +229,10 @@ html, body, #root {
 .brand-text h1 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: .2px; }
 .brand-sub { margin: 1px 0 0; font-size: 11.5px; color: var(--text-3); }
 .header-right { margin-left: auto; display: flex; align-items: center; gap: 10px; min-width: 0; }
+
+/* 操作按钮组（重启 / 运行日志 / 内嵌）。auto 外边距把它推到 .header-right 的最右端，
+   在 win 布局下 .header-right 是 flex:1，所以它就落在窗口按钮左边。 */
+.header-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; flex: none; }
 
 /* 自定义窗口控制（替代原生标题栏的最小化/最大化/关闭），贴合 header 右侧边缘 */
 /* macOS 风格交通灯窗口控制：红(关闭)/黄(最小化)/绿(最大化) 小圆点，

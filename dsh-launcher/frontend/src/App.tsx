@@ -56,6 +56,13 @@ export default function App() {
   const [logW, setLogW] = useState(LOG_DEFAULT);
   // 窗口宽度：两条缝的上限要按它反推，否则窄窗口会把主内容挤没。
   const [viewportW, setViewportW] = useState(() => window.innerWidth);
+  // 内嵌 DSH 视图：整块下半区换成 DSH 网页（左右两栏都让位）。
+  // 地址由后端从实例启动日志解析（带 token），进来自动加载；不需要手填。
+  const [embedMode, setEmbedMode] = useState(false);
+  const [embedUrl, setEmbedUrl] = useState('');
+  const [embedNote, setEmbedNote] = useState('');
+  // 自增计数当 iframe 的 key，用来强制重新加载（「刷新」按钮）。
+  const [embedReload, setEmbedReload] = useState(0);
   // 布局：layoutPref 为用户显式选择（''=自动）；os 为最终生效布局。
   // mac 用当前布局；win/linux 把三个点移到顶栏右侧、logo 上移顶栏左侧。
   const [layoutPref, setLayoutPref] = useState<LayoutMode>('');
@@ -422,6 +429,63 @@ export default function App() {
     instances.find((i) => i.status === 'running' || i.status === 'starting') ??
     null;
 
+  // 内嵌目标：只有启动器自己拉起的实例，启动日志里才有带 token 的地址。
+  const embedInstance = dshLive;
+
+  // 进入内嵌模式（或实例状态变化）时自动解析带 token 的地址并加载。
+  // 启动日志那行可能要等一两秒才出现，所以轮询几次。
+  useEffect(() => {
+    if (!embedMode || !embedInstance) {
+      setEmbedUrl('');
+      setEmbedNote('');
+      return;
+    }
+    let active = true;
+    let tries = 0;
+    const load = async () => {
+      const url = await api.getEmbedURL(embedInstance.id).catch(() => '');
+      if (!active) return;
+      if (url) {
+        setEmbedUrl(url);
+        setEmbedNote('');
+        return;
+      }
+      if (tries++ >= 20) {
+        setEmbedNote(
+          embedInstance.status === 'ready' || embedInstance.status === 'running'
+            ? '没能从启动日志里解析到带 token 的地址（该实例可能不是启动器拉起的）。'
+            : '实例未运行，没有可内嵌的地址。'
+        );
+        return;
+      }
+      setEmbedNote('正在从实例启动日志解析 DSH 地址…');
+      window.setTimeout(load, 1000);
+    };
+    void load();
+    return () => {
+      active = false;
+    };
+  }, [embedMode, embedInstance?.id, embedInstance?.status, embedInstance?.webUrl]);
+
+  // Esc 退出内嵌视图
+  useEffect(() => {
+    if (!embedMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setEmbedMode(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [embedMode]);
+
+  // 稳定引用：Header 是子组件，回调不 useCallback 会每次渲染都换新引用（见 AGENTS.md）。
+  const toggleEmbed = useCallback(() => setEmbedMode((v) => !v), []);
+
+  // 「刷新」：换掉 iframe 的 key，强制整页重新加载。
+  const reloadEmbed = useCallback(() => {
+    if (!embedUrl) return;
+    setEmbedReload((n) => n + 1);
+  }, [embedUrl]);
+
   // Live activity badge for the header 运行日志 button.
   const logsLive =
     instances.some((i) => i.status === 'starting' || i.status === 'running') || marketOp.running;
@@ -482,6 +546,8 @@ export default function App() {
         logsOpen={logsOpen}
         logsLive={logsLive}
         onToggleLogs={() => setLogsOpen((o) => !o)}
+        embedMode={embedMode}
+        onToggleEmbed={toggleEmbed}
         onCloseRequest={requestClose}
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsed((v) => !v)}
@@ -497,27 +563,65 @@ export default function App() {
           } as CSSProperties
         }
       >
-        <Sidebar
-          view={view}
-          onNavigate={setView}
-          collapsed={collapsed}
-          width={collapsed ? undefined : sidebarShown}
-        />
-        <Resizer
-          side="left"
-          width={sidebarShown}
-          min={SIDEBAR_MIN}
-          max={sidebarMax}
-          disabled={collapsed}
-          onDrag={setSidebarW}
-          onCommit={(w) => persistWidths(w, logShown)}
-          onReset={() => {
-            setSidebarW(SIDEBAR_DEFAULT);
-            persistWidths(SIDEBAR_DEFAULT, logShown);
-          }}
-          label="调整菜单宽度"
-        />
+        {!embedMode && (
+          <>
+            <Sidebar
+              view={view}
+              onNavigate={setView}
+              collapsed={collapsed}
+              width={collapsed ? undefined : sidebarShown}
+            />
+            <Resizer
+              side="left"
+              width={sidebarShown}
+              min={SIDEBAR_MIN}
+              max={sidebarMax}
+              disabled={collapsed}
+              onDrag={setSidebarW}
+              onCommit={(w) => persistWidths(w, logShown)}
+              onReset={() => {
+                setSidebarW(SIDEBAR_DEFAULT);
+                persistWidths(SIDEBAR_DEFAULT, logShown);
+              }}
+              label="调整菜单宽度"
+            />
+          </>
+        )}
         <div className="app-main">
+        {embedMode ? (
+          <div className="embed-host">
+            {/* 地址自动来自实例启动日志；这里只显示 + 刷新 / 退出 */}
+            <div className="embed-bar">
+              <span className="embed-url" title={embedUrl || embedNote}>
+                {embedUrl || embedNote || '正在解析实例地址…'}
+              </span>
+              <button
+                className="btn"
+                onClick={reloadEmbed}
+                disabled={!embedUrl}
+                title="重新加载当前页面"
+              >
+                刷新
+              </button>
+              <button className="btn" onClick={() => setEmbedMode(false)} title="退出内嵌视图（Esc）">
+                退出
+              </button>
+            </div>
+            {embedUrl ? (
+              <iframe
+                key={`${embedUrl}#${embedReload}`}
+                className="embed-frame"
+                src={embedUrl}
+                title="DSH 界面"
+              />
+            ) : (
+              <div className="embed-empty">
+                <p className="embed-note">{embedNote || '正在准备内嵌视图…'}</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
         <div className="app-content">
           {view === 'versions' && (
             <VersionView
@@ -601,6 +705,8 @@ export default function App() {
           onClearMarketLogs={clearMarketLogs}
           onCancelMarket={cancelMarket}
         />
+          </>
+        )}
       </div>
       </div>
 

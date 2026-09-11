@@ -86,6 +86,23 @@ func extractWebURL(line string) string {
 	return "http://127.0.0.1:" + port
 }
 
+// authWebURLRe matches a local DSH web address *including* its query string. The
+// startup line carries the per-run session token there
+// (e.g. `dsh web: http://127.0.0.1:3080/?token=…`). Only the embedded-browser
+// mode needs it — the plain URL above deliberately drops the token.
+var authWebURLRe = regexp.MustCompile(`https?://(?:127\.0\.0\.1|localhost|\[::1\])(?::\d{2,5})(?:/[^\s"'<>]*)?`)
+
+// extractAuthWebURL returns the token-bearing local URL from an output line, or
+// "" when the line advertises none. A URL without `token=` is ignored because
+// the plain candidate list already covers it.
+func extractAuthWebURL(line string) string {
+	u := authWebURLRe.FindString(line)
+	if u == "" || !strings.Contains(u, "token=") {
+		return ""
+	}
+	return u
+}
+
 // managedProcess wraps a running DSH process for one instance.
 type managedProcess struct {
 	instanceID string
@@ -98,6 +115,7 @@ type managedProcess struct {
 	stopReq    atomic.Bool
 	urlMu      sync.Mutex
 	candidates []string // web URLs advertised by the process output, in order
+	authURL    string   // newest token-bearing URL from the startup log (内嵌模式用)
 }
 
 func (p *managedProcess) requestStop() { p.stopReq.Store(true) }
@@ -113,6 +131,20 @@ func (p *managedProcess) addWebCandidate(u string) {
 		}
 	}
 	p.candidates = append(p.candidates, u)
+}
+
+// setAuthWebURL records the newest token-bearing URL seen in the process output.
+func (p *managedProcess) setAuthWebURL(u string) {
+	p.urlMu.Lock()
+	p.authURL = u
+	p.urlMu.Unlock()
+}
+
+// authWebURL returns the last token-bearing URL, or "" when none was seen yet.
+func (p *managedProcess) authWebURL() string {
+	p.urlMu.Lock()
+	defer p.urlMu.Unlock()
+	return p.authURL
 }
 
 // takeWebCandidates drains the candidate list.
@@ -313,6 +345,9 @@ func (a *App) LaunchInstance(id string) error {
 			if u := extractWebURL(line); u != "" {
 				mp.addWebCandidate(u)
 			}
+			if au := extractAuthWebURL(line); au != "" {
+				mp.setAuthWebURL(au)
+			}
 			a.logEvent(LogEvent{
 				InstanceID: snapshot.ID,
 				PID:        mp.pid,
@@ -460,6 +495,20 @@ func dialLocalWeb(u string, timeout time.Duration) bool {
 	}
 	_ = conn.Close()
 	return true
+}
+
+// GetEmbedURL returns the token-bearing DSH web URL to embed in the launcher's
+// iframe. DSH mints a new token every run and prints it once in its startup log,
+// so this is empty until that line has been seen — or when the launcher does not
+// manage a process for that instance (there would be nothing to read it from).
+func (a *App) GetEmbedURL(instanceID string) string {
+	a.mu.Lock()
+	mp := a.processes[instanceID]
+	a.mu.Unlock()
+	if mp == nil {
+		return ""
+	}
+	return mp.authWebURL()
 }
 
 // StopInstance stops a running instance (kills the process tree).

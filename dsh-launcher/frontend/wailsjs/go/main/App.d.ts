@@ -24,6 +24,8 @@ export function GenerateShareCode(arg1:Array<string>):Promise<string>;
 
 export function GetAppDataPath():Promise<string>;
 
+export function GetEmbedURL(arg1:string):Promise<string>;
+
 export function GetInstanceMasks(arg1:string):Promise<Array<string>>;
 
 export function GetInstances():Promise<Array<main.Instance>>;

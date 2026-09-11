@@ -1,5 +1,5 @@
 import type { Instance, RegistryInfo } from '../types';
-import { RotateCw, ChevronsLeft, ChevronsRight, Terminal } from 'lucide-react';
+import { RotateCw, ChevronsLeft, ChevronsRight, Terminal, Monitor } from 'lucide-react';
 import WinControls from './WinControls';
 import dshLogo from '../assets/dsh.svg';
 
@@ -17,6 +17,9 @@ interface Props {
   logsOpen: boolean;
   logsLive: boolean;
   onToggleLogs: () => void;
+  // 内嵌 DSH 视图：整块下半区换成 DSH 网页，左右两栏都让位（地址完全手动输入）。
+  embedMode: boolean;
+  onToggleEmbed: () => void;
   // 顶部整体：三个点 + 展开按钮 + 状态，同属一条状态栏。
   onCloseRequest: () => void;
   collapsed: boolean;
@@ -33,6 +36,8 @@ export default function Header({
   logsOpen,
   logsLive,
   onToggleLogs,
+  embedMode,
+  onToggleEmbed,
   onCloseRequest,
   collapsed,
   onToggleCollapse,
@@ -104,6 +109,8 @@ export default function Header({
             <span className="chip-label">无法获取版本</span>
           )}
         </div>
+        {/* 操作按钮组：靠右，紧邻窗口按钮（见 CSS 的 .header-actions） */}
+        <div className="header-actions">
         <button
           className="btn btn-ghost btn-icon"
           onClick={onRestartDsh}
@@ -122,6 +129,20 @@ export default function Header({
           {logsLive && <span className="live-dot" title="有实例正在启动或有任务运行中" />}
           <Terminal size={16} strokeWidth={1.75} aria-hidden />
         </button>
+        <button
+          className={`btn btn-icon embed-toggle-btn ${embedMode ? 'btn-accent' : 'btn-ghost'}`}
+          onClick={onToggleEmbed}
+          title={
+            embedMode
+              ? '退出内嵌视图，回到启动器界面'
+              : '在启动器内嵌显示 DSH 界面（地址手动输入，菜单与运行日志两栏让位）'
+          }
+          aria-label={embedMode ? '退出内嵌 DSH' : '内嵌 DSH 界面'}
+          aria-pressed={embedMode}
+        >
+          <Monitor size={16} strokeWidth={1.75} aria-hidden />
+        </button>
+        </div>
       </div>
     </header>
   );
