@@ -60,6 +60,39 @@ dsh-launcher（监督者）
 - 已有未交付的重启请求时拒绝（幂等）；
 - 重启请求文件被 launcher 消费即删（防循环）。
 
+## 内嵌支持（embed）
+
+让 launcher 能把 DSH 界面嵌进自己的**跨源 iframe**。
+
+**为什么需要放宽**：DSH 的浏览器会话 cookie 是 `SameSite=Strict`
+（`dsh-client-connection` 的 `sessionCookie()`），而跨站 iframe 的请求一律不带它。
+于是 `/?token=…` 虽然能过，但它返回的 `303 → /` 那一步拿不到 cookie，直接 401 ——
+界面永远打不开。（另有一条 `/api` 栅栏：`isTrustedApiRequest()` 会拒绝
+`sec-fetch-site: cross-site`。）
+
+**做了什么**：插件在 `connection` service 就绪后替换它的两个方法
+（这两处都由调用方**每请求现查 service**，见 `dsh-host-frontend-static` 的
+`ctx.connection.authorizeIndex(req, res)` 与 `dsh-api-gateway` 的
+`connection.requestRejection(req)`，所以替换实例方法即生效）：
+
+| 方法 | 放宽规则 | 目的 |
+|---|---|---|
+| `authorizeIndex` | **仅当 `sec-fetch-site: cross-site`** 且 `GET /?token=<有效 launch token>` → 直接渲染 index | 跳过 cookie 往返；普通浏览器仍走原 303+cookie 流程（否则它拿不到 cookie） |
+| `requestRejection` | ① `Origin` 命中白名单（默认 `http://wails.localhost`，即启动器页面源）；② 内嵌文档自身的请求：`Origin` **或** `Referer` 的 host 等于请求的 `Host` | iframe 内部对自身源的 `/api` 请求没有 Strict cookie，靠这两条识别 |
+
+> ② 里**必须同时看 `Origin`**：流式端点 **`/api/remote.mux`（实时事件流）只带 `Origin`，
+> 既没有 `Referer` 也没有 `Sec-Fetch-Site`**。只按 Referer 判定会导致「界面能打开、
+> 但左下角一直显示『自动重连中』」——会话列表、工作区都出不来。
+
+**没有放宽的**（实测仍被拒）：无 token → 401；错 token → 401；
+外部来源 `Origin` → 403；外部 `Referer` → 401；无 `Origin` → 401。
+
+**安全代价（要知道）**：规则 ② 意味着「任何 `Origin`/`Referer` 指向本机同 host 的
+cookie-less 请求」都会被放行。攻击者网页发出的跨站请求带的是自己的 Origin，Host/Origin
+栅栏照旧拒绝；且 `sec-fetch-site: cross-site` 的请求仍被挡住，所以外部站点依旧打不开
+界面、也调不动 `/api`。但这条规则的强度确实低于原设计（原设计要求持有签名 cookie）。
+不需要内嵌时，把 `relaxEmbedAuth()` 的调用去掉即可恢复原状。
+
 ## 状态文件
 
 | 文件 | 位置 | 作用 |

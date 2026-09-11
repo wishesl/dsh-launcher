@@ -14,8 +14,12 @@
  *
  * 装配与残留：由 dsh-launcher 按「项目 opt-in 标记 + 插件已装」双重门控生成
  * 项目级 --patch 覆盖层装载；不用本项目启动时本插件不被任何行引用 → 工具不存在、状态不碰。
+ *
+ * 附带能力（内嵌支持）：放宽 DSH 的浏览器会话校验，使启动器能把 DSH 界面嵌进自己的
+ * 跨源 iframe。详见 relaxEmbedAuth() 的注释——只对「带有效 launch token 的 index」和
+ * 「来自启动器源的 /api」放宽，其它站点行为不变。
  */
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -175,8 +179,137 @@ function scheduleDelivery(ctx, pending) {
 	attempt();
 }
 
+//#region 内嵌支持（embed）
+/**
+ * 允许内嵌的来源（跨源 iframe 请求里的 `Origin`）。默认只放行启动器自己的页面源
+ * `http://wails.localhost`（Wails v2 在 Windows 上固定用它承载前端，见 wails 的
+ * frontend.go 里硬编码的 startURL）。要换源改这里，别在外面配。
+ */
+const EMBED_ALLOWED_ORIGINS = new Set(["http://wails.localhost"]);
+
+/** 读取一个请求头（Node 已小写化，这里兼容原始大小写与数组形态）。 */
+function headerValue(headers, name) {
+	const raw = headers?.[name] ?? headers?.[name.toLowerCase()];
+	if (typeof raw === "string") return raw;
+	return Array.isArray(raw) && raw.length > 0 ? raw[0] : void 0;
+}
+
+/** 一个 URL 的 host 是否等于给定 Host 头（用于判断"请求来自本机同源的文档"）。 */
+function sameHost(url, host) {
+	if (typeof url !== "string" || typeof host !== "string" || host.length === 0) return false;
+	try {
+		return new URL(url).host === host;
+	} catch {
+		return false;
+	}
+}
+
+/** `GET /?token=<launchToken>`，判定语义与 DSH 内部的 tokenMatches 一致（等长 + 定时安全比较）。 */
+function hasValidLaunchToken(req, launchToken) {
+	if (req?.method !== "GET") return false;
+	if (typeof launchToken !== "string" || launchToken.length === 0) return false;
+	let url;
+	try {
+		url = new URL(req.url ?? "/", "http://dsh.invalid");
+	} catch {
+		return false;
+	}
+	if (url.pathname !== "/") return false;
+	const tokens = url.searchParams.getAll("token");
+	if (tokens.length !== 1) return false;
+	const actual = Buffer.from(tokens[0], "utf8");
+	const expected = Buffer.from(launchToken, "utf8");
+	return actual.byteLength === expected.byteLength && timingSafeEqual(actual, expected);
+}
+
+/**
+ * 放宽 DSH 的浏览器会话校验，让启动器能把界面嵌进自己的跨源 iframe。
+ *
+ * 为什么必须放宽：DSH 的会话 cookie 是 `SameSite=Strict`（见 client-connection 的
+ * sessionCookie），而跨站 iframe 里的请求一律不带它。于是 `/?token=…` 虽然能过，
+ * 但它返回的 303→`/` 那一步拿不到 cookie，直接 401 —— 界面永远打不开。
+ *
+ * 只做两处**最小**放宽，其余请求（其它站点、没带 token 的）行为完全不变：
+ *
+ *   1) `authorizeIndex`：`GET /?token=<有效 launch token>` 直接返回 true（渲染 index），
+ *      不再依赖 303 + cookie 往返。token 本身就是凭据，安全性语义不变。
+ *   2) `requestRejection`：只对 `Origin` 命中白名单的请求跳过 cookie 校验 —— iframe
+ *      里拿不到 Strict cookie，但来源确实是我们自己的启动器。Host/Origin 栅栏对
+ *      其它来源照旧生效（外部网页仍然 403）。
+ *
+ * 两处都是「通过 service 对象、每请求现查」的方法（frontend-static 调
+ * `ctx.connection.authorizeIndex(...)`，api-gateway 调 `connection.requestRejection(...)`），
+ * 所以这里直接替换实例上的方法是生效的。
+ */
+function relaxEmbedAuth(ctx) {
+	const conn = ctx.get("connection");
+	if (conn === void 0 || conn.browserAuth === void 0) {
+		ctx.logger.info("[dsh-self-mcp] embed: 没有 connection service（非 web 组合），跳过");
+		return;
+	}
+	if (conn.__dshSelfMcpEmbedPatched === true) {
+		return; // 幂等：重复 apply 不叠加包装
+	}
+	if (typeof conn.authorizeIndex !== "function" || typeof conn.requestRejection !== "function") {
+		ctx.logger.warn("[dsh-self-mcp] embed: connection 上没有预期的认证方法，跳过（DSH 版本变了？）");
+		return;
+	}
+
+	const auth = conn.browserAuth;
+	const originalAuthorizeIndex = conn.authorizeIndex.bind(conn);
+	const originalRequestRejection = conn.requestRejection.bind(conn);
+
+	// —— 临时诊断（定稿前删除）：console.error 会进启动器日志 ——
+	const probe = () => {};
+
+	conn.authorizeIndex = (req, res) => {
+		const site = headerValue(req?.headers, "sec-fetch-site");
+		// 只在**真的跨站 iframe** 里走直出：普通浏览器仍走原来的 303+cookie，
+		// 否则它拿不到 cookie，后续 /api 会 401。
+		if (site === "cross-site" && hasValidLaunchToken(req, auth.launchToken)) {
+			probe(`INDEX 直出`);
+			ctx.logger.info("[dsh-self-mcp] embed: 跨站 iframe 携带有效 token → 直接渲染 index（跳过 cookie 往返）");
+			return true;
+		}
+		return originalAuthorizeIndex(req, res);
+	};
+
+	conn.requestRejection = (req) => {
+		const rejection = originalRequestRejection(req);
+		if (rejection === void 0) return void 0;
+		const host = headerValue(req?.headers, "host");
+		const origin = headerValue(req?.headers, "origin");
+		const referer = headerValue(req?.headers, "referer");
+		// ① 启动器页面直接发起的请求（跨源 → 带 Origin，命中白名单）
+		if (typeof origin === "string" && EMBED_ALLOWED_ORIGINS.has(origin.toLowerCase())) {
+			ctx.logger.info(`[dsh-self-mcp] embed: 放行 ${origin} 的 ${req.method} ${req.url}`);
+			return void 0;
+		}
+		// ② 内嵌文档自身发起的请求：Origin（或 Referer）与请求 Host 同源。
+		//    这类请求拿不到 SameSite=Strict 的会话 cookie，但它们确实来自本机同源的文档。
+		//    注意：流式端点 /api/remote.mux 只带 Origin、没有 Referer 也没有 Sec-Fetch-Site，
+		//    所以必须用 Origin 判定，不能只看 Referer。
+		if (sameHost(origin, host) || sameHost(referer, host)) {
+			probe(`放行同源 ${req.url}`);
+			return void 0;
+		}
+		return rejection;
+	};
+
+	conn.__dshSelfMcpEmbedPatched = true;
+	ctx.logger.info(
+		`[dsh-self-mcp] embed: 已放宽浏览器会话校验（白名单来源: ${[...EMBED_ALLOWED_ORIGINS].join(", ")}）`
+	);
+}
+//#endregion
+
 function apply(ctx) {
 	ctx.logger.info(`[dsh-self-mcp] 已装载：dsh-restart 工具可用（launcher=${process.env.DSH_LAUNCHER === "1" ? "是" : "否"}）`);
+
+	// 0) 内嵌支持：connection service 就绪后放宽浏览器会话校验（只有 web 组合才有它）
+	ctx.inject(["connection"], (connectionCtx) => {
+		relaxEmbedAuth(connectionCtx);
+	});
 
 	// 1) 重启完成交付（新进程 boot 时）
 	if (existsSync(pendingPath())) {
