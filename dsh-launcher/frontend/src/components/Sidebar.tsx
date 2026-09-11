@@ -28,12 +28,10 @@ export default function Sidebar({ view, onNavigate, collapsed, width }: Props) {
       aria-label="主导航"
     >
       <div className="side-head">
-        <div className="brand">
+        {/* 与顶栏品牌区同一套皮：裸 mark + 单行字标（副标题降级为 title 提示）。 */}
+        <div className="brand" title="DeepSeek Harness 启动器">
           <img className="brand-logo-img" src={dshLogo} alt="DSH Launcher" draggable={false} />
-          <div className="brand-text">
-            <h1>DSH Launcher</h1>
-            <p className="brand-sub">DeepSeek Harness 启动器</p>
-          </div>
+          <h1 className="brand-name">DSH Launcher</h1>
         </div>
       </div>
 

@@ -90,7 +90,6 @@ html, body, #root {
 
 /* win/linux 布局：logo 上移顶栏左侧（展开按钮保持原左侧位置），三个点移到顶栏右侧 */
 .app.os-win .header-brand { display: flex; }
-.app.os-win .header-brand .brand-logo-img { width: 30px; height: 30px; padding: 2px; border-radius: 8px; }
 .app.os-win .sidebar .side-head { display: none; }
 .app.os-win .header-right { order: 2; margin-left: 0; flex: 1; }
 .app.os-win .side-collapse { order: 1; margin-left: 6px; }
@@ -188,7 +187,7 @@ html, body, #root {
 .app-header .latest-chip {
   --wails-draggable: no-drag;
 }
-.brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .brand-logo {
   width: 34px; height: 34px; flex: none;
   border-radius: 10px;
@@ -198,17 +197,25 @@ html, body, #root {
   background: linear-gradient(135deg, #2b3142, #141b2e);
   box-shadow: 0 4px 12px rgba(20, 27, 46, .22);
 }
+/* 品牌图标只用裸 mark：旧版是「白底 + 1px 描边 + 阴影 + 内边距」的方块，
+   在浅色顶栏里读起来像脚手架默认的占位贴纸，也和右侧无边框的 chip 语言打架。 */
 .brand-logo-img {
-  width: 36px; height: 36px; flex: none;
-  border-radius: 10px;
+  width: 28px; height: 28px; flex: none;
   object-fit: contain;
-  background: #fff;
-  border: 1px solid var(--border-soft);
-  padding: 3px;
-  box-shadow: var(--shadow-card);
+  background: transparent;
 }
-.brand-text h1 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: .2px; }
-.brand-sub { margin: 1px 0 0; font-size: 11.5px; color: var(--text-3); }
+/* 单行字标：原来主标 + 副标题两行，副标题既重复产品名又比主标长，把重心往右拽。 */
+.brand-name { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; }
+/* 版本 pill：等宽小字，只当"这是哪个构建"的注脚，不抢状态 chip 的焦点。 */
+.brand-ver {
+  flex: none;
+  font-size: 10.5px; line-height: 1; font-weight: 600;
+  color: var(--text-3);
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 4px 7px;
+}
 .header-right { margin-left: auto; display: flex; align-items: center; gap: 10px; min-width: 0; }
 
 /* 操作按钮组（重启 / 运行日志 / 内嵌）。auto 外边距把它推到 .header-right 的最右端，
@@ -316,8 +323,8 @@ html, body, #root {
 /* 收起态：仅图标小卡片，logo 图仍居首，仅隐藏文字 */
 .sidebar.collapsed { width: 64px; padding: 14px 8px; }
 .sidebar.collapsed .brand { justify-content: center; }
-.sidebar.collapsed .brand-text { display: none; }
-.sidebar.collapsed .brand-logo-img { width: 30px; height: 30px; padding: 2px; border-radius: 8px; }
+.sidebar.collapsed .brand-name { display: none; }
+.sidebar.collapsed .brand-logo-img { width: 28px; height: 28px; }
 .sidebar.collapsed .side-head { justify-content: center; }
 .sidebar.collapsed .nav-label { display: none; }
 .sidebar.collapsed .side-nav { justify-content: center; }

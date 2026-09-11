@@ -94,6 +94,10 @@ cd dsh-launcher && wails build
 ```
 
 > `frontend/dist/`、`build/bin/`、`*.exe` 均在 `.gitignore`，不入库。
+>
+> **版本号**：顶栏品牌区的版本 pill 读 `dsh-launcher/version.go` 的 `version`（默认 `dev`，
+> 表示本地构建）。发版时用 ldflags 注入，不要手改源码：
+> `wails build -ldflags "-X main.version=0.1.5"`。前端拿不到版本时不渲染 pill。
 
 ## 6. 验证方式
 

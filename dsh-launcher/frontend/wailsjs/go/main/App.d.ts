@@ -30,6 +30,8 @@ export function GetInstanceMasks(arg1:string):Promise<Array<string>>;
 
 export function GetInstances():Promise<Array<main.Instance>>;
 
+export function GetLauncherVersion():Promise<string>;
+
 export function GetLayout():Promise<string>;
 
 export function GetMarketSettings():Promise<main.MarketSettings>;

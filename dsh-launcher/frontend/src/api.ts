@@ -12,6 +12,7 @@ import {
   GetEmbedURL,
   GetInstanceMasks,
   GetInstances,
+  GetLauncherVersion,
   GetLayout,
   GetUIWidths,
   GetMarketSettings,
@@ -142,6 +143,9 @@ export const api = {
   setUIWidths: (w: UIWidths): Promise<void> => SetUIWidths(w as any),
   // 内嵌 DSH 视图用：带 token 的地址（后端从实例启动日志解析，每次启动都不同）
   getEmbedURL: (instanceId: string): Promise<string> => GetEmbedURL(instanceId),
+
+  // 启动器自身版本（顶栏品牌区的版本 pill）；发版用 -ldflags 注入，未注入时为 "dev"
+  getLauncherVersion: (): Promise<string> => GetLauncherVersion(),
 
   // plugin favorites (local, offline)
   listFavorites: (): Promise<FavoritePlugin[]> => ListFavorites(),

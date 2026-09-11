@@ -45,6 +45,8 @@ export default function App() {
   const [registry, setRegistry] = useState<RegistryInfo | null>(null);
   const [registryLoading, setRegistryLoading] = useState(false);
   const [appDataPath, setAppDataPath] = useState('');
+  // 启动器版本（顶栏品牌区 pill）；后端未注入版本时为 "dev"。
+  const [launcherVersion, setLauncherVersion] = useState('');
   const [logs, setLogs] = useState<Record<string, LogEvent[]>>({});
   const [activeLogId, setActiveLogId] = useState<string | null>(null);
   // Right-side run-log drawer: open state + which tab (instance logs / market).
@@ -99,6 +101,20 @@ export default function App() {
       if (w.sidebar > 0) setSidebarW(w.sidebar);
       if (w.log > 0) setLogW(w.log);
     })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // 启动器自身版本（顶栏品牌区的小 pill）。取不到就不显示，不占位。
+  useEffect(() => {
+    let active = true;
+    api
+      .getLauncherVersion()
+      .then((v) => {
+        if (active) setLauncherVersion(typeof v === 'string' ? v.trim() : '');
+      })
+      .catch(() => undefined);
     return () => {
       active = false;
     };
@@ -539,6 +555,7 @@ export default function App() {
       <Header
         registry={registry}
         registryLoading={registryLoading}
+        launcherVersion={launcherVersion}
         serviceLive={serviceLive}
         dshLive={dshLive}
         onRestartDsh={restartDsh}

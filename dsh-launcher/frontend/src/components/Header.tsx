@@ -6,6 +6,8 @@ import dshLogo from '../assets/dsh.svg';
 interface Props {
   registry: RegistryInfo | null;
   registryLoading: boolean;
+  /** 启动器自身版本（后端 ldflags 注入，未注入时为 "dev"）；空串表示不显示 pill。 */
+  launcherVersion: string;
   // Service-driven "DSH 已就绪": the instance whose configured port answers
   // HTTP right now — independent of whether the launcher manages its process.
   serviceLive: { id: string; name: string; url: string } | null;
@@ -34,6 +36,7 @@ interface Props {
 export default function Header({
   registry,
   registryLoading,
+  launcherVersion,
   serviceLive,
   dshLive,
   onRestartDsh,
@@ -58,13 +61,17 @@ export default function Header({
 
   return (
     <header className="app-header">
-      {/* win/linux 布局：logo 上移顶栏左侧（mac 布局默认隐藏） */}
-      <div className="brand header-brand">
+      {/* win/linux 布局：logo 上移顶栏左侧（mac 布局默认隐藏）。
+          单行字标：旧版的两行「DSH Launcher / DeepSeek Harness 启动器」在 58px 顶栏里
+          既重复又压秤，这句话降级成整块的 title 提示。 */}
+      <div className="brand header-brand" title="DeepSeek Harness 启动器">
         <img className="brand-logo-img" src={dshLogo} alt="DSH Launcher" draggable={false} />
-        <div className="brand-text">
-          <h1>DSH Launcher</h1>
-          <p className="brand-sub">DeepSeek Harness 启动器</p>
-        </div>
+        <h1 className="brand-name">DSH Launcher</h1>
+        {launcherVersion && (
+          <span className="brand-ver mono">
+            {/^\d/.test(launcherVersion) ? `v${launcherVersion}` : launcherVersion}
+          </span>
+        )}
       </div>
       <WinControls onCloseRequest={onCloseRequest} />
       <button

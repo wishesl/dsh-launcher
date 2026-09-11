@@ -58,6 +58,10 @@ export function GetInstances() {
   return window['go']['main']['App']['GetInstances']();
 }
 
+export function GetLauncherVersion() {
+  return window['go']['main']['App']['GetLauncherVersion']();
+}
+
 export function GetLayout() {
   return window['go']['main']['App']['GetLayout']();
 }
