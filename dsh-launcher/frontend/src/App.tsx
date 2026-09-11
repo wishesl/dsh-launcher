@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react';
 import { api, errMsg } from './api';
 import { BrowserOpenURL, Environment } from '../wailsjs/runtime/runtime';
 import type { ExitChoice, Instance, LayoutMode, LogEvent, MarketOpState, RegistryInfo, ServiceState } from './types';
-import { clamp } from './util';
+import { clamp, maskUrlSecrets } from './util';
 import Header from './components/Header';
 import Sidebar, { type ViewKey } from './components/Sidebar';
 import VersionView from './components/VersionView';
@@ -547,7 +547,10 @@ export default function App() {
         logsLive={logsLive}
         onToggleLogs={() => setLogsOpen((o) => !o)}
         embedMode={embedMode}
+        embedReady={!!embedUrl}
+        embedTitle={embedUrl ? maskUrlSecrets(embedUrl) : ''}
         onToggleEmbed={toggleEmbed}
+        onRefreshEmbed={reloadEmbed}
         onCloseRequest={requestClose}
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsed((v) => !v)}
@@ -590,23 +593,7 @@ export default function App() {
         <div className="app-main">
         {embedMode ? (
           <div className="embed-host">
-            {/* 地址自动来自实例启动日志；这里只显示 + 刷新 / 退出 */}
-            <div className="embed-bar">
-              <span className="embed-url" title={embedUrl || embedNote}>
-                {embedUrl || embedNote || '正在解析实例地址…'}
-              </span>
-              <button
-                className="btn"
-                onClick={reloadEmbed}
-                disabled={!embedUrl}
-                title="重新加载当前页面"
-              >
-                刷新
-              </button>
-              <button className="btn" onClick={() => setEmbedMode(false)} title="退出内嵌视图（Esc）">
-                退出
-              </button>
-            </div>
+            {/* 工具条已移除：刷新 / 退出 挪到顶栏，这里只留页面本身 */}
             {embedUrl ? (
               <iframe
                 key={`${embedUrl}#${embedReload}`}

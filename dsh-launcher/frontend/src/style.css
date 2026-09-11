@@ -141,25 +141,6 @@ html, body, #root {
   text-align: center;
 }
 .embed-note { margin: 0; font-size: 13px; color: var(--text-2); }
-/* 顶部工具条：当前地址（只读展示）+ 刷新 / 退出 */
-.embed-bar {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel);
-}
-.embed-url {
-  flex: 1;
-  min-width: 0;
-  font-size: 12.5px;
-  color: var(--text-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 /* ---------- Buttons ---------- */
 .btn {

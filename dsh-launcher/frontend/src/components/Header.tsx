@@ -17,9 +17,14 @@ interface Props {
   logsOpen: boolean;
   logsLive: boolean;
   onToggleLogs: () => void;
-  // 内嵌 DSH 视图：整块下半区换成 DSH 网页，左右两栏都让位（地址完全手动输入）。
+  // 内嵌 DSH 视图：整块下半区换成 DSH 网页，左右两栏都让位（地址自动解析）。
+  // 进入后这一组按钮变成「刷新 / 退出」，下半区保持干净不再放工具条。
   embedMode: boolean;
+  embedReady: boolean;
+  /** 当前内嵌地址（token 已打码），只用于刷新按钮的悬停提示。 */
+  embedTitle: string;
   onToggleEmbed: () => void;
+  onRefreshEmbed: () => void;
   // 顶部整体：三个点 + 展开按钮 + 状态，同属一条状态栏。
   onCloseRequest: () => void;
   collapsed: boolean;
@@ -37,7 +42,10 @@ export default function Header({
   logsLive,
   onToggleLogs,
   embedMode,
+  embedReady,
+  embedTitle,
   onToggleEmbed,
+  onRefreshEmbed,
   onCloseRequest,
   collapsed,
   onToggleCollapse,
@@ -129,19 +137,36 @@ export default function Header({
           {logsLive && <span className="live-dot" title="有实例正在启动或有任务运行中" />}
           <Terminal size={16} strokeWidth={1.75} aria-hidden />
         </button>
-        <button
-          className={`btn btn-icon embed-toggle-btn ${embedMode ? 'btn-accent' : 'btn-ghost'}`}
-          onClick={onToggleEmbed}
-          title={
-            embedMode
-              ? '退出内嵌视图，回到启动器界面'
-              : '在启动器内嵌显示 DSH 界面（地址手动输入，菜单与运行日志两栏让位）'
-          }
-          aria-label={embedMode ? '退出内嵌 DSH' : '内嵌 DSH 界面'}
-          aria-pressed={embedMode}
-        >
-          <Monitor size={16} strokeWidth={1.75} aria-hidden />
-        </button>
+        {embedMode ? (
+          /* 内嵌模式：这一组换成「刷新 / 退出」，下半区不再放工具条 */
+          <>
+            <button
+              className="btn btn-ghost embed-refresh-btn"
+              onClick={onRefreshEmbed}
+              disabled={!embedReady}
+              title={embedTitle ? `重新加载 ${embedTitle}` : '重新加载内嵌页面'}
+            >
+              刷新
+            </button>
+            <button
+              className="btn btn-accent embed-exit-btn"
+              onClick={onToggleEmbed}
+              title="退出内嵌视图，回到启动器界面（Esc）"
+            >
+              退出
+            </button>
+          </>
+        ) : (
+          <button
+            className="btn btn-icon btn-ghost embed-toggle-btn"
+            onClick={onToggleEmbed}
+            title="在启动器内嵌显示 DSH 界面（菜单与运行日志两栏让位）"
+            aria-label="内嵌 DSH 界面"
+            aria-pressed={false}
+          >
+            <Monitor size={16} strokeWidth={1.75} aria-hidden />
+          </button>
+        )}
         </div>
       </div>
     </header>

@@ -13,6 +13,28 @@ export function clamp(v: number, lo: number, hi: number): number {
   return Math.min(Math.max(v, lo), Math.max(lo, hi));
 }
 
+// 把 URL 里 token/secret 之类的查询参数值打码，只用于**界面展示**。
+// DSH 的内嵌地址形如 http://127.0.0.1:3080/?token=<每启动一次的会话令牌>，
+// 直接显示在标题栏上等于把令牌摆在截图/旁人眼前；真实地址仍照常传给 iframe。
+const SECRET_QUERY_KEYS = /^(token|secret|key|code|password)$/i;
+
+export function maskUrlSecrets(url: string): string {
+  if (!url) return url;
+  const at = url.indexOf('?');
+  if (at === -1) return url;
+  const head = url.slice(0, at);
+  const params = url
+    .slice(at + 1)
+    .split('&')
+    .map((seg) => {
+      const eq = seg.indexOf('=');
+      if (eq === -1) return seg;
+      const name = seg.slice(0, eq);
+      return SECRET_QUERY_KEYS.test(decodeURIComponent(name)) ? `${name}=••••••••` : seg;
+    });
+  return `${head}?${params.join('&')}`;
+}
+
 // 从实例的 extraArgs 里解析 --port（支持 `--port 3081` 和 `--port=3081`）。
 // 未指定时 DSH web 默认监听 3080。
 // 运行中实例优先使用后端从进程输出捕获的真实地址（runtime=true），
