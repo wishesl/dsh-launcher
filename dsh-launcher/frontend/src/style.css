@@ -641,6 +641,20 @@ body.resizing .log-drawer { transition: none; }
 }
 .log-drawer-title { font-weight: 700; font-size: 14px; flex: none; }
 .log-drawer-sub { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* 实例选择器：挂在标题旁，属于"我在看哪台"的上下文（标签行只放纯标签）。
+   宽度跟着内容走但设上限，名字长就省略号；剩下的宽度留给副标题。 */
+.log-inst-select {
+  appearance: none;
+  flex: 0 1 auto;
+  min-width: 0; max-width: 52%;
+  padding: 4px 24px 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel-2) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%236a7284' stroke-width='3' stroke-linecap='round'><path d='M6 9l6 6 6-6'/></svg>") no-repeat right 7px center;
+  font-size: 12px; font-weight: 600; color: var(--text-2);
+  text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+}
+.log-inst-select:hover { border-color: var(--accent); color: var(--text); }
 .log-drawer-close {
   margin-left: auto;
   appearance: none;

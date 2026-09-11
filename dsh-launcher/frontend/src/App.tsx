@@ -468,6 +468,10 @@ export default function App() {
     openLogs('logs');
   };
 
+  // 右栏标题旁的实例下拉：只换实例，**不切标签** —— 它现在是"我在看哪台"的全局上下文，
+  // 在「兼容性」页换实例时应该留在兼容性页（切标签由标签自己负责）。
+  const pickLogInstance = useCallback((id: string) => setActiveLogId(id), []);
+
   const clearLog = (id: string) => {
     const map = { ...logsRef.current };
     map[id] = [];
@@ -815,7 +819,7 @@ export default function App() {
           instances={instances}
           logs={logs}
           activeLogId={activeLogId}
-          onSelect={showLog}
+          onSelect={pickLogInstance}
           onClear={clearLog}
           tab={logsTab}
           onTabChange={setLogsTab}

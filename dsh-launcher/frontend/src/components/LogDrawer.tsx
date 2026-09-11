@@ -80,38 +80,16 @@ export default function LogDrawer({
     >
       <div className="log-drawer-head">
         <span className="log-drawer-title">运行日志</span>
-        <span className="log-drawer-sub">
-          {tab === 'compat'
-            ? caps
-              ? `${caps.instanceName} · ${caps.items.filter((i) => !i.ok && !i.unknown).length} 项不可用`
-              : activeInstance
-                ? `${activeInstance.name} · 探测中…`
-                : '选择一个实例'
-            : tab === 'market'
-              ? marketBusy
-                ? `正在${opLabel} ${marketOp.target}…`
-                : '插件市场任务'
-              : activeInstance
-                ? `${activeInstance.name} · ${activeLogs.length} 行`
-                : '选择一个实例查看日志'}
-        </span>
-        <button className="log-drawer-close" onClick={onClose} title="收起日志">✕</button>
-      </div>
-
-      <div className="log-drawer-tabs">
-        {/* 实例不再一实例一个标签：实例一多就横向滚动，把后面两个固定标签挤没。
-            合成一个下拉，省下的宽度全给「市场任务 / 兼容性」。 */}
+        {/* 实例选择器属于"我在看哪台"的上下文，放在标题旁边；标签行留给纯标签，
+            否则一个下拉混在两个标签里读起来不一致。 */}
         {instances.length === 0 ? (
-          <span className="muted log-inst-empty">暂无实例</span>
+          <span className="log-drawer-sub">暂无实例</span>
         ) : (
           <select
-            className={`log-inst-select ${tab === 'logs' ? 'active' : ''}`}
+            className="log-inst-select"
             value={activeLogId ?? instances[0].id}
-            onChange={(e) => {
-              onSelect(e.target.value);
-              onTabChange('logs');
-            }}
-            title="选择要查看日志的实例"
+            onChange={(e) => onSelect(e.target.value)}
+            title="选择要查看的实例（日志与兼容性都跟着它）"
           >
             {instances.map((inst) => (
               <option key={inst.id} value={inst.id}>
@@ -122,6 +100,35 @@ export default function LogDrawer({
             ))}
           </select>
         )}
+        <span className="log-drawer-sub">
+          {tab === 'compat'
+            ? caps
+              ? `${caps.items.filter((i) => !i.ok && !i.unknown).length} 项不可用`
+              : '探测中…'
+            : tab === 'market'
+              ? marketBusy
+                ? `正在${opLabel} ${marketOp.target}…`
+                : '插件市场任务'
+              : activeInstance
+                ? `${activeLogs.length} 行`
+                : '选择一个实例查看日志'}
+        </span>
+        <button className="log-drawer-close" onClick={onClose} title="收起日志">✕</button>
+      </div>
+
+      <div className="log-drawer-tabs">
+        {/* 三个纯标签平分宽度：实例日志是默认页（实例由标题旁的下拉决定）。 */}
+        <button
+          className={`log-tab ${tab === 'logs' ? 'active' : ''}`}
+          onClick={() => onTabChange('logs')}
+        >
+          {activeInstance && isLive(activeInstance) ? (
+            <span className="live">●</span>
+          ) : (
+            <span className="dim">○</span>
+          )}{' '}
+          实例日志
+        </button>
         <button
           className={`log-tab log-tab-market ${tab === 'market' ? 'active' : ''} ${marketBusy ? 'busy' : ''}`}
           onClick={() => onTabChange('market')}
