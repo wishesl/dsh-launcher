@@ -546,6 +546,16 @@ export default function App() {
   // 否则一打开面板是空的，用户得先猜要先去点哪个实例标签。
   const capsTargetId = activeLogId ?? embedInstance?.id ?? instances[0]?.id ?? null;
 
+  // 右栏打开时若还没选实例就默认选一个（优先正在跑的）。否则下拉里显示着第一台、
+  // 日志面板却是空的 —— 自相矛盾。
+  useEffect(() => {
+    if (!logsOpen || activeLogId || instances.length === 0) return;
+    const live = instances.find(
+      (i) => i.status === 'ready' || i.status === 'running' || i.status === 'starting'
+    );
+    setActiveLogId((live ?? instances[0]).id);
+  }, [logsOpen, activeLogId, instances]);
+
   // 打开「兼容性」标签（或切换/重启实例）时探测一次。能力报告是插件在启动时写的，
   // 进程起来之前读不到，所以要跟着状态变化重探。
   useEffect(() => {

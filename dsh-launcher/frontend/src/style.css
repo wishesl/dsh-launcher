@@ -658,13 +658,31 @@ body.resizing .log-drawer { transition: none; }
 
 .log-drawer-tabs {
   flex: none;
-  display: flex; align-items: center; gap: 4px;
+  display: flex; align-items: center; gap: 6px;
   padding: 8px 12px 0;
-  overflow-x: auto;
   min-width: 0;
 }
+/* 实例选择器：替代"一实例一个标签"。宽度跟着内容走但设上限（名字长就省略号），
+   剩下的宽度全部让给右边两个固定标签。 */
+.log-inst-select {
+  appearance: none;
+  flex: 0 1 auto;
+  min-width: 0; max-width: 48%;
+  padding: 7px 26px 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%236a7284' stroke-width='3' stroke-linecap='round'><path d='M6 9l6 6 6-6'/></svg>") no-repeat right 8px center;
+  font-size: 12.5px; font-weight: 600; color: var(--text-2);
+  text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+}
+.log-inst-select:hover { border-color: var(--accent); color: var(--text); }
+.log-inst-select.active { border-color: var(--accent); color: var(--accent); background-color: var(--accent-soft); }
+.log-inst-empty { padding: 6px 10px; }
 .log-tab {
   appearance: none; border: none; background: none; cursor: pointer;
+  /* 两个固定标签平分剩余宽度（"展开"），不再被实例标签挤成一条 */
+  flex: 1 1 0; min-width: 0; justify-content: center;
+  display: inline-flex; align-items: center; gap: 6px;
   padding: 7px 12px;
   border-radius: 8px 8px 0 0;
   font-size: 12.5px; color: var(--text-2); font-weight: 600;

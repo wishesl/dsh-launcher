@@ -99,19 +99,29 @@ export default function LogDrawer({
       </div>
 
       <div className="log-drawer-tabs">
-        {instances.length === 0 && <span className="muted" style={{ padding: '6px 10px' }}>暂无实例</span>}
-        {instances.map((inst) => (
-          <button
-            key={inst.id}
-            className={`log-tab ${tab === 'logs' && activeLogId === inst.id ? 'active' : ''}`}
-            onClick={() => {
-              onSelect(inst.id);
+        {/* 实例不再一实例一个标签：实例一多就横向滚动，把后面两个固定标签挤没。
+            合成一个下拉，省下的宽度全给「市场任务 / 兼容性」。 */}
+        {instances.length === 0 ? (
+          <span className="muted log-inst-empty">暂无实例</span>
+        ) : (
+          <select
+            className={`log-inst-select ${tab === 'logs' ? 'active' : ''}`}
+            value={activeLogId ?? instances[0].id}
+            onChange={(e) => {
+              onSelect(e.target.value);
               onTabChange('logs');
             }}
+            title="选择要查看日志的实例"
           >
-            <span className={isLive(inst) ? 'live' : undefined}>●</span> {inst.name}
-          </button>
-        ))}
+            {instances.map((inst) => (
+              <option key={inst.id} value={inst.id}>
+                {isLive(inst) ? '● ' : '○ '}
+                {inst.name}
+                {isLive(inst) ? '（运行中）' : '（已停止）'}
+              </option>
+            ))}
+          </select>
+        )}
         <button
           className={`log-tab log-tab-market ${tab === 'market' ? 'active' : ''} ${marketBusy ? 'busy' : ''}`}
           onClick={() => onTabChange('market')}
