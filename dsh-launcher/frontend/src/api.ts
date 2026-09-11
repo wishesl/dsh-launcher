@@ -34,6 +34,7 @@ import {
   QuitApp,
   RemoveFavorite,
   RemoveInstance,
+  ReorderInstances,
   RequestClose,
   RunAutoStartInstances,
   SaveInstance,
@@ -86,6 +87,8 @@ export const api = {
     SetInstanceMasks(id, names),
   saveInstance: (i: Instance): Promise<Instance[]> => SaveInstance(i as any),
   removeInstance: (id: string): Promise<Instance[]> => RemoveInstance(id),
+  // 拖拽排序：把新顺序落盘。后端只接受当前 id 集合的一个排列，否则原样返回。
+  reorderInstances: (ids: string[]): Promise<Instance[]> => ReorderInstances(ids),
   launchInstance: (id: string): Promise<void> => LaunchInstance(id),
   stopInstance: (id: string): Promise<void> => StopInstance(id),
   installToDirectory: (id: string): Promise<Instance[]> => InstallToDirectory(id),

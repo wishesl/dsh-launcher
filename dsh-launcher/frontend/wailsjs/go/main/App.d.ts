@@ -76,6 +76,8 @@ export function RemoveFavorite(arg1:string):Promise<Array<main.FavoritePlugin>>;
 
 export function RemoveInstance(arg1:string):Promise<Array<main.Instance>>;
 
+export function ReorderInstances(arg1:Array<string>):Promise<Array<main.Instance>>;
+
 export function RequestClose():Promise<void>;
 
 export function RunAutoStartInstances():Promise<Array<string>>;

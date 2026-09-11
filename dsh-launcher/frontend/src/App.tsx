@@ -344,6 +344,36 @@ export default function App() {
     }
   };
 
+  // 拖拽排序：本地顺序立即生效，落盘走 300ms 合并。
+  // 合并是给键盘 ↑/↓ 用的 —— 按住方向键会自动重复，一次一键就写一遍 instances.json；
+  // 拖拽只会调用一次，合并对它没有可见影响。seq 防止「旧请求的响应覆盖新顺序」：
+  // 否则连按时会先被服务端回包掰回上一版，闪一下再跳到最终顺序。
+  // useCallback 稳定引用：符合 AGENTS.md 4.1（传给子组件的回调必须稳定）。
+  const reorderSeq = useRef(0);
+  const reorderTimer = useRef<number | null>(null);
+  const reorderInstances = useCallback(
+    (ids: string[]) => {
+      setInstances((prev) => {
+        const byId = new Map(prev.map((i) => [i.id, i]));
+        const next = ids.map((id) => byId.get(id)).filter((i): i is Instance => !!i);
+        return next.length === prev.length ? next : prev;
+      });
+      if (reorderTimer.current !== null) window.clearTimeout(reorderTimer.current);
+      const seq = ++reorderSeq.current;
+      reorderTimer.current = window.setTimeout(() => {
+        reorderTimer.current = null;
+        api
+          .reorderInstances(ids)
+          .then((list) => {
+            // 后端只接受当前 id 集合的一个排列，被拒时返回原顺序 → 这里把 UI 掰回去。
+            if (seq === reorderSeq.current) setInstances(list);
+          })
+          .catch((e) => showToast('保存实例顺序失败: ' + errMsg(e), 'error'));
+      }, 300);
+    },
+    [showToast]
+  );
+
   const install = async (id: string) => {
     setBusyId(id);
     setActiveLogId(id);
@@ -655,6 +685,7 @@ export default function App() {
               onDelete={remove}
               onSelectLog={selectLog}
               onToggleAutoStart={toggleAutoStart}
+              onReorder={reorderInstances}
             />
           )}
           {view === 'market' && (

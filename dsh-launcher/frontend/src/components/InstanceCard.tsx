@@ -1,4 +1,5 @@
 import type { Instance, RegistryInfo, ServiceState } from '../types';
+import { GripVertical } from 'lucide-react';
 import { getWebUrl } from '../util';
 import Switch from './Switch';
 
@@ -8,6 +9,10 @@ interface Props {
   registry: RegistryInfo | null;
   busy: boolean;
   activeLog: boolean;
+  /** 正在被拖动排序（列表实时重排，这一张要给"拿起来了"的视觉）。 */
+  dragging?: boolean;
+  onDragHandleDown: (e: React.PointerEvent<HTMLElement>, id: string) => void;
+  onDragHandleKeyDown: (e: React.KeyboardEvent<HTMLElement>, id: string) => void;
   onStart: (id: string) => void;
   onStop: (id: string) => void;
   onInstall: (id: string) => void;
@@ -39,6 +44,9 @@ export default function InstanceCard({
   registry,
   busy,
   activeLog,
+  dragging,
+  onDragHandleDown,
+  onDragHandleKeyDown,
   onStart,
   onStop,
   onInstall,
@@ -89,8 +97,22 @@ export default function InstanceCard({
         : '服务未就绪（端口未响应），无法打开';
 
   return (
-    <div className={`instance-card ${st.rail} ${activeLog ? 'active' : ''}`}>
+    <div
+      className={`instance-card ${st.rail} ${activeLog ? 'active' : ''} ${dragging ? 'dragging' : ''}`}
+      data-inst-id={instance.id}
+    >
       <div className="instance-top">
+        {/* 排序手柄：拖它重排实例顺序（键盘可用 ↑/↓）。 */}
+        <button
+          type="button"
+          className="inst-grip"
+          title="拖动调整顺序（也可聚焦后按 ↑ / ↓）"
+          aria-label={`调整「${instance.name}」的顺序`}
+          onPointerDown={(e) => onDragHandleDown(e, instance.id)}
+          onKeyDown={(e) => onDragHandleKeyDown(e, instance.id)}
+        >
+          <GripVertical size={14} strokeWidth={2} aria-hidden />
+        </button>
         <span className="instance-name" title={instance.directory}>{instance.name}</span>
         <span className={`status-badge ${st.cls}`}>
           <span className="status-dot" />

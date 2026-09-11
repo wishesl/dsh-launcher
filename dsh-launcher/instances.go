@@ -147,6 +147,34 @@ func (s *instanceStore) replace(list []Instance) {
 	s.loaded = list
 }
 
+// reorder rewrites the stored order to match ids, returning false when it did
+// nothing. It only accepts an EXACT permutation of the stored ids: a stale or
+// partial list (the frontend's copy can lag a delete that happened elsewhere)
+// must never silently drop a row, duplicate one, or invent an unknown id.
+func (s *instanceStore) reorder(ids []string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(ids) != len(s.loaded) {
+		return false
+	}
+	byID := make(map[string]Instance, len(s.loaded))
+	for _, inst := range s.loaded {
+		byID[inst.ID] = inst
+	}
+	next := make([]Instance, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		inst, ok := byID[id]
+		if !ok || seen[id] {
+			return false
+		}
+		seen[id] = true
+		next = append(next, inst)
+	}
+	s.loaded = next
+	return true
+}
+
 // newID returns a short random hex id.
 func newID() string {
 	b := make([]byte, 6)

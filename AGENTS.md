@@ -56,6 +56,14 @@
 - **插件市场安装 / 卸载** → 自动打开右栏并切到「市场任务」标签（`onShowMarketLogs()` → `openLogs('market')`）。
 - 市场页只保留一条**精简状态条**（`market-strip`：正在安装 X… + 取消 + 查看进度），完整输出在右栏。
 
+### 实例顺序（可拖拽）
+- `InstancesView` 卡片左上角手柄（`.inst-grip`）可拖动重排，键盘聚焦后 ↑/↓ 等价；Esc 取消不落盘。
+- `instanceStore` 的顺序是**唯一真相**——实例列表、日志标签页、托盘菜单都按它渲染。
+- 落盘走 `ReorderInstances`：后端**只接受当前 id 集合的一个排列**，stale / 缺项 / 重复项一律拒绝并原样返回，
+  前端用返回值把 UI 掰回（所以永远不会因为前端列表过期而丢实例）。
+- 拖动时列表是实时重排的（不给浮动 ghost），并且**不要用 pointer capture**：实时重排会让 React 挪动 DOM 节点，
+  节点被重新插入就会丢 capture。用 window 级 pointermove/pointerup 监听。
+
 ## 4. 前端代码约定
 
 ### 4.1 状态管理

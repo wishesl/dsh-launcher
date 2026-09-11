@@ -44,3 +44,62 @@ func TestResetRuntimeMustMutateStore(t *testing.T) {
 		t.Errorf("resetRuntime failed to mutate the store: %+v", s.loaded[0])
 	}
 }
+
+func TestInstanceStoreReorder(t *testing.T) {
+	newStore := func() *instanceStore {
+		s := &instanceStore{path: filepath.Join(t.TempDir(), "instances.json")}
+		s.loaded = []Instance{{ID: "a"}, {ID: "b"}, {ID: "c"}}
+		return s
+	}
+	order := func(s *instanceStore) string {
+		out := ""
+		for _, inst := range s.loaded {
+			out += inst.ID
+		}
+		return out
+	}
+
+	t.Run("permutation rewrites the order", func(t *testing.T) {
+		s := newStore()
+		if !s.reorder([]string{"c", "a", "b"}) {
+			t.Fatal("a valid permutation must be accepted")
+		}
+		if got := order(s); got != "cab" {
+			t.Fatalf("order = %q, want cab", got)
+		}
+	})
+
+	t.Run("same order is still accepted", func(t *testing.T) {
+		s := newStore()
+		if !s.reorder([]string{"a", "b", "c"}) {
+			t.Fatal("an identity permutation must be accepted")
+		}
+		if got := order(s); got != "abc" {
+			t.Fatalf("order = %q, want abc", got)
+		}
+	})
+
+	// Every rejection path must leave the store exactly as it was: a stale
+	// frontend list must never drop or duplicate an instance.
+	for _, tc := range []struct {
+		name string
+		ids  []string
+	}{
+		{"short list", []string{"b", "a"}},
+		{"long list", []string{"a", "b", "c", "a"}},
+		{"unknown id", []string{"a", "b", "zzz"}},
+		{"duplicate id", []string{"a", "a", "b"}},
+		{"empty", nil},
+	} {
+		t.Run("rejects "+tc.name, func(t *testing.T) {
+			s := newStore()
+			if s.reorder(tc.ids) {
+				t.Fatalf("reorder(%v) must be rejected", tc.ids)
+			}
+			if got := order(s); got != "abc" {
+				t.Fatalf("a rejected reorder must not touch the store, order = %q", got)
+			}
+		})
+	}
+}
+

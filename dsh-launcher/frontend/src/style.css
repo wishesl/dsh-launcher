@@ -380,6 +380,30 @@ html, body, #root {
   padding: 2px 2px 4px;
 }
 
+/* 拖动排序：列表实时重排，被拖动的那张"拿起来"（抬升 + 描边高亮），
+   其余卡片自然让位。拖拽期间整窗保持抓取光标并禁止选中文字。 */
+body.reordering { cursor: grabbing; user-select: none; }
+.instance-card.dragging {
+  border-color: var(--accent);
+  box-shadow: 0 10px 24px rgba(20, 27, 46, .16);
+  opacity: .96;
+}
+/* 排序手柄：平时很淡，悬停/聚焦才显形，避免和卡片里的按钮抢注意力。 */
+.inst-grip {
+  flex: none;
+  width: 20px; height: 20px; margin-left: -4px;
+  display: grid; place-items: center;
+  padding: 0;
+  border: 0; border-radius: 5px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: grab;
+  touch-action: none;
+}
+.inst-grip:hover { color: var(--text-2); background: var(--panel-3); }
+.inst-grip:active { cursor: grabbing; }
+.inst-grip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
 /* status rail colors */
 .rail-running, .rail-ready { --rail: var(--green); }
 .rail-starting, .rail-stopping, .rail-restarting { --rail: var(--amber); }

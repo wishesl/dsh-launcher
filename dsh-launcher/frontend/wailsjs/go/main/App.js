@@ -150,6 +150,10 @@ export function RemoveInstance(arg1) {
   return window['go']['main']['App']['RemoveInstance'](arg1);
 }
 
+export function ReorderInstances(arg1) {
+  return window['go']['main']['App']['ReorderInstances'](arg1);
+}
+
 export function RequestClose() {
   return window['go']['main']['App']['RequestClose']();
 }

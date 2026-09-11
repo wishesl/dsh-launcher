@@ -250,6 +250,22 @@ func (a *App) GetInstances() []Instance {
 	return a.store.list()
 }
 
+// ReorderInstances rewrites the instance order to match ids — the instance list
+// is drag-to-reorderable, and the store's order is what the list, the log tabs
+// and the tray menu all render from.
+//
+// The call is a no-op unless ids is an exact permutation of the stored ids; in
+// that case the unchanged order is returned so the UI snaps back instead of
+// showing a list the backend never accepted.
+func (a *App) ReorderInstances(ids []string) []Instance {
+	if !a.store.reorder(ids) {
+		return a.store.list()
+	}
+	a.store.saveAll()
+	go a.refreshTrayInstances() // 托盘菜单按 store 顺序渲染
+	return a.store.list()
+}
+
 // SaveInstance adds a new instance or updates the matching one. It auto-fills
 // the local version detected in the target directory.
 func (a *App) SaveInstance(inst Instance) ([]Instance, error) {
