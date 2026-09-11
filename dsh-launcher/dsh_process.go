@@ -225,6 +225,10 @@ func (a *App) LaunchInstance(id string) error {
 	// 不挂载、不注入，零残留。
 	selfRestart := selfRestartEnabled(snapshot)
 
+	// 能力报告以"本次启动"为准：先清掉上一次运行留下的文件，否则面板会拿着旧进程
+	// 的结论谎报"一切正常"（上次装了插件、这次没装时最危险）。
+	cleanupCapabilities(snapshot.Directory)
+
 	a.emitStatus(snapshot.ID, "starting", 0)
 	if snapshot.Source {
 		a.systemLog(snapshot.ID, 0, fmt.Sprintf("正在启动 DSH（源码模式） (目录: %s)", snapshot.Directory))

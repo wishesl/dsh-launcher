@@ -10,6 +10,7 @@ import {
   GenerateShareCode,
   GetAppDataPath,
   GetEmbedURL,
+  GetCapabilities,
   GetInstanceMasks,
   GetInstances,
   GetLauncherVersion,
@@ -54,6 +55,7 @@ import {
 } from '../wailsjs/go/main/App';
 import { EventsOff, EventsOn } from '../wailsjs/runtime/runtime';
 import type {
+  CapabilityReport,
   EnvLogEvent,
   EnvReport,
   FavoriteDraft,
@@ -149,6 +151,9 @@ export const api = {
 
   // 启动器自身版本（顶栏品牌区的版本 pill）；发版用 -ldflags 注入，未注入时为 "dev"
   getLauncherVersion: (): Promise<string> => GetLauncherVersion(),
+
+  // 兼容性探测：这台实例上各项能力"到底能不能用"（本地读取，不发网络请求）
+  getCapabilities: (instanceId: string): Promise<CapabilityReport> => GetCapabilities(instanceId),
 
   // plugin favorites (local, offline)
   listFavorites: (): Promise<FavoritePlugin[]> => ListFavorites(),

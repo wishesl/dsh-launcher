@@ -658,6 +658,53 @@ body.resizing .log-drawer { transition: none; }
 .log-tab .dim { color: var(--text-3); }
 .log-tab-market.busy { color: var(--amber); }
 .log-tab-market.busy.active { color: var(--amber); border-bottom-color: var(--amber); }
+/* 兼容性标签：有红灯时标签自己亮出来，不用等用户点进去才发现能力失效 */
+.log-tab-compat .caps-bad-dot { color: var(--red); }
+.log-tab-compat:has(.caps-bad-dot) { color: var(--red); }
+
+/* ---------- 兼容性面板（右栏第三标签） ---------- */
+.caps-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; min-width: 0; }
+.caps-head {
+  flex: none;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 8px;
+}
+.caps-head-title { font-size: 12.5px; font-weight: 600; color: var(--text-2); min-width: 0; }
+.caps-meta { flex: none; display: flex; gap: 10px; font-size: 11.5px; color: var(--text-3); margin-bottom: 8px; }
+.caps-stale {
+  margin: 0 0 8px; padding: 7px 9px;
+  font-size: 11.5px; line-height: 1.5; color: var(--amber);
+  background: var(--amber-soft); border-radius: var(--radius-xs);
+}
+.caps-list { display: flex; flex-direction: column; gap: 6px; }
+/* 每行是一条耦合点的探测结论：左点=结论，中间=证据/原因，右侧标出探测方 */
+.caps-row {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+.caps-row.bad { border-color: color-mix(in srgb, var(--red) 28%, var(--border-soft)); background: var(--red-soft); }
+.caps-dot {
+  flex: none; width: 7px; height: 7px; margin-top: 5px; border-radius: 50%;
+  background: var(--green);
+}
+.caps-row.bad .caps-dot { background: var(--red); }
+.caps-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.caps-label { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.caps-detail { font-size: 11.5px; color: var(--text-3); word-break: break-all; }
+.caps-reason { font-size: 11.5px; color: var(--red); line-height: 1.5; }
+.caps-hint { font-size: 11.5px; color: var(--text-3); line-height: 1.5; }
+.caps-source {
+  flex: none; font-size: 10.5px; color: var(--text-3);
+  border: 1px solid var(--border-soft); border-radius: 999px; padding: 1px 6px 2px;
+}
+.caps-foot { margin: 10px 0 0; font-size: 11.5px; line-height: 1.6; color: var(--text-3); }
+
+/* 顶栏内嵌入口的门控包裹层（disabled 控件的 tooltip 只能挂在这里） */
+.embed-gate { display: inline-flex; flex: none; }
+.embed-gate.blocked { cursor: not-allowed; }
 
 .log-drawer-body {
   flex: 1; min-height: 0;

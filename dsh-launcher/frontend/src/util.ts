@@ -1,4 +1,4 @@
-import type { Instance } from './types';
+import type { CapabilityReport, Instance } from './types';
 
 export interface WebUrlInfo {
   url: string;
@@ -81,3 +81,33 @@ export function githubURLFromSpec(spec: string): string {
   const repo = specRepoOf(spec);
   return repo ? `https://github.com/${repo}` : '';
 }
+
+// ---- 能力门控 ----
+
+/** 面板里某一项的结论（取不到返回 undefined）。 */
+export function capabilityOf(caps: CapabilityReport | null | undefined, id: string) {
+  return caps?.items.find((i) => i.id === id);
+}
+
+/**
+ * 内嵌入口的门控原因，'' 表示可以进。
+ *
+ * 策略是**只在有明确结论时才拦**：
+ *  - 插件报告了 `embedRelax=false` → 拦，并把插件给的原因原样显示出来。这正是我们要
+ *    抓的静默失效：DSH 改了内部接口，插件跳过打补丁，内嵌必然 401 / 一直「自动重连中」。
+ *  - 报告里没有这一项、或压根没取到报告 → **不拦**。因为"没有报告"混淆了多种原因
+ *    （插件版本旧、实例没启用自管理重启、报告还没写出来），硬拦会把本来能用的内嵌锁死；
+ *    这种情况交给右栏「兼容性」面板说明，而不是禁用按钮。
+ */
+export function embedGateReason(caps?: CapabilityReport | null): string {
+  if (!caps) return '';
+  const item = capabilityOf(caps, 'embedRelax');
+  if (!item || item.ok) return '';
+  return item.reason || '该 DSH 版本未提供内嵌所需的会话接口';
+}
+
+/** 兼容性面板是否有红灯（用于右栏标签上的提示点）。 */
+export function hasCapabilityFailure(caps?: CapabilityReport | null): boolean {
+  return !!caps?.items.some((i) => !i.ok);
+}
+

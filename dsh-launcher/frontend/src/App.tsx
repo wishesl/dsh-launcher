@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { api, errMsg } from './api';
 import { BrowserOpenURL, Environment } from '../wailsjs/runtime/runtime';
-import type { ExitChoice, Instance, LayoutMode, LogEvent, MarketOpState, RegistryInfo, ServiceState } from './types';
-import { clamp, maskUrlSecrets } from './util';
+import type { CapabilityReport, ExitChoice, Instance, LayoutMode, LogEvent, LogTab, MarketOpState, RegistryInfo, ServiceState } from './types';
+import { clamp, embedGateReason, maskUrlSecrets } from './util';
 import Header from './components/Header';
 import Sidebar, { type ViewKey } from './components/Sidebar';
 import VersionView from './components/VersionView';
@@ -136,7 +136,9 @@ export default function App() {
     },
     [detectOs]
   );
-  const [logsTab, setLogsTab] = useState<'logs' | 'market'>('logs');
+  const [logsTab, setLogsTab] = useState<LogTab>('logs');
+  // 兼容性探测结果（按实例缓存）：右栏「兼容性」标签 + 内嵌入口的门控都用它。
+  const [capsById, setCapsById] = useState<Record<string, CapabilityReport>>({});
   // Plugin-market operation stream (hoisted so the drawer can show it too).
   const [marketLogs, setMarketLogs] = useState<string[]>([]);
   const [marketOp, setMarketOp] = useState<MarketOpState>({ running: false, kind: '', target: '' });
@@ -166,9 +168,18 @@ export default function App() {
   }, []);
 
   // Open the right-side run-log drawer on a given tab.
-  const openLogs = useCallback((tab: 'logs' | 'market') => {
+  const openLogs = useCallback((tab: LogTab) => {
     setLogsTab(tab);
     setLogsOpen(true);
+  }, []);
+
+  // 重新探测一台实例的能力（本地读取，不阻塞）。取不到就保持上一次的结果，
+  // 不让面板因为一次读取失败而清空。
+  const loadCaps = useCallback(async (id: string) => {
+    const report = await api.getCapabilities(id).catch(() => null);
+    if (report && report.instanceId) {
+      setCapsById((m) => ({ ...m, [report.instanceId]: report }));
+    }
   }, []);
 
   const clearMarketLogs = useCallback(() => {
@@ -523,6 +534,31 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [embedMode]);
 
+  // 「兼容性」面板的目标实例：优先用日志里选中的那个；没选就默认当前运行的实例 ——
+  // 否则一打开面板是空的，用户得先猜要先去点哪个实例标签。
+  const capsTargetId = activeLogId ?? embedInstance?.id ?? instances[0]?.id ?? null;
+
+  // 打开「兼容性」标签（或切换/重启实例）时探测一次。能力报告是插件在启动时写的，
+  // 进程起来之前读不到，所以要跟着状态变化重探。
+  useEffect(() => {
+    if (!logsOpen || logsTab !== 'compat' || !capsTargetId) return;
+    void loadCaps(capsTargetId);
+  }, [logsOpen, logsTab, capsTargetId, loadCaps]);
+
+  // 内嵌入口的门控要读目标实例的能力报告，所以它一来就探一次（不只是打开面板时）。
+  useEffect(() => {
+    if (!embedInstance) return;
+    void loadCaps(embedInstance.id);
+  }, [embedInstance?.id, embedInstance?.status, loadCaps]);
+
+  // 内嵌门控：插件明确报告"放宽失败"时置灰并给出原因；没有结论时不拦（见 util.ts）。
+  const embedCaps = embedInstance ? capsById[embedInstance.id] : undefined;
+  const embedBlockedReason = embedGateReason(embedCaps);
+  const activeCaps = capsTargetId ? capsById[capsTargetId] : undefined;
+  const refreshCaps = useCallback(() => {
+    if (capsTargetId) void loadCaps(capsTargetId);
+  }, [capsTargetId, loadCaps]);
+
   // 稳定引用：Header 是子组件，回调不 useCallback 会每次渲染都换新引用（见 AGENTS.md）。
   const toggleEmbed = useCallback(() => setEmbedMode((v) => !v), []);
 
@@ -596,6 +632,7 @@ export default function App() {
         embedMode={embedMode}
         embedReady={!!embedUrl}
         embedTitle={embedUrl ? maskUrlSecrets(embedUrl) : ''}
+        embedBlockedReason={embedBlockedReason}
         onToggleEmbed={toggleEmbed}
         onRefreshEmbed={reloadEmbed}
         onCloseRequest={requestClose}
@@ -739,6 +776,8 @@ export default function App() {
           marketOp={marketOp}
           onClearMarketLogs={clearMarketLogs}
           onCancelMarket={cancelMarket}
+          caps={activeCaps}
+          onRefreshCaps={refreshCaps}
         />
           </>
         )}

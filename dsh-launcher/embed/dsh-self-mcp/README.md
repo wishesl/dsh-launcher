@@ -99,9 +99,51 @@ cookie-less 请求」都会被放行。攻击者网页发出的跨站请求带�
 |---|---|---|
 | `pending.json` | `<实例目录>/.dsh-self-mcp/` | 交付意图（跨重启的持久状态） |
 | `restart-request.json` | 同上 | launcher 契约：请求自动重新拉起 |
+| `capabilities.json` | 同上 | 能力报告：探测结论的出口（见下节） |
+
+## 能力报告（capabilities.json）
+
+插件判断「某项功能能不能用」靠**探测私有接口在不在**（例如 `connection` 上还有没有
+`authorizeIndex` / `requestRejection`），**不按 DSH 版本号分支** —— 版本号是上游控制的
+时间戳，用它当键必然滞后（用户装的是 `latest`，任何"版本 → 预设"的表都慢一步）。
+
+探测必须有出口：以前 `relaxEmbedAuth()` 发现接口变了只写 logger 就 `return`，界面上只
+表现为内嵌一直「自动重连中」，排查要好几个来回。现在探测结论会**落盘**成：
+
+```json
+{
+  "schema": 1,
+  "plugin": "dsh-self-mcp",
+  "pluginVersion": "0.1.0",
+  "pid": 12345,
+  "reportedAt": "2026-09-12T02:00:00.000Z",
+  "launcher": true,
+  "instanceId": "…",
+  "capabilities": [
+    { "id": "pluginLoaded", "ok": true, "reason": "" },
+    { "id": "embedRelax", "ok": false, "reason": "connection 上没有 authorizeIndex / requestRejection（DSH 内部接口变了？）" }
+  ]
+}
+```
+
+- 能力项：`pluginLoaded` / `restartTool` / `embedRelax` / `restartDelivery`（最后一项记录
+  上一次重启完成实际走的通道：plugin/notice 还是回退的 `prompt()`）。
+- 写入时机：`apply()` 装载时、`relaxEmbedAuth()` 探测后、工具注册后、以及交付重启完成
+  消息之后 —— 都是 best-effort，写不出去不影响插件功能。
+- 启动器侧：`capabilities.go` 读回报告，补上自己的探测项（地址 / token / 覆盖层门控），
+  汇总成右栏「兼容性」标签；`embedRelax` 为 false 时直接把内嵌入口置灰并显示原因。
+- **陈旧保护**：启动器每次启动实例前先删掉这个文件，所以「文件在」就等于「本次运行
+  报告过」；报告里的 `pid` 与当前进程不符时面板会标成"可能已过期"。
+
+契约是 launcher 与插件双方约定的，不依赖 DSH 的任何私有格式 —— 这是把耦合点从
+"别人的内部实现"挪到"我们自己的边界"上的做法。**升级插件后需要重新安装到全局**
+（`pnpm add file:<profile>/.dsh-builtin/dsh-self-mcp`），否则跑的还是旧副本、不会写报告。
 
 ## 验证
 
-- Go：`cd dsh-launcher && go test ./...`（含 `self_restart_test.go`）
+- Go：`cd dsh-launcher && go test ./...`（含 `self_restart_test.go`、`capabilities_test.go`）
 - 覆盖层挂载：`node <dsh>/lib/bin.js web --patch .dsh-self-restart-test.yml --port 0 --no-open`
   启动成功后清理临时覆盖层文件（已 gitignore）。
+- 能力报告：启动一个勾选了「自管理重启」的实例，然后看
+  `<实例目录>/.dsh-self-mcp/capabilities.json`，或直接开右栏「兼容性」标签。
+

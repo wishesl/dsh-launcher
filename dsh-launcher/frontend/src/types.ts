@@ -243,3 +243,34 @@ export interface ShareImportResult {
   imported: FavoritePlugin[];
   skipped: string[];      // ids already present (deduped)
 }
+
+// ---------- 兼容性 / 能力探测（见 capabilities.go 与 capabilities.json） ----------
+
+/** 右栏第三个标签页（与实例日志 / 市场任务并列）。 */
+export type LogTab = 'logs' | 'market' | 'compat';
+
+/**
+ * 面板上的一行。`id` 是稳定契约键 —— 前端按 id 做功能门控
+ * （例如 `embedRelax` 决定内嵌入口是否置灰），改名等于破坏兼容。
+ */
+export interface CapabilityItem {
+  id: string;
+  label: string;
+  ok: boolean;
+  detail: string;   // 证据：解析到的地址 / 门控卡在哪一道
+  reason: string;   // ok=false 时插件给的人话原因
+  source: string;   // "launcher" | "plugin"
+  hint: string;     // 这一项坏掉的后果
+}
+
+export interface CapabilityReport {
+  instanceId: string;
+  instanceName: string;
+  version: string;
+  status: string;
+  plugin: string;   // "dsh-self-mcp@0.1.0"；插件未报告时为空
+  pluginAt: string; // 报告时间（RFC3339）
+  stale: boolean;   // 报告来自上一个进程（pid 不匹配）
+  items: CapabilityItem[];
+}
+

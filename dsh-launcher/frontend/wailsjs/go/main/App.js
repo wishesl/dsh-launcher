@@ -46,6 +46,10 @@ export function GetAppDataPath() {
   return window['go']['main']['App']['GetAppDataPath']();
 }
 
+export function GetCapabilities(arg1) {
+  return window['go']['main']['App']['GetCapabilities'](arg1);
+}
+
 export function GetEmbedURL(arg1) {
   return window['go']['main']['App']['GetEmbedURL'](arg1);
 }

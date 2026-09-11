@@ -1,5 +1,73 @@
 export namespace main {
 	
+	export class CapabilityItem {
+	    id: string;
+	    label: string;
+	    ok: boolean;
+	    detail: string;
+	    reason: string;
+	    source: string;
+	    hint: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CapabilityItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.label = source["label"];
+	        this.ok = source["ok"];
+	        this.detail = source["detail"];
+	        this.reason = source["reason"];
+	        this.source = source["source"];
+	        this.hint = source["hint"];
+	    }
+	}
+	export class CapabilityReport {
+	    instanceId: string;
+	    instanceName: string;
+	    version: string;
+	    status: string;
+	    plugin: string;
+	    pluginAt: string;
+	    stale: boolean;
+	    items: CapabilityItem[];
+	
+	    static createFrom(source: any = {}) {
+	        return new CapabilityReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.instanceId = source["instanceId"];
+	        this.instanceName = source["instanceName"];
+	        this.version = source["version"];
+	        this.status = source["status"];
+	        this.plugin = source["plugin"];
+	        this.pluginAt = source["pluginAt"];
+	        this.stale = source["stale"];
+	        this.items = this.convertValues(source["items"], CapabilityItem);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class DSHVersion {
 	    version: string;
 	    published: string;

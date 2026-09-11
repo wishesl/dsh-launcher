@@ -36,6 +36,9 @@ const Config = z.object({});
 const STATE_DIR = ".dsh-self-mcp";
 const PENDING_FILE = "pending.json";
 const REQUEST_FILE = "restart-request.json";
+/** 能力报告：启动器读它决定「内置浏览器」等入口的可用性（见 writeCapabilityReport）。 */
+const CAPS_FILE = "capabilities.json";
+const CAPS_SCHEMA = 1;
 const CONFIRM_WORD = "restart-dsh";
 /** 交付重试退避（覆盖新进程 web server 绑定前的窗口）。 */
 const RETRY_DELAYS_MS = [500, 1500, 4000, 10000, 20000, 40000];
@@ -51,6 +54,81 @@ function pendingPath() {
 function requestPath() {
 	return path.join(stateDir(), REQUEST_FILE);
 }
+
+function capsPath() {
+	return path.join(stateDir(), CAPS_FILE);
+}
+
+//#region 能力报告（capabilities.json）
+/**
+ * 运行时能力报告。
+ *
+ * 判断"某项功能能不能用"靠的是**探测私有接口在不在**（例如 connection 上还有没有
+ * authorizeIndex / requestRejection），不是按 DSH 版本号分支 —— 版本号是上游控制的
+ * 时间戳，用它当键必然滞后（用户装的是 latest，任何"版本 → 预设"的表都慢一步）。
+ *
+ * 但探测必须**有出口**：只写 logger 的话，失败在启动器侧是静默的 —— 内嵌会表现为
+ * 一直「自动重连中」，排查要花好几轮。这里把结论落成 JSON 文件，由启动器读取、
+ * 在右栏「兼容性」面板展示，并在能力缺失时**直接把入口置灰 + 写出原因**，而不是让
+ * 用户点进去撞空。
+ *
+ * 契约是 launcher 与插件双方约定的（<实例目录>/.dsh-self-mcp/capabilities.json），
+ * 不依赖 DSH 的任何私有格式 —— 这就是把耦合点从"别人的内部实现"挪到"我们自己的
+ * 边界"上的做法。
+ */
+const capabilityState = new Map();
+/** 写报告时用来打日志的 ctx（apply 时注入；模块级只是为了让 setter 调用点简洁）。 */
+let capsCtx = null;
+
+/** 记一条能力结论。reason 只在 ok=false 时有意义，写人话（会原样显示在面板上）。 */
+function setCapability(id, ok, reason = "") {
+	capabilityState.set(id, { id, ok, reason });
+}
+
+/** 插件自身版本（读不到就留空，不影响报告本身）。 */
+function pluginVersion() {
+	try {
+		const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+		return typeof pkg.version === "string" ? pkg.version : "";
+	} catch {
+		return "";
+	}
+}
+
+/** 落盘能力报告。best-effort：报告写不出去不应该影响插件本身的功能。 */
+function writeCapabilityReport() {
+	try {
+		mkdirSync(stateDir(), { recursive: true });
+		writeFileSync(capsPath(), JSON.stringify({
+			schema: CAPS_SCHEMA,
+			plugin: name,
+			pluginVersion: pluginVersion(),
+			pid: process.pid,
+			reportedAt: new Date().toISOString(),
+			launcher: process.env.DSH_LAUNCHER === "1",
+			instanceId: process.env.DSH_INSTANCE_ID ?? "",
+			capabilities: [...capabilityState.values()],
+		}, null, 2), "utf8");
+	} catch (error) {
+		capsCtx?.logger?.warn?.(`[dsh-self-mcp] 能力报告写入失败: ${error.message}`);
+	}
+}
+
+/** 注册工具的包装：把"注册成功 / 失败"记进能力报告。
+ *  失败时 dsh-restart 根本不存在，界面上只会看到"工具不可用"—— 有报告才知道为什么。 */
+function trackRestartTool(register) {
+	try {
+		const disposable = register();
+		setCapability("restartTool", true);
+		writeCapabilityReport();
+		return disposable;
+	} catch (error) {
+		setCapability("restartTool", false, `工具注册失败：${error.message}`);
+		writeCapabilityReport();
+		throw error;
+	}
+}
+//#endregion
 
 /** 折叠行上的一行摘要（`notice` 形态的 `summary`）。 */
 const NOTICE_SUMMARY = "DSH 已重启完成，继续执行";
@@ -137,9 +215,14 @@ async function deliverRestartComplete(ctx, pending) {
 
 	try {
 		await deliverAsPluginNotice(controller, pending, text);
+		setCapability("restartDelivery", true);
+		writeCapabilityReport();
 		return;
 	} catch (error) {
 		ctx.logger.warn(`[dsh-self-mcp] plugin 通道投递失败（${error.message}），回退到 prompt() 可见通道`);
+		// 记下这一次实际走的通道：界面表现不同（折叠行 vs 用户气泡），是真实观测数据。
+		setCapability("restartDelivery", false, `已回退 sessionController.prompt()：${error.message}`);
+		writeCapabilityReport();
 	}
 
 	if (typeof controller.prompt !== "function") {
@@ -245,13 +328,20 @@ function relaxEmbedAuth(ctx) {
 	const conn = ctx.get("connection");
 	if (conn === void 0 || conn.browserAuth === void 0) {
 		ctx.logger.info("[dsh-self-mcp] embed: 没有 connection service（非 web 组合），跳过");
+		setCapability("embedRelax", false, "该组合没有 connection 服务（非 web 组合），内嵌不适用");
+		writeCapabilityReport();
 		return;
 	}
 	if (conn.__dshSelfMcpEmbedPatched === true) {
 		return; // 幂等：重复 apply 不叠加包装
 	}
 	if (typeof conn.authorizeIndex !== "function" || typeof conn.requestRejection !== "function") {
+		// 以前这里只写日志就 return —— 探测到了，但结论没有出口，界面上只能看到
+		// 内嵌一直重连。现在同时落进能力报告，启动器会把内嵌入口置灰并显示这条原因。
+		const why = "connection 上没有 authorizeIndex / requestRejection（DSH 内部接口变了？）";
 		ctx.logger.warn("[dsh-self-mcp] embed: connection 上没有预期的认证方法，跳过（DSH 版本变了？）");
+		setCapability("embedRelax", false, why);
+		writeCapabilityReport();
 		return;
 	}
 
@@ -297,6 +387,8 @@ function relaxEmbedAuth(ctx) {
 	};
 
 	conn.__dshSelfMcpEmbedPatched = true;
+	setCapability("embedRelax", true);
+	writeCapabilityReport();
 	ctx.logger.info(
 		`[dsh-self-mcp] embed: 已放宽浏览器会话校验（白名单来源: ${[...EMBED_ALLOWED_ORIGINS].join(", ")}）`
 	);
@@ -304,6 +396,10 @@ function relaxEmbedAuth(ctx) {
 //#endregion
 
 function apply(ctx) {
+	capsCtx = ctx;
+	// 能执行到这里就说明插件确实装载了 —— 这是能力报告的第一条，也是启动器
+	// 判断"插件是不是根本没加载"的信号（文件在 = 装载成功）。
+	setCapability("pluginLoaded", true);
 	ctx.logger.info(`[dsh-self-mcp] 已装载：dsh-restart 工具可用（launcher=${process.env.DSH_LAUNCHER === "1" ? "是" : "否"}）`);
 
 	// 0) 内嵌支持：connection service 就绪后放宽浏览器会话校验（只有 web 组合才有它）
@@ -324,7 +420,7 @@ function apply(ctx) {
 	}
 
 	// 2) 注册唯一工具 dsh-restart
-	ctx.effect(() => ctx.tools.register({
+	ctx.effect(() => trackRestartTool(() => ctx.tools.register({
 		name: "dsh-restart",
 		description:
 			"重启整个 DSH 进程。由 dsh-launcher 监督自动重新拉起；重启完成后本插件会自动向发起会话注入"
@@ -417,7 +513,7 @@ function apply(ctx) {
 
 			return { status: "restarting" };
 		},
-	}), "dsh-self-mcp.tool");
+	})), "dsh-self-mcp.tool");
 }
 
 export { Config, apply, inject, name };

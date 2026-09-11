@@ -25,6 +25,8 @@ interface Props {
   embedReady: boolean;
   /** 当前内嵌地址（token 已打码），只用于刷新按钮的悬停提示。 */
   embedTitle: string;
+  /** 非空表示内嵌入口被门控：插件探测到 DSH 侧接口不可用时的原因（置灰 + 提示用）。 */
+  embedBlockedReason: string;
   onToggleEmbed: () => void;
   onRefreshEmbed: () => void;
   // 顶部整体：三个点 + 展开按钮 + 状态，同属一条状态栏。
@@ -47,6 +49,7 @@ export default function Header({
   embedMode,
   embedReady,
   embedTitle,
+  embedBlockedReason,
   onToggleEmbed,
   onRefreshEmbed,
   onCloseRequest,
@@ -164,15 +167,28 @@ export default function Header({
             </button>
           </>
         ) : (
-          <button
-            className="btn btn-icon btn-ghost embed-toggle-btn"
-            onClick={onToggleEmbed}
-            title="在启动器内嵌显示 DSH 界面（菜单与运行日志两栏让位）"
-            aria-label="内嵌 DSH 界面"
-            aria-pressed={false}
+          /* 置灰时 title 必须挂在外层 span 上：Chromium 里 disabled 控件不接收鼠标
+             事件，写在 button 上的原生 title 不会弹出，用户就问不到"为什么点不了"。 */
+          <span
+            className={`embed-gate ${embedBlockedReason ? 'blocked' : ''}`}
+            title={
+              embedBlockedReason
+                ? `内嵌不可用：${embedBlockedReason}（详见右栏「兼容性」标签）`
+                : undefined
+            }
           >
-            <Monitor size={16} strokeWidth={1.75} aria-hidden />
-          </button>
+            <button
+              className="btn btn-icon btn-ghost embed-toggle-btn"
+              onClick={onToggleEmbed}
+              disabled={!!embedBlockedReason}
+              title="在启动器内嵌显示 DSH 界面（菜单与运行日志两栏让位）"
+              aria-label="内嵌 DSH 界面"
+              aria-disabled={!!embedBlockedReason}
+              aria-pressed={false}
+            >
+              <Monitor size={16} strokeWidth={1.75} aria-hidden />
+            </button>
+          </span>
         )}
         </div>
       </div>

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
-import type { Instance, LogEvent, MarketOpState } from '../types';
+import type { CapabilityReport, Instance, LogEvent, LogTab, MarketOpState } from '../types';
+import { hasCapabilityFailure } from '../util';
 import LogPanel from './LogPanel';
 
 interface Props {
@@ -12,12 +13,15 @@ interface Props {
   activeLogId: string | null;
   onSelect: (id: string) => void;
   onClear: (id: string) => void;
-  tab: 'logs' | 'market';
-  onTabChange: (t: 'logs' | 'market') => void;
+  tab: LogTab;
+  onTabChange: (t: LogTab) => void;
   marketLogs: string[];
   marketOp: MarketOpState;
   onClearMarketLogs: () => void;
   onCancelMarket: () => void;
+  /** 当前选中实例的能力探测结果（「兼容性」标签用；未探测到时为 undefined）。 */
+  caps?: CapabilityReport;
+  onRefreshCaps: () => void;
 }
 
 export default function LogDrawer({
@@ -35,6 +39,8 @@ export default function LogDrawer({
   marketOp,
   onClearMarketLogs,
   onCancelMarket,
+  caps,
+  onRefreshCaps,
 }: Props) {
   const logRef = useRef<HTMLDivElement>(null);
   const marketRef = useRef<HTMLDivElement>(null);
@@ -75,13 +81,19 @@ export default function LogDrawer({
       <div className="log-drawer-head">
         <span className="log-drawer-title">运行日志</span>
         <span className="log-drawer-sub">
-          {tab === 'market'
-            ? marketBusy
-              ? `正在${opLabel} ${marketOp.target}…`
-              : '插件市场任务'
-            : activeInstance
-              ? `${activeInstance.name} · ${activeLogs.length} 行`
-              : '选择一个实例查看日志'}
+          {tab === 'compat'
+            ? caps
+              ? `${caps.instanceName} · ${caps.items.filter((i) => !i.ok).length} 项不可用`
+              : activeInstance
+                ? `${activeInstance.name} · 探测中…`
+                : '选择一个实例'
+            : tab === 'market'
+              ? marketBusy
+                ? `正在${opLabel} ${marketOp.target}…`
+                : '插件市场任务'
+              : activeInstance
+                ? `${activeInstance.name} · ${activeLogs.length} 行`
+                : '选择一个实例查看日志'}
         </span>
         <button className="log-drawer-close" onClick={onClose} title="收起日志">✕</button>
       </div>
@@ -106,10 +118,76 @@ export default function LogDrawer({
         >
           {marketBusy ? <span className="live">●</span> : <span className="dim">○</span>} 市场任务
         </button>
+        {/* 兼容性：探测结果有红灯时标签上直接亮红点 —— 这就是"让失败可见"的入口，
+            不用等用户点进去才发现某项能力已经失效。 */}
+        <button
+          className={`log-tab log-tab-compat ${tab === 'compat' ? 'active' : ''}`}
+          onClick={() => onTabChange('compat')}
+          title="兼容性探测：这台实例上各项能力到底能不能用（不按 DSH 版本号判断）"
+        >
+          {hasCapabilityFailure(caps) ? (
+            <span className="caps-bad-dot">●</span>
+          ) : (
+            <span className="dim">○</span>
+          )}{' '}
+          兼容性
+        </button>
       </div>
 
       <div className="log-drawer-body">
-        {tab === 'market' ? (
+        {tab === 'compat' ? (
+          <div className="caps-panel">
+            <div className="caps-head">
+              <span className="caps-head-title">
+                {caps ? `${caps.instanceName} · DSH ${caps.version || '版本未知'}` : '正在探测…'}
+              </span>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={onRefreshCaps}
+                disabled={!caps && !activeInstance}
+              >
+                重新探测
+              </button>
+            </div>
+            {!caps ? (
+              <span className="muted">
+                {activeInstance
+                  ? '正在读取能力报告…'
+                  : '先在左侧选一个实例，或在上面点一个实例标签。'}
+              </span>
+            ) : (
+              <>
+                <div className="caps-meta">
+                  <span>插件 {caps.plugin || '未报告'}</span>
+                  {caps.pluginAt && <span>{new Date(caps.pluginAt).toLocaleTimeString()}</span>}
+                </div>
+                {caps.stale && (
+                  <p className="caps-stale">
+                    ⚠ 这份报告来自上一个进程（pid 对不上），结论可能已过期 —— 重新启动该实例即可刷新。
+                  </p>
+                )}
+                <div className="caps-list">
+                  {caps.items.map((it) => (
+                    <div key={it.id} className={`caps-row ${it.ok ? 'ok' : 'bad'}`}>
+                      <span className="caps-dot" />
+                      <div className="caps-body">
+                        <span className="caps-label">{it.label}</span>
+                        {it.detail && <span className="caps-detail">{it.detail}</span>}
+                        {!it.ok && it.reason && <span className="caps-reason">{it.reason}</span>}
+                        {!it.ok && it.hint && <span className="caps-hint">影响：{it.hint}</span>}
+                      </div>
+                      <span className="caps-source">{it.source === 'plugin' ? '插件' : '启动器'}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="caps-foot">
+                  这些是探测结论，不是按 DSH 版本号推断的 —— 上游改了内部实现时，
+                  这里会直接变成红灯，而不是让功能静默失效。
+                </p>
+              </>
+            )}
+          </div>
+        ) : tab === 'market' ? (
           <div className="market-drawer-panel">
             <div className="market-drawer-head">
               <span className="market-drawer-status">
