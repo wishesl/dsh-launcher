@@ -78,7 +78,13 @@ jobs:
         shell: bash
         env:
           GOARCH: ${{ matrix.goarch }}
-        run: wails build -clean ${{ matrix.wails_tags }}
+          # 标签名（如 v0.5.0）。下面去掉前缀 v 后经 -ldflags 注入 main.version ——
+          # 不注入的话顶栏品牌区的版本 pill 会一直显示 "dev"（那是本地构建的标记）。
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          echo "Building dsh-launcher $VERSION"
+          wails build -clean ${{ matrix.wails_tags }} -ldflags "-X main.version=$VERSION"
 
       - name: Package Windows exe
         if: runner.os == 'Windows'
