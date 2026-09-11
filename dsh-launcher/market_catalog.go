@@ -70,7 +70,9 @@ const marketProfileName = "web"
 // default is <user home>/.dsh — the leading ".dsh" is part of the fallback
 // (a missing dot here silently points every read/toggle at a non-existent
 // profile directory while the dsh CLI keeps using the real one).
-func marketProfileDir() string {
+// A var so tests can point it at a temp profile (same pattern as
+// patchFilePath / favoritesFilePath).
+var marketProfileDir = func() string {
 	home := strings.TrimSpace(os.Getenv("DSH_HOME"))
 	if home == "" {
 		h, err := os.UserHomeDir()

@@ -198,7 +198,9 @@ export default function App() {
       setMarketLogs(arr);
     });
     api.onMarketStatus((e) => {
-      setMarketOp({ running: e.state === 'running', kind: e.kind, target: e.target });
+      // from/to carry the version span for plugin updates (undefined for
+      // install/uninstall) — the market strip and the drawer show them.
+      setMarketOp({ running: e.state === 'running', kind: e.kind, target: e.target, from: e.from, to: e.to });
     });
     api.onCloseRequest(() => {
       const remembered = exitChoiceRef.current;

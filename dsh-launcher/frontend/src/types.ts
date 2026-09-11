@@ -137,6 +137,30 @@ export interface MarketOpResult {
   error: string;
 }
 
+// --- plugin updates ---
+// One availability verdict per installed plugin, produced by
+// CheckPluginUpdates (5-minute cache; the 「检查更新」 button forces a refresh).
+export interface UpdateCheck {
+  name: string;
+  current: string;            // installed version
+  latest: string;             // npm dist-tags.latest / embedded builtin version
+  kind: string;               // npm | github | linked | builtin
+  hasUpdate: boolean;
+  runnable: boolean;          // false for kinds this release cannot update
+  jump: string;               // patch | minor | major | prerelease | downgrade | none | unknown
+  inRange: boolean;           // fits the spec → plain `pnpm update` (no spec rewrite)
+  risky: boolean;             // needs explicit confirmation
+  target: string;             // pnpm target derived server-side
+  remote: string;             // npm name or owner/repo
+  err: string;                // per-item failure; other rows are unaffected
+}
+
+export interface UpdateCheckResult {
+  checked: string;            // RFC3339
+  plugins: UpdateCheck[];
+  updatable: number;
+}
+
 export interface MarketSettings {
   registryUrl: string;
   profile: string;
@@ -156,18 +180,24 @@ export interface MarketLogEvent {
 
 export interface MarketStatusEvent {
   state: string; // running | done | failed | cancelled
-  kind: string;  // install | uninstall
+  kind: string;  // install | uninstall | update
   target: string;
   error?: string;
   blockedBuilds?: string[];
+  // Plugin-update version span (absent for install/uninstall).
+  name?: string;
+  from?: string;
+  to?: string;
 }
 
 // Live state of the plugin-market operation (hoisted to App so the right-side
 // run-log drawer can render the "市场任务" tab from anywhere).
 export interface MarketOpState {
   running: boolean;
-  kind: string;   // install | uninstall
+  kind: string;   // install | uninstall | update
   target: string; // plugin / package name
+  from?: string;  // version span, update only
+  to?: string;
 }
 
 // --- plugin favorites (local, offline, independent of the catalog) ---

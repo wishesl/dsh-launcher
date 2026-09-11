@@ -18,6 +18,10 @@ export function CheckEnvironment() {
   return window['go']['main']['App']['CheckEnvironment']();
 }
 
+export function CheckPluginUpdates(arg1) {
+  return window['go']['main']['App']['CheckPluginUpdates'](arg1);
+}
+
 export function DetectLocalVersion(arg1) {
   return window['go']['main']['App']['DetectLocalVersion'](arg1);
 }
@@ -192,4 +196,8 @@ export function UninstallPlugin(arg1, arg2) {
 
 export function UninstallSelfRestartPlugin(arg1) {
   return window['go']['main']['App']['UninstallSelfRestartPlugin'](arg1);
+}
+
+export function UpdatePlugin(arg1, arg2, arg3) {
+  return window['go']['main']['App']['UpdatePlugin'](arg1, arg2, arg3);
 }

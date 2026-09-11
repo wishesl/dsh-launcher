@@ -3,6 +3,7 @@ import {
   ApproveBuilds,
   CancelMarketOp,
   CheckEnvironment,
+  CheckPluginUpdates,
   DetectLocalVersion,
   DirectoryExists,
   FetchMarketCatalog,
@@ -44,6 +45,7 @@ import {
   TogglePlugin,
   UninstallPlugin,
   UninstallSelfRestartPlugin,
+  UpdatePlugin,
 } from '../wailsjs/go/main/App';
 import { EventsOff, EventsOn } from '../wailsjs/runtime/runtime';
 import type {
@@ -66,6 +68,7 @@ import type {
   ServiceState,
   ShareImportResult,
   StatusEvent,
+  UpdateCheckResult,
 } from './types';
 
 // Typed wrappers around the Wails-generated bindings, plus event wiring.
@@ -120,6 +123,10 @@ export const api = {
   listInstalledPlugins: (): Promise<InstalledPlugin[]> => ListInstalledPlugins(),
   togglePlugin: (name: string, enabled: boolean): Promise<void> => TogglePlugin(name, enabled),
   approveBuilds: (names: string[]): Promise<void> => ApproveBuilds(names),
+  // 插件更新：检查（force 绕过 5 分钟缓存）+ 单个更新（allowRisky 需前端二次确认）
+  checkPluginUpdates: (force: boolean): Promise<UpdateCheckResult> => CheckPluginUpdates(force),
+  updatePlugin: (instanceId: string, name: string, allowRisky: boolean): Promise<MarketOpResult> =>
+    UpdatePlugin(instanceId, name, allowRisky),
   getMarketSettings: (): Promise<MarketSettings> => GetMarketSettings(),
   setMarketRegistryURL: (url: string): Promise<void> => SetMarketRegistryURL(url),
 

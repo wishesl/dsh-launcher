@@ -240,6 +240,21 @@
   white-space: nowrap;
 }
 .installed-actions { display: flex; align-items: center; gap: 12px; flex: none; }
+
+/* --- plugin updates (see 插件更新功能实现方案.md) --- */
+/* Version span in a row head: "v1.2.3 → v1.4.0". The target version is the
+   only accent-coloured text in the row, so the eye lands on what changes. */
+.version-update { font-size: 12px; color: var(--accent); font-weight: 600; }
+/* Informational version-jump pill (minor). tag-warn (major) and pill-soft
+   (patch) already exist in style.css. */
+.pill-info {
+  color: #1d4ed8;
+  border-color: rgba(29, 78, 216, 0.35);
+  background: rgba(29, 78, 216, 0.08);
+}
+/* Discover tab: an installed card whose plugin has a newer version. */
+.update-available { color: var(--accent); border-color: var(--accent); }
+.market-update-pill { cursor: pointer; }
 .installed-toggle {
   display: inline-flex;
   align-items: center;

@@ -126,10 +126,10 @@ func parseIgnoredBuilds(output string) []string {
 // --- single-flight market operation state ---
 
 var (
-	marketBusy    atomic.Bool
-	marketOpMu    sync.Mutex
-	marketOpJob   *winJob
-	marketOpCmd   *exec.Cmd
+	marketBusy     atomic.Bool
+	marketOpMu     sync.Mutex
+	marketOpJob    *winJob
+	marketOpCmd    *exec.Cmd
 	marketOpCancel atomic.Bool
 )
 
@@ -155,10 +155,16 @@ func (a *App) CancelMarketOp() bool {
 
 // marketOpStatus streams operation state to the frontend on dsh:market-status.
 type MarketOpStatus struct {
-	State   string   `json:"state"` // running | done | failed | cancelled
-	Kind    string   `json:"kind"`  // install | uninstall
-	Target  string   `json:"target"`
-	Error   string   `json:"error,omitempty"`
+	State  string `json:"state"` // running | done | failed | cancelled
+	Kind   string `json:"kind"`  // install | uninstall | update
+	Target string `json:"target"`
+	Error  string `json:"error,omitempty"`
+	// Version span of a plugin update (empty for install/uninstall). Fed from
+	// the update check so the right-side drawer can show "v0.1.1 → v0.1.4"
+	// without the frontend having to re-query.
+	Name    string   `json:"name,omitempty"`
+	From    string   `json:"from,omitempty"`
+	To      string   `json:"to,omitempty"`
 	Blocked []string `json:"blockedBuilds,omitempty"`
 }
 

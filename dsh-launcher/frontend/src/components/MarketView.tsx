@@ -9,6 +9,8 @@ import type {
   MarketCatalog,
   MarketOpState,
   MarketPlugin,
+  UpdateCheck,
+  UpdateCheckResult,
 } from '../types';
 import { ChevronDown } from 'lucide-react';
 import Switch from './Switch';
@@ -146,6 +148,37 @@ function findCatalogEntry(installed: InstalledPlugin, catalog: MarketCatalog | n
   });
 }
 
+// jumpLabel maps the backend's version-jump classification to the pill shown
+// next to the version span. The wording is deliberately about SIZE, not
+// desirability: "major" means breaking-change risk, nothing more.
+function jumpLabel(jump: string): { text: string; cls: string } {
+  switch (jump) {
+    case 'major':
+      return { text: '⚠ major', cls: 'pill tag-warn' };
+    case 'minor':
+      return { text: 'minor', cls: 'pill pill-info' };
+    case 'patch':
+      return { text: 'patch', cls: 'pill pill-soft' };
+    case 'prerelease':
+      return { text: '⚠ 预发布', cls: 'pill tag-warn' };
+    default:
+      return { text: '更新', cls: 'pill pill-soft' };
+  }
+}
+
+// updateConfirmText explains, per plugin, exactly what the update will do —
+// including whether the user's spec pin gets rewritten. Shown in the dialog
+// before any risky update runs.
+function updateConfirmText(c: UpdateCheck): string {
+  if (c.jump === 'major') {
+    return `${c.name} 从 v${c.current} 升级到 v${c.latest} 是主版本升级，可能包含不兼容变更（插件 API、配置项或 profile 层栈结构都可能变化）。`;
+  }
+  if (c.jump === 'prerelease') {
+    return `${c.name} 将从 v${c.current} 切到预发布版本 v${c.latest}，预发布版本可能不稳定。`;
+  }
+  return `${c.name} 的目标版本 v${c.latest} 超出 package.json 中声明的版本范围，更新会把它改写为 ^${c.latest}。`;
+}
+
 export default function MarketView({
   instances,
   showToast,
@@ -165,6 +198,13 @@ export default function MarketView({
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [installed, setInstalled] = useState<InstalledPlugin[]>([]);
   const [favorites, setFavorites] = useState<FavoritePlugin[]>([]);
+  // Plugin update availability (backend-cached 5 min; 「检查更新」 forces a refetch).
+  const [updates, setUpdates] = useState<UpdateCheckResult | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [updateErr, setUpdateErr] = useState('');
+  // Risky updates (major / out-of-range spec rewrite) land here for a
+  // confirmation dialog instead of running straight away.
+  const [pendingUpdate, setPendingUpdate] = useState<UpdateCheck | null>(null);
   const [targetId, setTargetId] = useState('');
   const [selfRestartInstalled, setSelfRestartInstalled] = useState(false);
   const [pendingApprove, setPendingApprove] = useState<{ names: string[]; retry: () => void } | null>(null);
@@ -205,21 +245,49 @@ export default function MarketView({
     }
   }, [showToast]);
 
+  // Update check. Errors are kept in local state and rendered as an inline
+  // hint in the Installed tab — a failed check must never masquerade as a
+  // toast and must never blank the installed list.
+  const checkUpdates = useCallback(
+    async (force: boolean) => {
+      setChecking(true);
+      setUpdateErr('');
+      try {
+        setUpdates(await api.checkPluginUpdates(force));
+      } catch (e) {
+        setUpdateErr(errMsg(e));
+      } finally {
+        setChecking(false);
+      }
+    },
+    []
+  );
+
+  const updatesByName = useMemo(() => {
+    const m = new Map<string, UpdateCheck>();
+    for (const u of updates?.plugins ?? []) m.set(u.name, u);
+    return m;
+  }, [updates]);
+  const updatable = updates?.updatable ?? 0;
+
   useEffect(() => {
     loadCatalog(false);
     loadInstalled();
     loadFavorites();
+    checkUpdates(false);
     api.marketOpRunning().then((running) => onMarketRunning(running)).catch(() => undefined);
-  }, [loadCatalog, loadInstalled, loadFavorites, onMarketRunning]);
+  }, [loadCatalog, loadInstalled, loadFavorites, checkUpdates, onMarketRunning]);
 
   // When an operation settles (running → done/failed/cancelled), refresh the
-  // installed list. marketOp is driven by dsh:market-status (subscribed in App).
+  // installed list AND the update verdicts (the version just moved).
+  // marketOp is driven by dsh:market-status (subscribed in App).
   useEffect(() => {
     if (wasRunningRef.current && !marketOp.running) {
       loadInstalled();
+      checkUpdates(false);
     }
     wasRunningRef.current = marketOp.running;
-  }, [marketOp.running, loadInstalled]);
+  }, [marketOp.running, loadInstalled, checkUpdates]);
 
   // Default target instance = first.
   useEffect(() => {
@@ -351,6 +419,57 @@ export default function MarketView({
     } catch (e) {
       showToast('放行构建脚本失败: ' + errMsg(e), 'error');
     }
+  };
+
+  // Update one plugin. Mirrors install(): stop-guard → clear + pop the
+  // right-side drawer → single-flight backend call → relaunch if we stopped
+  // it. The backend derives the command from the CURRENT spec/registry state,
+  // so the frontend never passes a target — only a name and allowRisky.
+  const runUpdate = async (check: UpdateCheck, allowRisky: boolean) => {
+    if (!targetInstance) {
+      showToast('请先在主界面添加实例，再选择更新目标', 'error');
+      return;
+    }
+    const wasRunning = await stopIfRunning();
+    if (targetInstance.status !== 'stopped' && targetInstance.status !== 'crashed' && !wasRunning) return;
+    onClearMarketLogs();
+    setPendingApprove(null);
+    onShowMarketLogs();
+    setBusy(true);
+    try {
+      const r = await api.updatePlugin(targetId, check.name, allowRisky);
+      if (r.ok) {
+        showToast(`已更新 ${check.name} v${check.current} → v${check.latest}，重启实例后生效`);
+        if (wasRunning) {
+          showToast('正在重新启动实例…');
+          await api.launchInstance(targetId);
+        }
+      } else if (r.already) {
+        showToast(r.error || '该插件已是最新版本');
+      } else if (r.cancelled) {
+        showToast('已取消更新', 'error');
+      } else if (r.blockedBuilds && r.blockedBuilds.length > 0) {
+        setPendingApprove({ names: r.blockedBuilds, retry: () => runUpdate(check, allowRisky) });
+        showToast(`构建脚本被拦截（${r.blockedBuilds.join(', ')}），请放行后重试`, 'error');
+      } else {
+        showToast(r.error || '更新失败，详见输出', 'error');
+      }
+    } catch (e) {
+      showToast('更新失败: ' + errMsg(e), 'error');
+    } finally {
+      setBusy(false);
+      loadInstalled();
+      checkUpdates(false);
+    }
+  };
+
+  // Entry point for the row button: risky updates ask first.
+  const onUpdateClick = (check: UpdateCheck) => {
+    if (check.risky) {
+      setPendingUpdate(check);
+      return;
+    }
+    runUpdate(check, false);
   };
 
   // 内置插件 dsh-self-mcp（自管理重启）：安装到全局 profile。
@@ -563,6 +682,18 @@ export default function MarketView({
   const installedForFavorite = (f: FavoritePlugin): InstalledPlugin | undefined =>
     installed.find((i) => i.name.toLowerCase() === (f.npm || f.name).toLowerCase());
 
+  // Update verdict for a CATALOG entry, used by the discover tab to upgrade the
+  // "已安装" badge into "可更新 v…". Matches through the installed package name
+  // (which may be the entry's npm name) and only reports actionable updates.
+  const updateForEntry = (p: MarketPlugin): UpdateCheck | undefined => {
+    const candidates = [p.npm || '', p.name].filter(Boolean).map((n) => n.toLowerCase());
+    const inst = installed.find((i) => candidates.includes(i.name.toLowerCase()));
+    if (!inst) return undefined;
+    const up = updatesByName.get(inst.name);
+    if (!up || !up.hasUpdate || !up.runnable) return undefined;
+    return up;
+  };
+
   const categories = catalog?.categories ?? {};
   const categoryEntries = Object.entries(categories);
 
@@ -618,6 +749,15 @@ export default function MarketView({
             <button className="btn btn-ghost" onClick={() => loadCatalog(true)} disabled={catalogLoading}>
               {catalogLoading ? '刷新中…' : '刷新目录'}
             </button>
+            {updates && updatable > 0 && (
+              <button
+                className="pill pill-accent market-update-pill"
+                title="有插件可以更新，点击查看"
+                onClick={() => setTab('installed')}
+              >
+                可更新 {updatable} 个
+              </button>
+            )}
             {catalog && <span className="market-count">{filtered.length} / {catalog.plugins.length}</span>}
           </div>
 
@@ -697,9 +837,19 @@ export default function MarketView({
                           {isFav ? '★' : '☆'}
                         </button>
                         {isInstalled ? (
-                          <span className="btn btn-ghost btn-sm" style={{ opacity: 0.55, cursor: 'default' }}>
-                            已安装
-                          </span>
+                          updateForEntry(p) ? (
+                            <button
+                              className="btn btn-ghost btn-sm update-available"
+                              title={`已装 v${updateForEntry(p)!.current}，可更新到 v${updateForEntry(p)!.latest}`}
+                              onClick={() => setTab('installed')}
+                            >
+                              可更新 v{updateForEntry(p)!.latest}
+                            </button>
+                          ) : (
+                            <span className="btn btn-ghost btn-sm" style={{ opacity: 0.55, cursor: 'default' }}>
+                              已安装
+                            </span>
+                          )
                         ) : (
                           <button
                             className="btn btn-primary btn-sm"
@@ -765,10 +915,27 @@ export default function MarketView({
           </div>
           <div className="market-toolbar">
             <button className="btn btn-ghost" onClick={loadInstalled}>刷新</button>
+            <button className="btn btn-ghost" onClick={() => checkUpdates(true)} disabled={checking || marketOp.running}>
+              {checking ? '检查中…' : '检查更新'}
+            </button>
+            {updates && (
+              <span className={updatable > 0 ? 'pill pill-accent' : 'pill pill-soft'}>
+                {updatable > 0 ? `可更新 ${updatable} 个` : '全部最新'}
+              </span>
+            )}
             <span className="field-hint">
               开关写入 profile 的 cordis.patch.yml，约 1 秒内生效（HMR），重启后保持
             </span>
           </div>
+          {updateErr && (
+            <div className="log-hint log-hint-err">
+              检查更新失败: {updateErr}
+              <div className="row" style={{ marginTop: 6 }}>
+                <button className="btn btn-ghost btn-sm" onClick={() => checkUpdates(true)}>重试</button>
+                <span className="field-hint">插件本身仍可正常开关/卸载；检查失败不影响已装列表</span>
+              </div>
+            </div>
+          )}
           {installed.length === 0 && <div className="empty"><p>暂无已装社区插件</p></div>}
           {installed.map((p) => {
             const cat = findCatalogEntry(p, catalog);
@@ -789,6 +956,38 @@ export default function MarketView({
             const ghRepo = ghUrl ? githubRepoOf(ghUrl) : null;
             const isLocal = p.kind === 'linked';
             const isFav = isFavoriteInstalled(p);
+            // Update verdict for this package (undefined while the first check
+            // is still in flight).
+            const up = updatesByName.get(p.name);
+            let updateBtn: React.ReactNode = null;
+            if (up && up.hasUpdate && up.runnable) {
+              updateBtn = (
+                <button
+                  className="btn btn-primary btn-sm"
+                  title={up.risky ? '需要确认的更新' : `更新到 v${up.latest}`}
+                  disabled={marketOp.running || busy || checking}
+                  onClick={() => onUpdateClick(up)}
+                >
+                  {up.risky ? '更新…' : '更新'}
+                </button>
+              );
+            } else if (up && up.hasUpdate && up.kind === 'builtin') {
+              updateBtn = (
+                <button
+                  className="btn btn-ghost btn-sm"
+                  disabled
+                  title="内置插件更新将在后续版本支持；当前可先「卸载」再「安装到全局」"
+                >
+                  重装（待支持）
+                </button>
+              );
+            } else if (up && up.kind === 'github') {
+              updateBtn = (
+                <span className="field-hint" title="git 来源无法在不 clone 的情况下判断远端是否有新提交；请在「发现」页重新安装该插件以拉取最新提交">
+                  git 来源 · 请重新安装
+                </span>
+              );
+            }
             return (
               <div key={p.name} className="installed-row">
                 <div className="installed-info">
@@ -799,6 +998,12 @@ export default function MarketView({
                       {isLocal ? '本地开发' : p.kind === 'github' ? '远程 GitHub' : p.kind === 'npm' ? '远程 npm' : p.kind}
                     </span>
                     {p.version && <span className="installed-version mono">v{p.version}</span>}
+                    {up && up.hasUpdate && up.latest && (
+                      <span className="version-update mono">→ v{up.latest}</span>
+                    )}
+                    {up && up.hasUpdate && <span className={jumpLabel(up.jump).cls}>{jumpLabel(up.jump).text}</span>}
+                    {up && up.err && <span className="pill tag-warn" title={up.err}>检查失败</span>}
+                    {up && up.kind === 'builtin' && !up.hasUpdate && <span className="pill pill-soft">内置</span>}
                     {p.state === 'disabled' && <span className="pill tag-warn">已停用</span>}
                   </div>
                   <div className="installed-desc">{desc}</div>
@@ -821,6 +1026,7 @@ export default function MarketView({
                   >
                     {isFav ? '★' : '☆'}
                   </button>
+                  {updateBtn}
                   <label className="installed-toggle" title="写入 cordis.patch.yml 的 disabled 开关">
                     <Switch
                       checked={p.state !== 'disabled'}
@@ -915,14 +1121,64 @@ export default function MarketView({
         </div>
       )}
 
-      {/* Slim status strip — only while an install/uninstall is in flight;
-          full streamed output lives in the right-side run-log drawer
-          (auto-popped on install/uninstall), and completion is toasted. */}
+      {/* Risky update confirmation (major bump / spec rewrite / prerelease).
+          Deliberately a modal: this is the one action that changes the user's
+          package.json pin, so it gets an explicit decision. */}
+      {pendingUpdate && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setPendingUpdate(null);
+          }}
+        >
+          <div className="modal" role="dialog" aria-modal="true">
+            <div className="modal-head">
+              <h2>确认更新 {pendingUpdate.name}</h2>
+            </div>
+            <div className="form-body">
+              <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7 }}>
+                {updateConfirmText(pendingUpdate)}
+              </p>
+              <p className="field-hint">
+                <span className="mono">{pendingUpdate.current}</span>
+                {' → '}
+                <span className="mono">{pendingUpdate.latest}</span>
+                {' · '}
+                {jumpLabel(pendingUpdate.jump).text}
+              </p>
+              <p className="field-hint">
+                更新会重新执行 pnpm（可能需要下载），完成后由「市场任务」右栏输出全过程；
+                若目标实例正在运行，会先停止、更新完成后自动拉起。
+              </p>
+            </div>
+            <div className="modal-foot">
+              <button className="btn btn-ghost" onClick={() => setPendingUpdate(null)}>取消</button>
+              <button
+                className="btn btn-primary"
+                disabled={marketOp.running || busy}
+                onClick={() => {
+                  const target = pendingUpdate;
+                  setPendingUpdate(null);
+                  runUpdate(target, true);
+                }}
+              >
+                仍要更新
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Slim status strip — only while an install/uninstall/update is in
+          flight; full streamed output lives in the right-side run-log drawer
+          (auto-popped on operation start), and completion is toasted. */}
       {marketOp.running && (
         <div className="market-strip busy">
           <span className="spin" />
           <span className="market-strip-text">
-            正在{marketOp.kind === 'uninstall' ? '卸载' : '安装'} {marketOp.target}…
+            {marketOp.kind === 'update'
+              ? `正在更新 ${marketOp.target}${marketOp.from ? ` v${marketOp.from} → v${marketOp.to}` : ''}…`
+              : `正在${marketOp.kind === 'uninstall' ? '卸载' : '安装'} ${marketOp.target}…`}
           </span>
           <button className="btn btn-ghost btn-sm" onClick={onCancelMarket}>取消</button>
           <button className="btn btn-ghost btn-sm" onClick={onShowMarketLogs}>查看进度</button>

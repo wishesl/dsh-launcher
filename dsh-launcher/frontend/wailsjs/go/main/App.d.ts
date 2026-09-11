@@ -10,6 +10,8 @@ export function CancelMarketOp():Promise<boolean>;
 
 export function CheckEnvironment():Promise<main.EnvReport>;
 
+export function CheckPluginUpdates(arg1:boolean):Promise<main.UpdateCheckResult>;
+
 export function DetectLocalVersion(arg1:string):Promise<string>;
 
 export function DirectoryExists(arg1:string):Promise<boolean>;
@@ -97,3 +99,5 @@ export function TogglePlugin(arg1:string,arg2:boolean):Promise<void>;
 export function UninstallPlugin(arg1:string,arg2:string):Promise<main.MarketOpResult>;
 
 export function UninstallSelfRestartPlugin(arg1:string):Promise<main.MarketOpResult>;
+
+export function UpdatePlugin(arg1:string,arg2:string,arg3:boolean):Promise<main.MarketOpResult>;
