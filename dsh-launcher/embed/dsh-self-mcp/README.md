@@ -17,8 +17,14 @@ dsh-launcher（监督者）
        → 消费即删（杜绝重启循环）→ 自动重新拉起同一实例
 
 新进程 boot，插件重新挂载
-  └─ 读 pending.json → 通过本地 web API POST /api/session.prompt
-       （与用户发消息完全同路径）向发起会话注入「重启完成」并唤醒继续
+  └─ 读 pending.json → 首选「agent 级 followup + plugin/notice 来源」投递
+       · 模型看到完整正文
+       · 界面渲染为 inject 折叠行（label=dsh-self-mcp + 一行 summary），不是用户气泡
+       · 依据：source.kind='plugin' + form='notice' 走 dsh-client-ui-chat
+         的 contextProvenance()/contextForm() 分支（只有 kind==='user' 才是用户气泡）
+     失败则回退 sessionController.prompt()（界面是用户气泡），保证消息一定送到
+     两条通道都在进程内、复用产品自己的消息路径，不经 /api
+       （dsh 0.1.2 起 /api 强制 401 且 prompt 载荷有 typert 网关包装，裸客户端不兼容）
      → 成功即删除 pending.json；失败保留待下次启动重试（进程内退避重试，不无限循环）
 ```
 

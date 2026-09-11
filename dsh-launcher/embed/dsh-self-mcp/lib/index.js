@@ -6,12 +6,16 @@
  *   2. 请求进程干净退出（ctx.appExit(0)）；由 dsh-launcher 的 exit-reconcile 检测请求文件后自动重新拉起。
  *
  * 重启完成后（新进程 boot，本插件重新挂载）：
- *   读取 pending.json，通过本地 web API `POST /api/session.prompt` 向发起会话注入
- *   「重启完成」消息并唤醒该会话继续——完全复用产品的消息发送路径，不手工改事件日志。
+ *   读取 pending.json，向发起会话投递「重启完成」消息并唤醒该会话继续。
+ *   首选 agent 级 `agent.followup()` + `source.kind='plugin'` + `form='notice'`：模型看到完整
+ *   正文，界面把该条渲染成 inject 折叠行（不是用户气泡）；该通道不可用时回退旧的
+ *   `sessionController.prompt()`（界面是用户气泡）以保证消息一定送到。
+ *   两条通道都复用产品自己的消息路径，不手工改事件日志。
  *
  * 装配与残留：由 dsh-launcher 按「项目 opt-in 标记 + 插件已装」双重门控生成
  * 项目级 --patch 覆盖层装载；不用本项目启动时本插件不被任何行引用 → 工具不存在、状态不碰。
  */
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -44,43 +48,107 @@ function requestPath() {
 	return path.join(stateDir(), REQUEST_FILE);
 }
 
-/** 本地 web 端口：webStartup 服务 → DSH_WEB_URL → 默认 3080。 */
-function webPort(ctx) {
-	const startup = ctx.get("webStartup");
-	if (startup !== void 0 && typeof startup.port === "number" && startup.port > 0) return startup.port;
-	const m = /:(\d{2,5})/.exec(process.env.DSH_WEB_URL ?? "");
-	if (m !== null) return Number(m[1]);
-	return 3080;
+/** 折叠行上的一行摘要（`notice` 形态的 `summary`）。 */
+const NOTICE_SUMMARY = "DSH 已重启完成，继续执行";
+/** 一行摘要上限，对齐 @deepseek-ai/dsh-llm 的 CONTEXT_SUMMARY_MAX_CHARS。 */
+const CONTEXT_SUMMARY_MAX_CHARS = 120;
+
+/** 「重启完成」注入正文。 */
+function restartCompleteText(pending) {
+	return `[dsh-restart 完成] 上次调用 dsh-restart 后进程已重启完成。`
+		+ `原因：${pending.reason ?? "(未说明)"}；发起会话：${pending.sessionId}；`
+		+ `重启请求时间：${new Date(pending.requestedAt).toISOString()}。`
+		+ `请继续刚才的调试任务；若有插件需要重启才生效，请据此继续验证。`;
 }
 
-/** 通过官方 /api/session.prompt 路径向目标会话注入一条 user 消息并唤醒（与用户发消息同路径）。 */
-async function deliverRestartComplete(ctx, pending) {
-	const port = webPort(ctx);
-	const body = {
-		type: "client-request",
-		rpcId: `self-restart-${pending.sessionId}-${Date.now()}`,
-		method: "session.prompt",
-		payload: {
-			sessionId: pending.sessionId,
-			mode: "queue",
-			content: [{
-				type: "text",
-				text: `[dsh-restart 完成] 上次调用 dsh-restart 后进程已重启完成。`
-					+ `原因：${pending.reason ?? "(未说明)"}；发起会话：${pending.sessionId}；`
-					+ `重启请求时间：${new Date(pending.requestedAt).toISOString()}。`
-					+ `请继续刚才的调试任务；若有插件需要重启才生效，请据此继续验证。`,
-			}],
-		},
-	};
-	const res = await fetch(`http://127.0.0.1:${port}/api/session.prompt`, {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify(body),
+/** 递归冻结，等价 @deepseek-ai/dsh-util-values 的 deepFreeze。 */
+function deepFreeze(value) {
+	if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+		Object.freeze(value);
+		for (const key of Object.keys(value)) deepFreeze(value[key]);
+	}
+	return value;
+}
+
+/** 截断一行摘要，语义对齐 @deepseek-ai/dsh-llm 的 boundContextSummary。 */
+function boundSummary(summary) {
+	return summary.length <= CONTEXT_SUMMARY_MAX_CHARS
+		? summary
+		: `${summary.slice(0, CONTEXT_SUMMARY_MAX_CHARS - 1)}…`;
+}
+
+/** 构造一条 plugin 来源的 user 消息（等价 @deepseek-ai/dsh-llm 的 createUserMessage）。
+ *
+ *  不 import 该包：插件装在 <profile>/.dsh-builtin 下，而 @deepseek-ai/dsh-llm 不是 profile 的
+ *  直接依赖，装载期解析失败会连工具一起挂掉。这里只依赖 node:crypto 的 randomUUID——
+ *  inbox 投影对该消息用 z.custom() 校验，唯一硬要求是 id 全局唯一。
+ *
+ *  `source.kind='plugin'` + `form='notice'` 是产品既有的语义通道：模型看到完整 content，
+ *  客户端（dsh-client-ui-chat 的 contextProvenance/contextForm）把该条渲染成 inject 折叠行，
+ *  并在折叠行上显示 summary——因此不会以「用户气泡」出现在转录里。 */
+function createPluginNotice(text, summary) {
+	return deepFreeze({
+		id: randomUUID(),
+		role: "user",
+		content: [{ type: "text", text }],
+		source: { kind: "plugin", plugin: name, form: "notice", summary: boundSummary(summary) },
 	});
-	if (!res.ok) throw new Error(`prompt 端点返回 HTTP ${res.status}`);
-	const json = await res.json().catch(() => null);
-	if (json === null || json.result?.ok !== true) {
-		throw new Error(`prompt 被拒: ${JSON.stringify(json?.result ?? json)}`);
+}
+
+/** 首选通道：agent 级 followup + plugin/notice 来源。
+ *
+ *  绕过 sessionController.prompt() 的原因：prompt() 是浏览器「发送消息」那条路径，
+ *  必然铸出 source.kind==='user' 的 durable user 消息，界面上就是一个用户气泡。
+ *  agent 驱动接口允许自带 source，因此能走 inject 折叠行；同时它仍在进程内、
+ *  不经过 /api 的浏览器认证与 typert 网关封装。 */
+async function deliverAsPluginNotice(controller, pending, text) {
+	if (typeof controller.resolveAgent !== "function") {
+		throw new Error("sessionController.resolveAgent 不可用");
+	}
+	const resolved = await controller.resolveAgent(pending.sessionId);
+	if (resolved === null || typeof resolved !== "object") {
+		throw new Error(`resolveAgent 返回异常: ${JSON.stringify(resolved ?? null)}`);
+	}
+	if (resolved.error !== void 0) {
+		throw new Error(`resolveAgent 失败: ${JSON.stringify(resolved.error)}`);
+	}
+	const agent = resolved.agent;
+	if (agent === void 0 || typeof agent.followup !== "function") {
+		throw new Error("Agent 驱动接口不可用（缺少 followup）");
+	}
+	agent.followup(createPluginNotice(text, NOTICE_SUMMARY));
+}
+
+/** 投递「重启完成」并唤醒发起会话。
+ *
+ *  首选 plugin/notice 通道（界面为 inject 折叠行）；任何失败都回退到旧的
+ *  sessionController.prompt() 通道（界面为用户气泡），保证消息一定送到——
+ *  否则 pending.json 会一直留着，护栏 4 将拒绝后续所有 dsh-restart 调用。 */
+async function deliverRestartComplete(ctx, pending) {
+	const controller = ctx.get("sessionController");
+	if (controller === void 0) {
+		throw new Error("sessionController 服务不可用（该 profile 未挂载 Web 会话控制器）");
+	}
+	const text = restartCompleteText(pending);
+
+	try {
+		await deliverAsPluginNotice(controller, pending, text);
+		return;
+	} catch (error) {
+		ctx.logger.warn(`[dsh-self-mcp] plugin 通道投递失败（${error.message}），回退到 prompt() 可见通道`);
+	}
+
+	if (typeof controller.prompt !== "function") {
+		throw new Error("sessionController.prompt 不可用");
+	}
+	const result = await controller.prompt({
+		requestId: `self-restart-${pending.sessionId}-${Date.now()}`,
+		sessionId: pending.sessionId,
+		mode: "queue",
+		content: [{ type: "text", text }],
+	}, new AbortController().signal);
+	if (result === null || typeof result !== "object" || result.accepted !== true) {
+		throw new Error(`prompt 未被接受: ${JSON.stringify(result ?? null)}`);
 	}
 }
 
