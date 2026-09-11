@@ -47,6 +47,8 @@ export default function App() {
   const [appDataPath, setAppDataPath] = useState('');
   // 启动器版本（顶栏品牌区 pill）；后端未注入版本时为 "dev"。
   const [launcherVersion, setLauncherVersion] = useState('');
+  // 启动器**验证过**的 DSH 版本：只用于推荐（版本列表打标签、表单提示），不用于门控。
+  const [bestFitVersion, setBestFitVersion] = useState('');
   const [logs, setLogs] = useState<Record<string, LogEvent[]>>({});
   const [activeLogId, setActiveLogId] = useState<string | null>(null);
   // Right-side run-log drawer: open state + which tab (instance logs / market).
@@ -106,13 +108,19 @@ export default function App() {
     };
   }, []);
 
-  // 启动器自身版本（顶栏品牌区的小 pill）。取不到就不显示，不占位。
+  // 启动器自身版本（顶栏品牌区的小 pill）与最佳适配的 DSH 版本。取不到就不显示，不占位。
   useEffect(() => {
     let active = true;
     api
       .getLauncherVersion()
       .then((v) => {
         if (active) setLauncherVersion(typeof v === 'string' ? v.trim() : '');
+      })
+      .catch(() => undefined);
+    api
+      .getBestFitVersion()
+      .then((v) => {
+        if (active) setBestFitVersion(typeof v === 'string' ? v.trim() : '');
       })
       .catch(() => undefined);
     return () => {
@@ -724,6 +732,7 @@ export default function App() {
             <VersionView
               registry={registry}
               registryLoading={registryLoading}
+              bestFit={bestFitVersion}
               onRefreshRegistry={refreshRegistry}
             />
           )}
@@ -815,6 +824,7 @@ export default function App() {
       {modal && (
         <InstanceForm
           registry={registry}
+          bestFit={bestFitVersion}
           editing={modal.mode === 'edit' ? modal.instance : null}
           onClose={() => setModal(null)}
           onSaved={(list, note) => {

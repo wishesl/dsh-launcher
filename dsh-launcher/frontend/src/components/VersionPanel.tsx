@@ -4,6 +4,8 @@ import type { RegistryInfo } from '../types';
 interface Props {
   registry: RegistryInfo | null;
   loading: boolean;
+  /** 启动器验证过的 DSH 版本：打「最佳适配」标签 + 列表顶部给一句推荐。 */
+  bestFit: string;
 }
 
 function fmtDate(s: string): string {
@@ -13,7 +15,7 @@ function fmtDate(s: string): string {
   return d.toLocaleString();
 }
 
-export default function VersionPanel({ registry, loading }: Props) {
+export default function VersionPanel({ registry, loading, bestFit }: Props) {
   const [showAll, setShowAll] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
@@ -57,6 +59,12 @@ export default function VersionPanel({ registry, loading }: Props) {
           <span className="ver-big">{registry ? registry.latest : '—'}</span>
         </div>
         <div className="ver-side">
+          {bestFit && (
+            <div title="启动器实际验证过、各项能力都正常的版本 —— 推荐使用">
+              <span className="ver-label">最佳适配</span>
+              <span className="ver-big small best-fit">{bestFit}</span>
+            </div>
+          )}
           <div>
             <span className="ver-label">next</span>
             <span className="ver-big small">{registry?.next || '—'}</span>
@@ -67,6 +75,14 @@ export default function VersionPanel({ registry, loading }: Props) {
           </div>
         </div>
       </div>
+
+      {bestFit && (
+        <p className="best-fit-note">
+          推荐使用 <b className="mono">{bestFit}</b> —— 启动器针对它做过完整验证（内嵌视图、
+          自管理重启、插件装配）。装其它版本也能用：功能是否可用由右栏「兼容性」的实时探测决定，
+          不按版本号判断。
+        </p>
+      )}
 
       <div className="cmd-box">
         <code className="mono">{npxCmd}</code>
@@ -85,10 +101,14 @@ export default function VersionPanel({ registry, loading }: Props) {
           <div className="muted pad">暂无版本数据（点击「刷新版本」获取）</div>
         )}
         {visible.map((v) => (
-          <div key={v.version} className={`ver-row ${v.isLatest ? 'latest' : ''}`}>
+          <div
+            key={v.version}
+            className={`ver-row ${v.isLatest ? 'latest' : ''} ${v.version === bestFit ? 'best-fit' : ''}`}
+          >
             <span className="mono">{v.version}</span>
             <span>{fmtDate(v.published)}</span>
             <span>
+              {v.version === bestFit && <span className="tag-best">最佳适配</span>}
               {v.isLatest && <span className="tag-latest">latest</span>}
               {v.version === registry?.next && <span className="tag-next">next</span>}
             </span>

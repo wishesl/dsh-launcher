@@ -24,6 +24,8 @@ export function GenerateShareCode(arg1:Array<string>):Promise<string>;
 
 export function GetAppDataPath():Promise<string>;
 
+export function GetBestFitVersion():Promise<string>;
+
 export function GetCapabilities(arg1:string):Promise<main.CapabilityReport>;
 
 export function GetEmbedURL(arg1:string):Promise<string>;

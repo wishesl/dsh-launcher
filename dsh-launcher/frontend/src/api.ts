@@ -9,6 +9,7 @@ import {
   FetchMarketCatalog,
   GenerateShareCode,
   GetAppDataPath,
+  GetBestFitVersion,
   GetEmbedURL,
   GetCapabilities,
   GetInstanceMasks,
@@ -151,6 +152,9 @@ export const api = {
 
   // 启动器自身版本（顶栏品牌区的版本 pill）；发版用 -ldflags 注入，未注入时为 "dev"
   getLauncherVersion: (): Promise<string> => GetLauncherVersion(),
+
+  // 启动器**验证过**的 DSH 版本（只用于推荐：打标签 / 表单提示。能不能用始终由能力探测决定）
+  getBestFitVersion: (): Promise<string> => GetBestFitVersion(),
 
   // 兼容性探测：这台实例上各项能力"到底能不能用"（本地读取，不发网络请求）
   getCapabilities: (instanceId: string): Promise<CapabilityReport> => GetCapabilities(instanceId),

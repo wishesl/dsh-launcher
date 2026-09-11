@@ -1053,6 +1053,23 @@ body.resizing .log-drawer { transition: none; }
 .ver-row.latest { background: var(--accent-soft); }
 .tag-latest { background: var(--green); color: #fff; border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 700; }
 .tag-next { background: var(--amber); color: #fff; border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 700; }
+/* 「最佳适配」= 启动器实际验证过的版本。它是推荐、不是许可：所以用 accent 而不是状态色，
+   免得被读成"只有这个能用"（能不能用由右栏「兼容性」的实时探测决定，不按版本号判断）。 */
+.tag-best {
+  background: var(--accent); color: #fff;
+  border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 700;
+  margin-right: 6px;
+}
+/* 跟在版本号文字后面时（实例表单的「最新版」卡片）需要左边留一口气 */
+.radio-sub .tag-best { margin-left: 6px; margin-right: 0; }
+.ver-row.best-fit { background: var(--accent-soft); }
+.ver-big.best-fit { color: var(--accent); }
+.best-fit-note {
+  margin: 12px 0 14px; padding: 9px 11px;
+  font-size: 12px; line-height: 1.6; color: var(--text-2);
+  background: var(--accent-soft); border-radius: var(--radius-sm);
+}
+.best-fit-note b { color: var(--text); }
 
 /* ============================================================
    Modal & forms (InstanceForm / ExitDialog)

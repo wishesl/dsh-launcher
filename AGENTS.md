@@ -106,6 +106,11 @@ cd dsh-launcher && wails build
 > **版本号**：顶栏品牌区的版本 pill 读 `dsh-launcher/version.go` 的 `version`（默认 `dev`，
 > 表示本地构建）。发版时用 ldflags 注入，不要手改源码：
 > `wails build -ldflags "-X main.version=0.1.5"`。前端拿不到版本时不渲染 pill。
+>
+> **最佳适配版本**：同一个文件里的 `bestFitDSHVersion` = "我们实际验证过、各项能力都正常的 DSH 版本"。
+> 它**只用于推荐**（版本列表打「最佳适配」标签、实例表单在下拉里标注并在偏离时给一句提示），
+> **绝不用来门控** —— 功能能不能用始终由能力探测决定（见第 9 节）。完整验证过一个新版本后改它，
+> 或 `wails build -ldflags "-X main.bestFitDSHVersion=0.1.6-rc.1"`。取不到就不打标签、不提示。
 
 ## 6. 验证方式
 

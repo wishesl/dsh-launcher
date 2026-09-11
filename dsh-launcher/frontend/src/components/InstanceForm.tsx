@@ -6,6 +6,8 @@ import Switch from './Switch';
 
 interface Props {
   registry: RegistryInfo | null;
+  /** 启动器验证过、推荐使用的 DSH 版本（只用于提示，不会限制能选什么）。 */
+  bestFit: string;
   editing: Instance | null; // null => creating a new instance
   onClose: () => void;
   onSaved: (list: Instance[], note?: string) => void;
@@ -33,7 +35,7 @@ const DEFAULT_SOURCE_INIT = 'pnpm install';
 const DEFAULT_SOURCE_BUILD = 'pnpm run build';
 const DEFAULT_SOURCE_START = 'pnpm dsh web';
 
-export default function InstanceForm({ registry, editing, onClose, onSaved }: Props) {
+export default function InstanceForm({ registry, bestFit, editing, onClose, onSaved }: Props) {
   const [form, setForm] = useState<Instance>(() =>
     editing ? { ...DEFAULT_INSTANCE(), ...editing } : DEFAULT_INSTANCE()
   );
@@ -171,6 +173,12 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
     form.version.trim() !== '' &&
     form.version !== 'latest' &&
     !isValidVersion(form.version);
+
+  // 实际会跑起来的版本号：选「最新版」或下拉里的 `latest` 都会解析到 npm 最新版 ——
+  // 提示里给具体数字比给 "latest" 有用。
+  const rawVersion = sourceMode ? '' : versionMode === 'latest' ? 'latest' : form.version.trim();
+  const chosenVersion = rawVersion === 'latest' ? registry?.latest || 'latest' : rawVersion;
+  const offBestFit = !!bestFit && !!chosenVersion && chosenVersion !== bestFit;
 
   const save = async () => {
     if (!form.directory.trim()) {
@@ -314,7 +322,12 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
                   onChange={() => setVersionMode('latest')}
                 />
                 <span className="radio-title">最新版</span>
-                <span className="radio-sub">{registry ? registry.latest : '…'}</span>
+                <span className="radio-sub">
+                  {registry ? registry.latest : '…'}
+                  {bestFit && registry?.latest === bestFit && (
+                    <span className="tag-best">最佳适配</span>
+                  )}
+                </span>
               </label>
               <label className={`radio-card ${versionMode === 'spec' ? 'selected' : ''}`}>
                 <input
@@ -353,7 +366,7 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
                       <option value="latest">latest — 最新版{registry?.latest ? `（${registry.latest}）` : ''}</option>
                       {versionList.map((v) => (
                         <option key={v.version} value={v.version}>
-                          {v.version}{v.isLatest ? '（latest）' : ''}
+                          {v.version}{v.isLatest ? '（latest）' : ''}{v.version === bestFit ? '（最佳适配）' : ''}
                         </option>
                       ))}
                       <option value={CUSTOM_OPTION}>✏️ 自定义版本号…</option>
@@ -380,6 +393,14 @@ export default function InstanceForm({ registry, editing, onClose, onSaved }: Pr
                     ? `共 ${versionList.length} 个版本，最新 ${versionList[0].version}（${versionList[0].published ? new Date(versionList[0].published).toLocaleDateString() : ''} 发布）`
                     : '未获取到版本列表，点击「刷新」重试'}
                 </div>
+                {/* 推荐而不是拦截：选别的版本照样能启动，能不能用得看右栏「兼容性」的实时探测。 */}
+                {offBestFit && (
+                  <div className="field-hint">
+                    💡 启动器最佳适配的是 <b className="mono">{bestFit}</b>；当前选的{' '}
+                    <b className="mono">{chosenVersion}</b> 没做过完整验证。仍然可以正常启动 ——
+                    具体哪些功能可用，由右栏「兼容性」的实时探测决定，不按版本号判断。
+                  </div>
+                )}
               </div>
             )}
           </div>

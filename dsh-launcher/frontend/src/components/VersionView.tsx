@@ -4,11 +4,13 @@ import type { RegistryInfo } from '../types';
 interface Props {
   registry: RegistryInfo | null;
   registryLoading: boolean;
+  /** 启动器验证过、推荐使用的 DSH 版本（只用于打标签，空串则不标）。 */
+  bestFit: string;
   onRefreshRegistry: () => void;
 }
 
 // 版本历史页：独立菜单页（首页默认打开），完整版本列表 + 手动刷新。
-export default function VersionView({ registry, registryLoading, onRefreshRegistry }: Props) {
+export default function VersionView({ registry, registryLoading, bestFit, onRefreshRegistry }: Props) {
   return (
     <div className="view-page">
       <div className="instances-toolbar">
@@ -23,7 +25,7 @@ export default function VersionView({ registry, registryLoading, onRefreshRegist
         </button>
       </div>
       <div className="version-page-body">
-        <VersionPanel registry={registry} loading={registryLoading} />
+        <VersionPanel registry={registry} loading={registryLoading} bestFit={bestFit} />
       </div>
     </div>
   );
