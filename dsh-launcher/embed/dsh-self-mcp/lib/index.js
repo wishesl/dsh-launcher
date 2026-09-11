@@ -104,6 +104,10 @@ function writeCapabilityReport() {
 			plugin: name,
 			pluginVersion: pluginVersion(),
 			pid: process.pid,
+			// 启动器注入的一次性凭据，回写它启动器才能判断这份报告是不是"这一次启动"
+			// 产生的。注意：**不能让启动器改比 pid** —— 启动器手里是 cmd /c 外壳的 pid，
+			// 这里是 node 进程的 pid，中间隔着 cmd → npx → node，按构造就不会相等。
+			launchId: process.env.DSH_LAUNCH_ID ?? "",
 			reportedAt: new Date().toISOString(),
 			launcher: process.env.DSH_LAUNCHER === "1",
 			instanceId: process.env.DSH_INSTANCE_ID ?? "",

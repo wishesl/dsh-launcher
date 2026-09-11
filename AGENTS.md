@@ -134,6 +134,13 @@ cd dsh-launcher && wails build
 5. `npm run build` 通过 ≠ 桌面已更新；必须 `wails build`（产物 `build/bin/dsh-launcher.exe`）才算完成。
 6. 启动/安装类动作的 toast、日志提示语统一指向「右侧」面板（如“日志见右侧面板”），别写“下方”。
 7. 预览 stub 里 `window.runtime` 必须实现 `EventsOnMultiple`（Wails v2 生成代码在用它，缺了直接白屏）。
+8. **跨 shell 层不要比 pid。** 实例 / 市场命令走 `cmd /c`（`shellCommand`），`cmd.Process.Pid` 是
+   **外壳 cmd.exe** 的 pid，而 DSH / 插件报的是 node 进程的 pid（cmd → npx → node）。两者按构造
+   永远不相等 —— 拿它判断"是不是同一次运行"会 100% 误报。要判断同一次启动请用注入的一次性
+   `DSH_LAUNCH_ID`（见 `newLaunchID` / `stalePluginReport`）。
+9. **拿不准就不要下结论。** 本仓库反复踩到同一类错误：把探测的"没有证据"当成"失败"，于是功能
+   一切正常却报红。凡是缺凭据、缺报告、状态还没落定的场合一律不报（或标 `unknown`），
+   把确定的问题留给确定的证据。
 
 ---
 
@@ -158,8 +165,10 @@ cd dsh-launcher && wails build
    只统计 `!ok && !unknown`。
 3. **契约放在自己的边界上。** 报告文件的 schema 由 launcher + 插件双方约定，不依赖 DSH 的任何私有格式。
    面板里每个 `CapabilityItem.id` 是稳定契约键（前端按 id 门控），改名等于破坏兼容。
-4. **陈旧报告要失效。** 启动实例前先删报告文件（"文件在" = "本次运行报告过"），报告里的 `pid` 与
-   当前进程不符时标成"可能已过期"。
+4. **陈旧报告要失效。** 启动实例前先删报告文件（"文件在" = "本次运行报告过"），再用启动器注入的
+   一次性 `DSH_LAUNCH_ID` 与报告里的 `launchId` 比对，对不上才标"可能已过期"。
+   ⚠️ **不要用 pid 判断**（见第 8 节第 8 条：跨 `cmd /c` 外壳层的 pid 按构造不相等，会 100% 误报）；
+   任一侧缺 `launchId`（旧版插件）时不下结论。
 5. **熔断名单只在真出事时加。** 探测有盲区（形状在、语义变），那时才需要"已知坏组合 → 禁用"的黑名单；
    不要预先为每个版本写启用表。
 

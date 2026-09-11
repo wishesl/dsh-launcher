@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -106,9 +108,12 @@ func extractAuthWebURL(line string) string {
 // managedProcess wraps a running DSH process for one instance.
 type managedProcess struct {
 	instanceID string
-	pid        int
-	cmd        *exec.Cmd
-	job        *winJob // KILL_ON_JOB_CLOSE: kernel kills the tree even on hard app death
+	// launchID 是本次启动的一次性随机凭据，随 DSH_LAUNCH_ID 注入进程环境；插件把它
+	// 回写进能力报告，用来判断报告是不是这一次跑出来的（详见 newLaunchID）。
+	launchID string
+	pid      int
+	cmd      *exec.Cmd
+	job      *winJob // KILL_ON_JOB_CLOSE: kernel kills the tree even on hard app death
 
 	done       chan struct{}
 	once       sync.Once
@@ -118,8 +123,21 @@ type managedProcess struct {
 	authURL    string   // newest token-bearing URL from the startup log (内嵌模式用)
 }
 
-func (p *managedProcess) requestStop() { p.stopReq.Store(true) }
+// newLaunchID 生成一次启动的随机凭据（16 位十六进制）。
+//
+// 用途：判断插件写的能力报告是不是**这一次**启动产生的。不能拿 pid 比 ——
+// shellCommand 起的是 `cmd /c <cmd>`，启动器手里只有外壳（cmd.exe）的 pid，
+// 而插件报的是 node 进程的 pid，中间还隔着 cmd → npx → node，两者按构造就不会相等
+// （拿它当"过期"判据会 100% 误报）。
+func newLaunchID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b[:])
+}
 
+func (p *managedProcess) requestStop() { p.stopReq.Store(true) }
 func (p *managedProcess) stopRequested() bool { return p.stopReq.Load() }
 
 func (p *managedProcess) addWebCandidate(u string) {
@@ -284,8 +302,16 @@ func (a *App) LaunchInstance(id string) error {
 	a.applyProxyToCmd(cmd)
 	// 自管理重启（dsh-restart）：让 DSH 知道它由 launcher 监督。只在双门控通过时
 	// 注入，其他实例不带这两个变量（无副作用）。
+	// DSH_LAUNCH_ID 是"本次启动"的一次性凭据：插件把它回写进能力报告，启动器据此判断
+	// 报告是不是这一次跑出来的。**不能改用 pid 判断** —— 启动器手里是 `cmd /c` 外壳的
+	// pid，插件报的是 node 进程的 pid，中间隔着 cmd → npx → node，按构造就不会相等。
+	launchID := newLaunchID()
 	if selfRestart {
-		cmd.Env = append(cmd.Environ(), "DSH_LAUNCHER=1", "DSH_INSTANCE_ID="+snapshot.ID)
+		cmd.Env = append(cmd.Environ(),
+			"DSH_LAUNCHER=1",
+			"DSH_INSTANCE_ID="+snapshot.ID,
+			"DSH_LAUNCH_ID="+launchID,
+		)
 	}
 
 	stdout, err := cmd.StdoutPipe()
@@ -309,6 +335,7 @@ func (a *App) LaunchInstance(id string) error {
 
 	mp := &managedProcess{
 		instanceID: snapshot.ID,
+		launchID:   launchID,
 		pid:        cmd.Process.Pid,
 		cmd:        cmd,
 		done:       make(chan struct{}),

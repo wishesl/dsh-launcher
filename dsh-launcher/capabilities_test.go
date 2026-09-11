@@ -141,6 +141,45 @@ func ids(items []CapabilityItem) []string {
 	return out
 }
 
+func TestStalePluginReport(t *testing.T) {
+	// 同一次启动 → 不是过期。
+	if stalePluginReport("abc123", "abc123") {
+		t.Error("launch id 相同不应判定为过期")
+	}
+	// 不同启动 → 确实是上一个进程留下的。
+	if !stalePluginReport("abc123", "def456") {
+		t.Error("launch id 不同应判定为过期")
+	}
+	// 任一侧没有凭据 → 不下结论。这一条是关键：启动器手上是 cmd /c 外壳的 pid、
+	// 插件报的是 node 的 pid，两者按构造永远不等；只要缺凭据就报"已过期"，
+	// 用户就会看到"功能一切正常却提示报告过期"（这正是修这个的原因）。
+	if stalePluginReport("", "abc123") || stalePluginReport("abc123", "") || stalePluginReport("", "") {
+		t.Error("缺少 launch id 时不应判定为过期（宁可不说，也不要谎报）")
+	}
+}
+
+func TestMpLaunchID(t *testing.T) {
+	if got := mpLaunchID(nil); got != "" {
+		t.Errorf("没有托管进程时应返回空串，实际 %q", got)
+	}
+	if got := mpLaunchID(&managedProcess{launchID: "xyz"}); got != "xyz" {
+		t.Errorf("mpLaunchID = %q, want xyz", got)
+	}
+}
+
+func TestNewLaunchID(t *testing.T) {
+	a, b := newLaunchID(), newLaunchID()
+	if a == "" || b == "" {
+		t.Fatal("launch id 不应为空")
+	}
+	if len(a) != 16 {
+		t.Errorf("launch id 长度 = %d, want 16（8 字节 hex）", len(a))
+	}
+	if a == b {
+		t.Error("两次生成的 launch id 不应相同")
+	}
+}
+
 func TestPluginCopyMismatchReason(t *testing.T) {
 	// 版本不一致 = 装的是旧副本：必须给出"重新安装"这个可操作结论，并且由调用方标成
 	// unknown（不是故障）—— 功能其实还能用，报红就是误报。

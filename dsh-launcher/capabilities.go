@@ -37,6 +37,7 @@ type pluginCapabilityReport struct {
 	Plugin        string             `json:"plugin"`
 	PluginVersion string             `json:"pluginVersion"`
 	PID           int                `json:"pid"`
+	LaunchID      string             `json:"launchId"`
 	ReportedAt    string             `json:"reportedAt"`
 	Launcher      bool               `json:"launcher"`
 	InstanceID    string             `json:"instanceId"`
@@ -182,14 +183,34 @@ func (a *App) GetCapabilities(instanceID string) CapabilityReport {
 			report.Plugin += "@" + pluginReport.PluginVersion
 		}
 		report.PluginAt = pluginReport.ReportedAt
-		// 报告来自上一个进程（pid 对不上）→ 标出来但仍展示，别让面板沉默。
-		if mp != nil && pluginReport.PID != 0 && pluginReport.PID != mp.pid {
-			report.Stale = true
-		}
+		report.Stale = stalePluginReport(mpLaunchID(mp), pluginReport.LaunchID)
 		report.Items = append(report.Items, pluginCapabilityItems(pluginReport)...)
 	}
 
 	return report
+}
+
+// mpLaunchID 取当前托管进程的启动凭据（没有进程时为空，表示"无从比较"）。
+func mpLaunchID(mp *managedProcess) string {
+	if mp == nil {
+		return ""
+	}
+	return mp.launchID
+}
+
+// stalePluginReport 判断插件写的能力报告是不是"上一次启动"留下的。
+//
+// 用启动器自己发的一次性 launch id 比，**不要比 pid**：启动器手里是 `cmd /c` 外壳的
+// pid，插件报的是 node 进程的 pid（中间隔着 cmd → npx → node），按构造就不会相等 ——
+// 拿 pid 当判据会 100% 误报，用户会看到"功能一切正常却提示报告已过期"。
+//
+// 任一侧拿不到凭据（旧版插件不写这个字段）就不下结论：启动实例前已经删过报告文件，
+// "文件在"本身就是很强的证据。宁可不说，也不要谎报。
+func stalePluginReport(currentLaunchID, reportedLaunchID string) bool {
+	if currentLaunchID == "" || reportedLaunchID == "" {
+		return false
+	}
+	return currentLaunchID != reportedLaunchID
 }
 
 // launcherCapabilities 是启动器自己就能判定的几项：这些是不依赖插件、也不依赖
