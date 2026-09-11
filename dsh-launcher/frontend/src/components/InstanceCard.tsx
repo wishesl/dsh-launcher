@@ -9,8 +9,8 @@ interface Props {
   registry: RegistryInfo | null;
   busy: boolean;
   activeLog: boolean;
-  /** 正在被拖动排序（列表实时重排，这一张要给"拿起来了"的视觉）。 */
-  dragging?: boolean;
+  /** 刚要落到新位置（拖拽松手后的一小段）：给个轻量落位动画遮掉"占位条突然展开"的生硬感。 */
+  landed?: boolean;
   onDragHandleDown: (e: React.PointerEvent<HTMLElement>, id: string) => void;
   onDragHandleKeyDown: (e: React.KeyboardEvent<HTMLElement>, id: string) => void;
   onStart: (id: string) => void;
@@ -38,13 +38,18 @@ const STATUS_META: Record<string, { label: string; cls: string; rail: string }> 
   crashed: { label: '异常退出', cls: 'sb-crashed', rail: 'rail-crashed' },
 };
 
+/** 状态对应的左侧色条 class（设置 --rail）。幽灵卡片复用同一套配色。 */
+export function statusRail(status: string): string {
+  return (STATUS_META[status] ?? STATUS_META.stopped).rail;
+}
+
 export default function InstanceCard({
   instance,
   service,
   registry,
   busy,
   activeLog,
-  dragging,
+  landed,
   onDragHandleDown,
   onDragHandleKeyDown,
   onStart,
@@ -98,7 +103,7 @@ export default function InstanceCard({
 
   return (
     <div
-      className={`instance-card ${st.rail} ${activeLog ? 'active' : ''} ${dragging ? 'dragging' : ''}`}
+      className={`instance-card ${st.rail} ${activeLog ? 'active' : ''} ${landed ? 'inst-landed' : ''}`}
       data-inst-id={instance.id}
     >
       <div className="instance-top">

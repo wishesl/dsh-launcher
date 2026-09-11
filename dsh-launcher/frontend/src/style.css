@@ -380,14 +380,54 @@ html, body, #root {
   padding: 2px 2px 4px;
 }
 
-/* 拖动排序：列表实时重排，被拖动的那张"拿起来"（抬升 + 描边高亮），
-   其余卡片自然让位。拖拽期间整窗保持抓取光标并禁止选中文字。 */
+/* 拖动排序：大卡片离场 → 原地只留一枚细的落点占位，真正的视觉是跟手的幽灵小卡片
+   （见 .inst-ghost），其余卡片靠 InstancesView 的 FLIP 滑过去让位。
+   拖拽期间整窗保持抓取光标并禁止选中文字。 */
 body.reordering { cursor: grabbing; user-select: none; }
-.instance-card.dragging {
-  border-color: var(--accent);
-  box-shadow: 0 10px 24px rgba(20, 27, 46, .16);
-  opacity: .96;
+
+/* 落点占位条：细、带一点强调色光晕，明确"会插到这里"。 */
+.inst-slot {
+  flex: none;
+  height: 3px;
+  margin: 6px 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
 }
+
+/* 跟随光标的虚拟小卡片：只承载手柄 + 名字 + 状态点。
+   位置由 JS 直接写 transform（不走 state），所以跟手不掉帧。 */
+.inst-ghost {
+  position: fixed; top: 0; left: 0; z-index: 60;
+  display: flex; align-items: center; gap: 8px;
+  max-width: 300px;
+  padding: 7px 12px 7px 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--rail, var(--border));
+  border-radius: 9px;
+  box-shadow: 0 14px 30px rgba(20, 27, 46, .22), 0 2px 6px rgba(20, 27, 46, .1);
+  color: var(--text-3);
+  pointer-events: none; /* 别挡住指针下的事件，也别让卡片 hover 闪烁 */
+  will-change: transform;
+  transform: translate3d(-9999px, -9999px, 0); /* 首帧定位前先藏起来 */
+}
+.inst-ghost-name {
+  font-size: 13px; font-weight: 650; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.inst-ghost-dot {
+  flex: none; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--rail, var(--text-3));
+}
+
+/* 落位：占位条展开成整卡的瞬间给一点淡入，避免"啪"地跳出来。 */
+.instance-card.inst-landed { animation: inst-land 260ms cubic-bezier(.2,.8,.2,1); }
+@keyframes inst-land {
+  from { opacity: .45; transform: scale(.995); }
+  to { opacity: 1; transform: none; }
+}
+
 /* 排序手柄：平时很淡，悬停/聚焦才显形，避免和卡片里的按钮抢注意力。 */
 .inst-grip {
   flex: none;
