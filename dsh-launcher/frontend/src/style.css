@@ -705,15 +705,20 @@ body.resizing .log-drawer { transition: none; }
   background: var(--panel);
 }
 .caps-row.bad { border-color: color-mix(in srgb, var(--red) 28%, var(--border-soft)); background: var(--red-soft); }
+/* unknown = 没有结论 / 不适用：中性灰，绝不标红 —— 误报会让整个面板失去可信度 */
+.caps-row.unknown { border-color: var(--border-soft); background: var(--panel-2); }
 .caps-dot {
   flex: none; width: 7px; height: 7px; margin-top: 5px; border-radius: 50%;
   background: var(--green);
 }
 .caps-row.bad .caps-dot { background: var(--red); }
+.caps-row.unknown .caps-dot { background: var(--text-3); }
 .caps-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .caps-label { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.caps-row.unknown .caps-label { color: var(--text-2); }
 .caps-detail { font-size: 11.5px; color: var(--text-3); word-break: break-all; }
 .caps-reason { font-size: 11.5px; color: var(--red); line-height: 1.5; }
+.caps-note { font-size: 11.5px; color: var(--text-2); line-height: 1.5; }
 .caps-hint { font-size: 11.5px; color: var(--text-3); line-height: 1.5; }
 .caps-source {
   flex: none; font-size: 10.5px; color: var(--text-3);

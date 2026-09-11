@@ -4,6 +4,7 @@ export namespace main {
 	    id: string;
 	    label: string;
 	    ok: boolean;
+	    unknown: boolean;
 	    detail: string;
 	    reason: string;
 	    source: string;
@@ -18,6 +19,7 @@ export namespace main {
 	        this.id = source["id"];
 	        this.label = source["label"];
 	        this.ok = source["ok"];
+	        this.unknown = source["unknown"];
 	        this.detail = source["detail"];
 	        this.reason = source["reason"];
 	        this.source = source["source"];

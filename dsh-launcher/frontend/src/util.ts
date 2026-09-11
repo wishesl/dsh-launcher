@@ -106,9 +106,10 @@ export function embedGateReason(caps?: CapabilityReport | null): string {
   return item.reason || '该 DSH 版本未提供内嵌所需的会话接口';
 }
 
-/** 兼容性面板是否有红灯（用于右栏标签上的提示点）。 */
+/** 兼容性面板是否有**确定的问题**（用于右栏标签上的提示点）。
+ *  只统计 !ok && !unknown：unknown 是"没有结论 / 不适用"，标红就是误报。 */
 export function hasCapabilityFailure(caps?: CapabilityReport | null): boolean {
-  return !!caps?.items.some((i) => !i.ok);
+  return !!caps?.items.some((i) => !i.ok && !i.unknown);
 }
 
 /**
@@ -117,15 +118,15 @@ export function hasCapabilityFailure(caps?: CapabilityReport | null): boolean {
  * 只统计**已经跑起来**（ready / running）且启用了自管理重启的实例：启动中不参与判定 ——
  * 能力报告是插件在 apply() 时写的，那个窗口里"没有报告"是正常的，报红就是狼来了。
  *
- * 判为问题的情况：
- *  - 收到了报告，但里面有红灯（例如上游改了内部接口，`embedRelax` 失败）；
- *  - 跑起来了、门控也确实挂载了插件，却**始终没有**报告 —— 说明插件在 DSH 侧没装载成功。
+ * 计为问题的情况：收到了报告，但里面有**确定的**红灯（例如上游改了内部接口、`embedRelax`
+ * 失败）。"没有报告"由启动器分诊：插件没装 / 副本是旧版 / 实例没启用自管理重启都属于
+ * 已知的良性原因，后端会把这些标成 unknown，这里就不再报警（否则功能一切正常却满屏红灯）。
  */
 export function capsAlert(caps: CapabilityReport | undefined, inst: Instance): boolean {
   if (!inst.selfRestart) return false;
   if (inst.status !== 'ready' && inst.status !== 'running') return false;
-  if (!caps) return true;
-  return caps.items.some((i) => !i.ok);
+  if (!caps) return false; // 后端总会返回报告；取不到说明是前端拿数据的问题，不该报警
+  return caps.items.some((i) => !i.ok && !i.unknown);
 }
 
 

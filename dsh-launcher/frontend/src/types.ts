@@ -257,8 +257,11 @@ export interface CapabilityItem {
   id: string;
   label: string;
   ok: boolean;
+  /** true = 没有结论 / 不适用（插件未启用、副本是旧版……）。只作中性展示，**不标红** ——
+   *  面板一旦误报就会失去可信度，所以要严格区分"失败"和"没有结论"。 */
+  unknown: boolean;
   detail: string;   // 证据：解析到的地址 / 门控卡在哪一道
-  reason: string;   // ok=false 时插件给的人话原因
+  reason: string;   // ok=false 时的人话原因
   source: string;   // "launcher" | "plugin"
   hint: string;     // 这一项坏掉的后果
 }
@@ -268,7 +271,7 @@ export interface CapabilityReport {
   instanceName: string;
   version: string;
   status: string;
-  plugin: string;   // "dsh-self-mcp@0.1.0"；插件未报告时为空
+  plugin: string;   // "dsh-self-mcp@0.2.0"；插件未报告时为空
   pluginAt: string; // 报告时间（RFC3339）
   stale: boolean;   // 报告来自上一个进程（pid 不匹配）
   items: CapabilityItem[];

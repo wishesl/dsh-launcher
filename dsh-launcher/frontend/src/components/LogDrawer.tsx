@@ -83,7 +83,7 @@ export default function LogDrawer({
         <span className="log-drawer-sub">
           {tab === 'compat'
             ? caps
-              ? `${caps.instanceName} · ${caps.items.filter((i) => !i.ok).length} 项不可用`
+              ? `${caps.instanceName} · ${caps.items.filter((i) => !i.ok && !i.unknown).length} 项不可用`
               : activeInstance
                 ? `${activeInstance.name} · 探测中…`
                 : '选择一个实例'
@@ -167,18 +167,26 @@ export default function LogDrawer({
                   </p>
                 )}
                 <div className="caps-list">
-                  {caps.items.map((it) => (
-                    <div key={it.id} className={`caps-row ${it.ok ? 'ok' : 'bad'}`}>
-                      <span className="caps-dot" />
-                      <div className="caps-body">
-                        <span className="caps-label">{it.label}</span>
-                        {it.detail && <span className="caps-detail">{it.detail}</span>}
-                        {!it.ok && it.reason && <span className="caps-reason">{it.reason}</span>}
-                        {!it.ok && it.hint && <span className="caps-hint">影响：{it.hint}</span>}
+                  {caps.items.map((it) => {
+                    // 三态：ok / bad（确定失败，标红）/ unknown（没有结论、不适用 —— 中性）
+                    const state = it.ok ? 'ok' : it.unknown ? 'unknown' : 'bad';
+                    return (
+                      <div key={it.id} className={`caps-row ${state}`}>
+                        <span className="caps-dot" />
+                        <div className="caps-body">
+                          <span className="caps-label">{it.label}</span>
+                          {it.detail && <span className="caps-detail">{it.detail}</span>}
+                          {!it.ok && it.reason && (
+                            <span className={it.unknown ? 'caps-note' : 'caps-reason'}>{it.reason}</span>
+                          )}
+                          {state === 'bad' && it.hint && (
+                            <span className="caps-hint">影响：{it.hint}</span>
+                          )}
+                        </div>
+                        <span className="caps-source">{it.source === 'plugin' ? '插件' : '启动器'}</span>
                       </div>
-                      <span className="caps-source">{it.source === 'plugin' ? '插件' : '启动器'}</span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 <p className="caps-foot">
                   这些是探测结论，不是按 DSH 版本号推断的 —— 上游改了内部实现时，

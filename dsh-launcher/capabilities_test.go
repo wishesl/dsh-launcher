@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -138,4 +139,44 @@ func ids(items []CapabilityItem) []string {
 		out = append(out, it.ID)
 	}
 	return out
+}
+
+func TestPluginCopyMismatchReason(t *testing.T) {
+	// 版本不一致 = 装的是旧副本：必须给出"重新安装"这个可操作结论，并且由调用方标成
+	// unknown（不是故障）—— 功能其实还能用，报红就是误报。
+	reason, mismatch := pluginCopyMismatchReason("0.1.0", "0.2.0")
+	if !mismatch {
+		t.Fatal("版本不一致应当判定为副本过期")
+	}
+	if !strings.Contains(reason, "0.1.0") || !strings.Contains(reason, "0.2.0") {
+		t.Errorf("原因里要同时给出已装与内置版本，实际: %q", reason)
+	}
+	if !strings.Contains(reason, "重新安装") {
+		t.Errorf("原因要可操作（告诉用户怎么办），实际: %q", reason)
+	}
+
+	// 一致 / 读不出来 → 不下结论，交给调用方走"可能加载失败"的缺省分支。
+	for _, c := range [][2]string{{"0.2.0", "0.2.0"}, {"", "0.2.0"}, {"0.1.0", ""}, {"", ""}} {
+		if _, mismatch := pluginCopyMismatchReason(c[0], c[1]); mismatch {
+			t.Errorf("pluginCopyMismatchReason(%q, %q) 不应判定为不一致", c[0], c[1])
+		}
+	}
+}
+
+func TestSelfRestartGateDetail(t *testing.T) {
+	// 未勾选不是故障（按设计就不挂载），措辞必须让用户看出"这是正常的"。
+	off := selfRestartGateDetail(Instance{SelfRestart: false}, false)
+	if !strings.Contains(off, "按设计") {
+		t.Errorf("未勾选的说明要表明这是设计行为，实际: %q", off)
+	}
+	// 勾了但全局没装 → 要说清后果。
+	notInstalled := selfRestartGateDetail(Instance{SelfRestart: true}, false)
+	if !strings.Contains(notInstalled, selfRestartPluginName) || !strings.Contains(notInstalled, "不会生效") {
+		t.Errorf("全局未装的说明要给出后果，实际: %q", notInstalled)
+	}
+	// 挂载成功 → 说清两个门控都通过了。
+	on := selfRestartGateDetail(Instance{SelfRestart: true}, true)
+	if !strings.Contains(on, selfRestartPluginName) {
+		t.Errorf("挂载成功的说明应包含插件名，实际: %q", on)
+	}
 }
