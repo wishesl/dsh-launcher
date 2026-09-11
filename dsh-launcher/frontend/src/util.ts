@@ -7,6 +7,12 @@ export interface WebUrlInfo {
   runtime: boolean;  // true when the URL was captured from live process output
 }
 
+// 夹取到 [lo, hi]。hi < lo 时返回 lo（调用方可以把动态算出的上限直接传进来，
+// 不必先判断窗口是否已经窄到装不下最小宽度）。
+export function clamp(v: number, lo: number, hi: number): number {
+  return Math.min(Math.max(v, lo), Math.max(lo, hi));
+}
+
 // 从实例的 extraArgs 里解析 --port（支持 `--port 3081` 和 `--port=3081`）。
 // 未指定时 DSH web 默认监听 3080。
 // 运行中实例优先使用后端从进程输出捕获的真实地址（runtime=true），

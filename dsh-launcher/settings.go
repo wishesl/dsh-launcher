@@ -25,6 +25,9 @@ type settings struct {
 	Proxy string `json:"proxy"`
 	// UI layout override: "" = auto per OS, "mac" = Mac 布局, "win" = Win/Linux 布局.
 	Layout string `json:"layout"`
+	// 可拖拽栏宽（0 = 未设置，前端回落到默认值 204 / 440）。
+	SidebarWidth int `json:"sidebarWidth"`
+	LogWidth     int `json:"logWidth"`
 }
 
 // settingsStore persists launcher preferences next to instances.json.
@@ -117,6 +120,14 @@ func (s *settingsStore) setLayout(layout string) {
 	s.mu.Unlock()
 }
 
+// setUIWidths persists the two draggable pane widths (0 = unset).
+func (s *settingsStore) setUIWidths(sidebar, log int) {
+	s.mu.Lock()
+	s.data.SidebarWidth, s.data.LogWidth = sidebar, log
+	s.saveLocked()
+	s.mu.Unlock()
+}
+
 // GetLayout returns the UI layout override ("" = auto per platform).
 func (a *App) GetLayout() string {
 	if a.settings == nil {
@@ -134,6 +145,42 @@ func (a *App) SetLayout(layout string) error {
 	}
 	if a.settings != nil {
 		a.settings.setLayout(layout)
+	}
+	return nil
+}
+
+// maxUIWidth bounds a persisted pane width, so a hand-edited or corrupt
+// settings.json cannot hand the frontend an absurd value.
+const maxUIWidth = 4000
+
+// UIWidths carries the two draggable pane widths to the frontend. 0 means
+// "unset": the frontend then falls back to its own default (204 / 440).
+type UIWidths struct {
+	Sidebar int `json:"sidebar"`
+	Log     int `json:"log"`
+}
+
+// GetUIWidths returns the persisted pane widths (0 = unset).
+func (a *App) GetUIWidths() UIWidths {
+	if a.settings == nil {
+		return UIWidths{}
+	}
+	d := a.settings.get()
+	return UIWidths{Sidebar: d.SidebarWidth, Log: d.LogWidth}
+}
+
+// SetUIWidths persists the pane widths when a drag settles (not per frame).
+// Bounds stay permissive on purpose: the frontend clamps against the live
+// viewport, and a width saved on a wide window must still load on a narrow one.
+func (a *App) SetUIWidths(w UIWidths) error {
+	if w.Sidebar < 0 || w.Log < 0 {
+		return fmt.Errorf("栏宽不能为负: sidebar=%d log=%d", w.Sidebar, w.Log)
+	}
+	if w.Sidebar > maxUIWidth || w.Log > maxUIWidth {
+		return fmt.Errorf("栏宽超出上限 %d: sidebar=%d log=%d", maxUIWidth, w.Sidebar, w.Log)
+	}
+	if a.settings != nil {
+		a.settings.setUIWidths(w.Sidebar, w.Log)
 	}
 	return nil
 }

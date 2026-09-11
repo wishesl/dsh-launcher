@@ -5,6 +5,8 @@ import LogPanel from './LogPanel';
 interface Props {
   open: boolean;
   onClose: () => void;
+  /** 展开态的宽度（可拖拽）。收起时内联宽度取 0，让 .22s 过渡照常播放。 */
+  width: number;
   instances: Instance[];
   logs: Record<string, LogEvent[]>;
   activeLogId: string | null;
@@ -21,6 +23,7 @@ interface Props {
 export default function LogDrawer({
   open,
   onClose,
+  width,
   instances,
   logs,
   activeLogId,
@@ -63,7 +66,12 @@ export default function LogDrawer({
   // slice of the window width when open and collapses to 0 when closed, so the
   // whole interface always reads as sidebar | content | run-log.
   return (
-    <aside className={`log-drawer ${open ? 'open' : 'closed'}`} aria-label="运行日志" aria-hidden={!open}>
+    <aside
+      className={`log-drawer ${open ? 'open' : 'closed'}`}
+      style={{ width: open ? width : 0 }}
+      aria-label="运行日志"
+      aria-hidden={!open}
+    >
       <div className="log-drawer-head">
         <span className="log-drawer-title">运行日志</span>
         <span className="log-drawer-sub">

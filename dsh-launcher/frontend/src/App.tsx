@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { api, errMsg } from './api';
 import { BrowserOpenURL, Environment } from '../wailsjs/runtime/runtime';
 import type { ExitChoice, Instance, LayoutMode, LogEvent, MarketOpState, RegistryInfo, ServiceState } from './types';
+import { clamp } from './util';
 import Header from './components/Header';
 import Sidebar, { type ViewKey } from './components/Sidebar';
 import VersionView from './components/VersionView';
@@ -12,9 +14,26 @@ import InstanceForm from './components/InstanceForm';
 import MaskPluginsDialog from './components/MaskPluginsDialog';
 import ExitDialog from './components/ExitDialog';
 import LogDrawer from './components/LogDrawer';
+import Resizer from './components/Resizer';
 
 type ModalState = { mode: 'new' } | { mode: 'edit'; instance: Instance } | null;
 type Toast = { msg: string; kind: 'ok' | 'error' } | null;
+
+// ---- 三栏可拖拽宽度 ----
+// 两条缝分别控制左栏（菜单）与右栏（运行日志）；值持久化在 settings.json
+// 的 sidebarWidth / logWidth，0 表示未设置 → 用这里的默认值。
+const SIDEBAR_MIN = 160;
+const SIDEBAR_MAX = 320;
+const SIDEBAR_DEFAULT = 204;
+/** 收起态宽度，与 .sidebar.collapsed 的 64px 保持一致。 */
+const SIDEBAR_COLLAPSED = 64;
+const LOG_MIN = 300;
+const LOG_MAX = 720;
+const LOG_DEFAULT = 440;
+/** 中间主内容的最小宽度：两条缝都据此反推上限，防止把主内容挤没。 */
+const CONTENT_FLOOR = 360;
+/** 布局固定开销：.app 左右各 14px padding + 侧栏卡压在主卡上的 10px 层叠。 */
+const LAYOUT_CHROME = 38;
 
 export default function App() {
   const [view, setView] = useState<ViewKey>('versions'); // 首页默认打开「版本历史」
@@ -32,6 +51,11 @@ export default function App() {
   const [logsOpen, setLogsOpen] = useState(false);
   // Sidebar (菜单栏) 展开/收起：收起后变为仅图标小卡片。
   const [collapsed, setCollapsed] = useState(false);
+  // 三栏里两条缝的宽度（可拖拽）。collapsed 时左栏固定 64px，sidebarW 不参与。
+  const [sidebarW, setSidebarW] = useState(SIDEBAR_DEFAULT);
+  const [logW, setLogW] = useState(LOG_DEFAULT);
+  // 窗口宽度：两条缝的上限要按它反推，否则窄窗口会把主内容挤没。
+  const [viewportW, setViewportW] = useState(() => window.innerWidth);
   // 布局：layoutPref 为用户显式选择（''=自动）；os 为最终生效布局。
   // mac 用当前布局；win/linux 把三个点移到顶栏右侧、logo 上移顶栏左侧。
   const [layoutPref, setLayoutPref] = useState<LayoutMode>('');
@@ -58,6 +82,27 @@ export default function App() {
       active = false;
     };
   }, [detectOs]);
+
+  // 恢复上次拖出来的两条栏宽（0 = 从未拖过，保留默认值）。
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const w = await api.getUIWidths().catch(() => null);
+      if (!active || !w) return;
+      if (w.sidebar > 0) setSidebarW(w.sidebar);
+      if (w.log > 0) setLogW(w.log);
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // 窗口尺寸变化 → 重新计算两条缝的上限（拖动时也会即时生效）。
+  useEffect(() => {
+    const onResize = () => setViewportW(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   // 用户在设置里切换布局：保存偏好并立即应用（''=自动→按系统）。
   const onSetLayout = useCallback(
@@ -399,6 +444,32 @@ export default function App() {
     }
   };
 
+  // ---- 三栏宽度的最终生效值 ----
+  // 左栏收起时只占 64px，且不响应拖拽；层叠的 10px 要从它实际占宽里扣掉。
+  const sidebarEffective = collapsed ? SIDEBAR_COLLAPSED : sidebarW;
+  const logEffective = logsOpen ? logW : 0;
+  // 上限按"窗口宽 - 固定开销 - 中间保底 - 另一栏"反推，再夹到各自的界内。
+  const sidebarMax = clamp(
+    viewportW - LAYOUT_CHROME - CONTENT_FLOOR - logEffective,
+    SIDEBAR_MIN,
+    SIDEBAR_MAX
+  );
+  const logMax = clamp(
+    viewportW - LAYOUT_CHROME - CONTENT_FLOOR - (sidebarEffective - 10),
+    LOG_MIN,
+    LOG_MAX
+  );
+  // 真正渲染出去的宽度：窄窗口下即使 settings 里存着更宽的值也要收住。
+  const sidebarShown = clamp(sidebarW, SIDEBAR_MIN, sidebarMax);
+  const logShown = clamp(logW, LOG_MIN, logMax);
+
+  // 松手/键盘调整结束时才落盘（拖动过程中不写 settings.json）。
+  const persistWidths = useCallback((sidebar: number, log: number) => {
+    void api.setUIWidths({ sidebar: Math.round(sidebar), log: Math.round(log) }).catch(() => {
+      /* 栏宽只是界面偏好，写盘失败无需打扰用户 */
+    });
+  }, []);
+
   return (
     <div className={`app ${os === 'mac' ? 'os-mac' : 'os-win'}`}>
       <Header
@@ -416,11 +487,35 @@ export default function App() {
         onToggleCollapse={() => setCollapsed((v) => !v)}
       />
 
-      <div className="app-body">
+      <div
+        className="app-body"
+        style={
+          {
+            // 分隔条的定位靠这两个变量（见 style.css 的 .resizer-*）
+            '--sidebar-w': `${sidebarEffective}px`,
+            '--drawer-w': `${logEffective}px`,
+          } as CSSProperties
+        }
+      >
         <Sidebar
           view={view}
           onNavigate={setView}
           collapsed={collapsed}
+          width={collapsed ? undefined : sidebarShown}
+        />
+        <Resizer
+          side="left"
+          width={sidebarShown}
+          min={SIDEBAR_MIN}
+          max={sidebarMax}
+          disabled={collapsed}
+          onDrag={setSidebarW}
+          onCommit={(w) => persistWidths(w, logShown)}
+          onReset={() => {
+            setSidebarW(SIDEBAR_DEFAULT);
+            persistWidths(SIDEBAR_DEFAULT, logShown);
+          }}
+          label="调整菜单宽度"
         />
         <div className="app-main">
         <div className="app-content">
@@ -476,9 +571,24 @@ export default function App() {
         </div>
 
         {/* Right-side run-log pane: in-flow third column (sidebar | content | logs) */}
+        <Resizer
+          side="right"
+          width={logShown}
+          min={LOG_MIN}
+          max={logMax}
+          disabled={!logsOpen}
+          onDrag={setLogW}
+          onCommit={(w) => persistWidths(sidebarShown, w)}
+          onReset={() => {
+            setLogW(LOG_DEFAULT);
+            persistWidths(sidebarShown, LOG_DEFAULT);
+          }}
+          label="调整运行日志面板宽度"
+        />
         <LogDrawer
           open={logsOpen}
           onClose={() => setLogsOpen(false)}
+          width={logShown}
           instances={instances}
           logs={logs}
           activeLogId={activeLogId}

@@ -8,6 +8,9 @@ interface Props {
   view: ViewKey;
   onNavigate: (v: ViewKey) => void;
   collapsed: boolean;
+  /** 展开态的宽度（可拖拽）。收起态由 .sidebar.collapsed 的 64px 决定，
+   *  此时这里传 undefined —— 否则内联宽度会盖掉收起态的 CSS。 */
+  width?: number;
 }
 
 const NAV: { key: ViewKey; label: string; icon: LucideIcon }[] = [
@@ -17,9 +20,13 @@ const NAV: { key: ViewKey; label: string; icon: LucideIcon }[] = [
   { key: 'settings', label: '设置', icon: Settings },
 ];
 
-export default function Sidebar({ view, onNavigate, collapsed }: Props) {
+export default function Sidebar({ view, onNavigate, collapsed, width }: Props) {
   return (
-    <nav className={`sidebar ${collapsed ? 'collapsed' : ''}`} aria-label="主导航">
+    <nav
+      className={`sidebar ${collapsed ? 'collapsed' : ''}`}
+      style={width === undefined ? undefined : { width }}
+      aria-label="主导航"
+    >
       <div className="side-head">
         <div className="brand">
           <img className="brand-logo-img" src={dshLogo} alt="DSH Launcher" draggable={false} />

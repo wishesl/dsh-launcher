@@ -174,6 +174,12 @@ export interface ProxySettings {
 // UI layout override (Settings panel): "" = auto per OS, "mac", "win".
 export type LayoutMode = '' | 'mac' | 'win';
 
+// 三栏里两条可拖拽缝的宽度，持久化在 settings.json（0 = 未设置，用前端默认值）。
+export interface UIWidths {
+  sidebar: number;
+  log: number;
+}
+
 export interface MarketLogEvent {
   line: string;
 }

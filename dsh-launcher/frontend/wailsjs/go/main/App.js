@@ -66,6 +66,10 @@ export function GetProxySettings() {
   return window['go']['main']['App']['GetProxySettings']();
 }
 
+export function GetUIWidths() {
+  return window['go']['main']['App']['GetUIWidths']();
+}
+
 export function HideToTray() {
   return window['go']['main']['App']['HideToTray']();
 }
@@ -176,6 +180,10 @@ export function SetMarketRegistryURL(arg1) {
 
 export function SetProxy(arg1) {
   return window['go']['main']['App']['SetProxy'](arg1);
+}
+
+export function SetUIWidths(arg1) {
+  return window['go']['main']['App']['SetUIWidths'](arg1);
 }
 
 export function SortInstances() {

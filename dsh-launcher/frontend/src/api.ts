@@ -12,6 +12,7 @@ import {
   GetInstanceMasks,
   GetInstances,
   GetLayout,
+  GetUIWidths,
   GetMarketSettings,
   GetProxySettings,
   HideToTray,
@@ -41,6 +42,7 @@ import {
   SetLayout,
   SetMarketRegistryURL,
   SetProxy,
+  SetUIWidths,
   StopInstance,
   TogglePlugin,
   UninstallPlugin,
@@ -68,6 +70,7 @@ import type {
   ServiceState,
   ShareImportResult,
   StatusEvent,
+  UIWidths,
   UpdateCheckResult,
 } from './types';
 
@@ -133,6 +136,9 @@ export const api = {
   // UI layout (Settings)
   getLayout: (): Promise<LayoutMode> => GetLayout() as any,
   setLayout: (mode: LayoutMode): Promise<void> => SetLayout(mode),
+  // 三栏可拖拽宽度（落盘在 settings.json，松手时才写）
+  getUIWidths: (): Promise<UIWidths> => GetUIWidths() as any,
+  setUIWidths: (w: UIWidths): Promise<void> => SetUIWidths(w as any),
 
   // plugin favorites (local, offline)
   listFavorites: (): Promise<FavoritePlugin[]> => ListFavorites(),

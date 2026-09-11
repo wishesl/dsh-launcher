@@ -34,6 +34,8 @@ export function GetMarketSettings():Promise<main.MarketSettings>;
 
 export function GetProxySettings():Promise<main.ProxySettings>;
 
+export function GetUIWidths():Promise<main.UIWidths>;
+
 export function HideToTray():Promise<void>;
 
 export function ImportShareCode(arg1:string,arg2:Array<string>):Promise<main.ShareImportResult>;
@@ -89,6 +91,8 @@ export function SetLayout(arg1:string):Promise<void>;
 export function SetMarketRegistryURL(arg1:string):Promise<void>;
 
 export function SetProxy(arg1:string):Promise<void>;
+
+export function SetUIWidths(arg1:main.UIWidths):Promise<void>;
 
 export function SortInstances():Promise<void>;
 

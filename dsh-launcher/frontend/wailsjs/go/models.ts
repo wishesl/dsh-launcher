@@ -425,6 +425,20 @@ export namespace main {
 		}
 	}
 	
+	export class UIWidths {
+	    sidebar: number;
+	    log: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new UIWidths(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sidebar = source["sidebar"];
+	        this.log = source["log"];
+	    }
+	}
 	export class UpdateCheck {
 	    name: string;
 	    current: string;

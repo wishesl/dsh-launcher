@@ -242,7 +242,8 @@ html, body, #root {
 .dsh-chip-open:hover { text-decoration: underline; }
 
 /* ---------- Sidebar ---------- */
-.app-body { flex: 1; display: flex; min-height: 0; gap: 0; }
+/* position: relative 是两条分隔条的定位基准（.resizer 绝对定位贴在缝上）。 */
+.app-body { flex: 1; display: flex; min-height: 0; gap: 0; position: relative; }
 .sidebar {
   width: 204px; flex: none;
   position: relative;
@@ -432,6 +433,61 @@ html, body, #root {
   overflow-y: auto;
   padding: 2px 2px 4px;
 }
+
+/* ============================================================
+   可拖拽分隔条（左栏右边界 / 右栏左边界）
+   ------------------------------------------------------------
+   绝对定位贴在两条缝上，不占 flex 空间、不参与三栏宽度分配，
+   位置由 App 写在 .app-body 上的 --sidebar-w / --drawer-w 推出。
+   命中区 9px：缝两侧各吃 4.5px，落在两栏自己的 padding 里。
+   ============================================================ */
+.resizer {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 9px;
+  z-index: 5;              /* 高于 .sidebar 的 3，压在两张卡的交界处 */
+  cursor: col-resize;
+  touch-action: none;      /* 用 pointer 事件拖动，别触发滚动/缩放手势 */
+}
+/* 类名与 Resizer 的 side prop 对齐：resizer-left = 左栏右边界，resizer-right = 右栏左边界 */
+.resizer-left { left: calc(var(--sidebar-w, 204px) - 4.5px); }
+.resizer-right { right: calc(var(--drawer-w, 0px) - 4.5px); }
+/* 收起态（左栏 collapsed / 右栏 closed）不响应拖拽，也不该出现在缝上 */
+.resizer.disabled { display: none; }
+
+/* hover/拖动时的整条提示线 */
+.resizer::before {
+  content: '';
+  position: absolute;
+  left: 50%; top: 0; bottom: 0;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity .12s;
+}
+.resizer:hover::before, .resizer.dragging::before { opacity: .28; }
+
+/* 常驻抓手：hover 才显形，拖动时实心主色 */
+.resizer::after {
+  content: '';
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 4px; height: 36px;
+  transform: translate(-50%, -50%);
+  border-radius: 3px;
+  background: var(--border);
+  opacity: 0;
+  transition: opacity .12s, background .12s;
+}
+.resizer:hover::after { opacity: 1; }
+.resizer.dragging::after { opacity: 1; background: var(--accent); }
+
+/* 拖动期间：全窗口保持 col-resize 且禁止选中文字；右栏宽度过渡必须关掉，
+   否则每一帧都要走 .22s 动画，拖起来会像橡皮筋一样滞后。 */
+body.resizing { user-select: none; cursor: col-resize; }
+body.resizing .log-drawer { transition: none; }
 
 /* ============================================================
    Run-log pane (in-flow third column: sidebar | content | logs)
