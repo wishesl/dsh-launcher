@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { api, errMsg } from './api';
 import { BrowserOpenURL, Environment } from '../wailsjs/runtime/runtime';
 import type { CapabilityReport, ExitChoice, Instance, LayoutMode, LogEvent, LogTab, MarketOpState, RegistryInfo, ServiceState } from './types';
-import { clamp, embedGateReason, maskUrlSecrets } from './util';
+import { clamp, capsAlert, embedGateReason, maskUrlSecrets } from './util';
 import Header from './components/Header';
 import Sidebar, { type ViewKey } from './components/Sidebar';
 import VersionView from './components/VersionView';
@@ -559,6 +559,32 @@ export default function App() {
     if (capsTargetId) void loadCaps(capsTargetId);
   }, [capsTargetId, loadCaps]);
 
+  // 「兼容性检查」要覆盖所有跑着的实例，所以不能只在打开面板时才探测。
+  // 用 (id,status) 的指纹当依赖：启动中不探（报告还没写出来），状态一落定就重探。
+  const liveCapsTargets = useMemo(
+    () =>
+      instances
+        .filter((i) => i.status === 'ready' || i.status === 'running')
+        .map((i) => ({ id: i.id, status: i.status })),
+    [instances]
+  );
+  const liveCapsKey = JSON.stringify(liveCapsTargets);
+  useEffect(() => {
+    for (const t of liveCapsTargets) void loadCaps(t.id);
+    // liveCapsKey 是 liveCapsTargets 的稳定指纹（数组本身每次渲染都是新引用）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveCapsKey, loadCaps]);
+
+  // 按钮上的计数：哪些实例有需要处理的能力问题（判定规则见 util.ts 的 capsAlert）。
+  const capsAlertIds = instances.filter((i) => capsAlert(capsById[i.id], i)).map((i) => i.id);
+  const capsAlertKey = capsAlertIds.join(',');
+  const openCompatCheck = useCallback(() => {
+    // 有红灯就直接落到第一台出问题的实例上，省得用户还要自己去标签行里找。
+    const first = capsAlertKey.split(',')[0];
+    if (first) setActiveLogId(first);
+    openLogs('compat');
+  }, [capsAlertKey, openLogs]);
+
   // 稳定引用：Header 是子组件，回调不 useCallback 会每次渲染都换新引用（见 AGENTS.md）。
   const toggleEmbed = useCallback(() => setEmbedMode((v) => !v), []);
 
@@ -723,6 +749,8 @@ export default function App() {
               onSelectLog={selectLog}
               onToggleAutoStart={toggleAutoStart}
               onReorder={reorderInstances}
+              capsAlertCount={capsAlertIds.length}
+              onOpenCompat={openCompatCheck}
             />
           )}
           {view === 'market' && (

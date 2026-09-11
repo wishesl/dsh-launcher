@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { GripVertical } from 'lucide-react';
+import { GripVertical, ShieldCheck } from 'lucide-react';
 import type { Instance, LogEvent, RegistryInfo, ServiceState } from '../types';
 import InstanceCard, { statusRail } from './InstanceCard';
 
@@ -25,6 +25,10 @@ interface Props {
   onToggleAutoStart: (id: string, v: boolean) => void;
   /** 拖拽 / 键盘调整顺序后回调新的 id 顺序（由 App 落盘）。 */
   onReorder: (ids: string[]) => void;
+  /** 有兼容性问题的实例数（跑着的实例里判定，规则见 util.ts 的 capsAlert）。 */
+  capsAlertCount: number;
+  /** 打开右栏「兼容性」标签（有问题时直接落到第一台出问题的实例）。 */
+  onOpenCompat: () => void;
 }
 
 /** 自动滚动触发区：指针进入列表上/下边缘这么多像素内就开始滚动。 */
@@ -58,6 +62,8 @@ export default function InstancesView({
   onSelectLog,
   onToggleAutoStart,
   onReorder,
+  capsAlertCount,
+  onOpenCompat,
 }: Props) {
   const running = instances.filter(
     (i) => i.status === 'running' || i.status === 'starting' || i.status === 'ready'
@@ -306,8 +312,23 @@ export default function InstancesView({
 
   return (
     <div className="view-page">
-      <div className="instances-toolbar">
+      <div className="instances-toolbar instances-toolbar-main">
         <h2>实例</h2>
+        {/* 兼容性检查入口：探测结论在右栏「兼容性」标签里，这里给一个显式入口，
+            有问题的实例数直接落在按钮上 —— 不用等用户想起来去翻标签行。 */}
+        <button
+          className={`btn btn-ghost btn-sm compat-check-btn ${capsAlertCount > 0 ? 'has-alert' : ''}`}
+          onClick={onOpenCompat}
+          title={
+            capsAlertCount > 0
+              ? `${capsAlertCount} 台运行中的实例有兼容性提示 —— 点开右栏「兼容性」看具体哪一项`
+              : '探测这台 DSH 上各项能力到底能不能用（日志解析 / 插件装载 / 内嵌前置），结果在右栏「兼容性」'
+          }
+        >
+          <ShieldCheck size={15} strokeWidth={1.75} aria-hidden />
+          兼容性检查
+          {capsAlertCount > 0 && <span className="compat-badge">{capsAlertCount}</span>}
+        </button>
         <div className="status-strip" title="运行中 / 实例总数">
           <span>运行 <b className="live">{running}</b> / <b>{instances.length}</b></span>
           <span className="muted">·</span>

@@ -111,3 +111,21 @@ export function hasCapabilityFailure(caps?: CapabilityReport | null): boolean {
   return !!caps?.items.some((i) => !i.ok);
 }
 
+/**
+ * 这台实例当前是否存在需要用户注意的兼容性问题（用于「兼容性检查」按钮上的计数）。
+ *
+ * 只统计**已经跑起来**（ready / running）且启用了自管理重启的实例：启动中不参与判定 ——
+ * 能力报告是插件在 apply() 时写的，那个窗口里"没有报告"是正常的，报红就是狼来了。
+ *
+ * 判为问题的情况：
+ *  - 收到了报告，但里面有红灯（例如上游改了内部接口，`embedRelax` 失败）；
+ *  - 跑起来了、门控也确实挂载了插件，却**始终没有**报告 —— 说明插件在 DSH 侧没装载成功。
+ */
+export function capsAlert(caps: CapabilityReport | undefined, inst: Instance): boolean {
+  if (!inst.selfRestart) return false;
+  if (inst.status !== 'ready' && inst.status !== 'running') return false;
+  if (!caps) return true;
+  return caps.items.some((i) => !i.ok);
+}
+
+
