@@ -10,12 +10,20 @@ export function ApproveBuilds(arg1) {
   return window['go']['main']['App']['ApproveBuilds'](arg1);
 }
 
+export function CancelLauncherUpdate() {
+  return window['go']['main']['App']['CancelLauncherUpdate']();
+}
+
 export function CancelMarketOp() {
   return window['go']['main']['App']['CancelMarketOp']();
 }
 
 export function CheckEnvironment() {
   return window['go']['main']['App']['CheckEnvironment']();
+}
+
+export function CheckLauncherUpdate(arg1) {
+  return window['go']['main']['App']['CheckLauncherUpdate'](arg1);
 }
 
 export function CheckPluginUpdates(arg1) {
@@ -28,6 +36,10 @@ export function DetectLocalVersion(arg1) {
 
 export function DirectoryExists(arg1) {
   return window['go']['main']['App']['DirectoryExists'](arg1);
+}
+
+export function DownloadLauncherUpdate() {
+  return window['go']['main']['App']['DownloadLauncherUpdate']();
 }
 
 export function EnsureConfigDir() {
@@ -86,6 +98,10 @@ export function GetUIWidths() {
   return window['go']['main']['App']['GetUIWidths']();
 }
 
+export function GetUpdateSettings() {
+  return window['go']['main']['App']['GetUpdateSettings']();
+}
+
 export function HideToTray() {
   return window['go']['main']['App']['HideToTray']();
 }
@@ -130,6 +146,10 @@ export function MarketOpRunning() {
   return window['go']['main']['App']['MarketOpRunning']();
 }
 
+export function OpenReleasePage() {
+  return window['go']['main']['App']['OpenReleasePage']();
+}
+
 export function ParseShareCode(arg1) {
   return window['go']['main']['App']['ParseShareCode'](arg1);
 }
@@ -164,6 +184,10 @@ export function ReorderInstances(arg1) {
 
 export function RequestClose() {
   return window['go']['main']['App']['RequestClose']();
+}
+
+export function RestartLauncherNow() {
+  return window['go']['main']['App']['RestartLauncherNow']();
 }
 
 export function RunAutoStartInstances() {
@@ -206,6 +230,10 @@ export function SetUIWidths(arg1) {
   return window['go']['main']['App']['SetUIWidths'](arg1);
 }
 
+export function SetUpdateSettings(arg1) {
+  return window['go']['main']['App']['SetUpdateSettings'](arg1);
+}
+
 export function SortInstances() {
   return window['go']['main']['App']['SortInstances']();
 }
@@ -224,6 +252,14 @@ export function UninstallPlugin(arg1, arg2) {
 
 export function UninstallSelfRestartPlugin(arg1) {
   return window['go']['main']['App']['UninstallSelfRestartPlugin'](arg1);
+}
+
+export function UpdateAppliedVersion() {
+  return window['go']['main']['App']['UpdateAppliedVersion']();
+}
+
+export function UpdateOpRunning() {
+  return window['go']['main']['App']['UpdateOpRunning']();
 }
 
 export function UpdatePlugin(arg1, arg2, arg3) {

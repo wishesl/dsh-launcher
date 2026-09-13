@@ -28,6 +28,13 @@ type settings struct {
 	// 可拖拽栏宽（0 = 未设置，前端回落到默认值 204 / 440）。
 	SidebarWidth int `json:"sidebarWidth"`
 	LogWidth     int `json:"logWidth"`
+
+	// ---- 启动器自更新偏好（见 update.go）----
+	// AutoCheckUpdate 为 nil 表示"用户没表态" → 默认开启启动后自检。
+	AutoCheckUpdate         *bool  `json:"autoCheckUpdate,omitempty"`
+	UpdateIncludePrerelease bool   `json:"updateIncludePrerelease"`
+	UpdateSkippedVersion    string `json:"updateSkippedVersion"`
+	UpdateSourceRepo        string `json:"updateSourceRepo"`
 }
 
 // settingsStore persists launcher preferences next to instances.json.
@@ -124,6 +131,19 @@ func (s *settingsStore) setLayout(layout string) {
 func (s *settingsStore) setUIWidths(sidebar, log int) {
 	s.mu.Lock()
 	s.data.SidebarWidth, s.data.LogWidth = sidebar, log
+	s.saveLocked()
+	s.mu.Unlock()
+}
+
+// setUpdateSettings persists the launcher self-update preferences (see update.go).
+// auto is always written as an explicit value: once the user has an opinion, the
+// "unset → default on" fallback no longer applies.
+func (s *settingsStore) setUpdateSettings(auto, includePrerelease bool, skipped, repo string) {
+	s.mu.Lock()
+	s.data.AutoCheckUpdate = &auto
+	s.data.UpdateIncludePrerelease = includePrerelease
+	s.data.UpdateSkippedVersion = skipped
+	s.data.UpdateSourceRepo = repo
 	s.saveLocked()
 	s.mu.Unlock()
 }

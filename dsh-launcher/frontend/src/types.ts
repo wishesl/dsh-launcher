@@ -277,3 +277,67 @@ export interface CapabilityReport {
   items: CapabilityItem[];
 }
 
+// ---------- 启动器自更新（见 update.go /《版本升级实现方案.md》） ----------
+
+/** 本平台该下载哪个资产（后端按 GOOS/GOARCH 选好，前端只展示）。 */
+export interface UpdateAssetRef {
+  name: string;
+  size: number;
+  url: string;
+}
+
+/**
+ * 启动器的版本结论。三态在后端就分好了：
+ * - `err` 非空 = **没有结论**（断网 / 限流 / 接口变了）→ 中性展示，不是错误；
+ * - `comparable === false` = 本地 dev 构建（未注入版本号），不参与比较；
+ * - `supported === false` = 本平台/本 Release 不能应用内更新 → 给「打开 Release 页」兜底。
+ */
+export interface LauncherRelease {
+  current: string;
+  latest: string;
+  hasUpdate: boolean;
+  comparable: boolean;
+  prerelease: boolean;
+  name: string;
+  notes: string;
+  publishedAt: string;
+  htmlUrl: string;
+  asset: UpdateAssetRef;
+  supported: boolean;
+  supportNote: string;
+  checkedAt: string;
+  cached: boolean;
+  skipped: boolean;
+  err: string;
+}
+
+export interface UpdateSettings {
+  autoCheck: boolean;
+  includePrerelease: boolean;
+  skippedVersion: string;
+  sourceRepo: string;
+}
+
+/** dsh:update-status 的载荷（阶段 + 进度）。 */
+export interface UpdateStatusEvent {
+  state: string; // running | done | failed | cancelled
+  phase: string; // check | download | verify | apply
+  percent: number;
+  bytes: number;
+  total: number;
+  error?: string;
+}
+
+/** 弹窗持有的自更新运行态（对齐 MarketOpState 的形态，提升到 App）。 */
+export interface UpdateOpState {
+  running: boolean;
+  state: string;
+  phase: string;
+  percent: number;
+  bytes: number;
+  total: number;
+  error: string;
+  /** 本次运行已就位（替换完成，退出后生效）的版本；"" = 没有。 */
+  appliedVersion: string;
+}
+

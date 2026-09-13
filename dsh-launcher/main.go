@@ -2,6 +2,8 @@ package main
 
 import (
 	"embed"
+	"os"
+	"time"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -12,6 +14,14 @@ import (
 var assets embed.FS
 
 func main() {
+	// 自更新重启（RestartLauncherNow 拉起的新进程）：必须先等老进程退出，再进 wails.Run ——
+	// Wails 的单实例互斥体是在 wails.Run 里创建的，抢在前面会被当成"第二实例"直接 os.Exit(0)。
+	if pid := updatedFromPID(os.Args); pid > 0 {
+		waitForProcessExit(pid, 30*time.Second)
+	}
+	// 上一次自更新留下的 .old / 半截 .part：启动时清掉（best-effort，删不掉不算错）。
+	cleanupUpdateLeftovers()
+
 	// Create an instance of the app structure
 	app := NewApp()
 

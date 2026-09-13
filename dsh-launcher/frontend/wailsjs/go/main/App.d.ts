@@ -6,15 +6,21 @@ export function AddFavorite(arg1:main.FavoriteDraft):Promise<Array<main.Favorite
 
 export function ApproveBuilds(arg1:Array<string>):Promise<void>;
 
+export function CancelLauncherUpdate():Promise<boolean>;
+
 export function CancelMarketOp():Promise<boolean>;
 
 export function CheckEnvironment():Promise<main.EnvReport>;
+
+export function CheckLauncherUpdate(arg1:boolean):Promise<main.LauncherRelease>;
 
 export function CheckPluginUpdates(arg1:boolean):Promise<main.UpdateCheckResult>;
 
 export function DetectLocalVersion(arg1:string):Promise<string>;
 
 export function DirectoryExists(arg1:string):Promise<boolean>;
+
+export function DownloadLauncherUpdate():Promise<void>;
 
 export function EnsureConfigDir():Promise<void>;
 
@@ -44,6 +50,8 @@ export function GetProxySettings():Promise<main.ProxySettings>;
 
 export function GetUIWidths():Promise<main.UIWidths>;
 
+export function GetUpdateSettings():Promise<main.UpdateSettings>;
+
 export function HideToTray():Promise<void>;
 
 export function ImportShareCode(arg1:string,arg2:Array<string>):Promise<main.ShareImportResult>;
@@ -66,6 +74,8 @@ export function ListInstalledPlugins():Promise<Array<main.InstalledPlugin>>;
 
 export function MarketOpRunning():Promise<boolean>;
 
+export function OpenReleasePage():Promise<void>;
+
 export function ParseShareCode(arg1:string):Promise<main.ShareImportResult>;
 
 export function ProbeServices():Promise<Array<main.ServiceState>>;
@@ -83,6 +93,8 @@ export function RemoveInstance(arg1:string):Promise<Array<main.Instance>>;
 export function ReorderInstances(arg1:Array<string>):Promise<Array<main.Instance>>;
 
 export function RequestClose():Promise<void>;
+
+export function RestartLauncherNow():Promise<void>;
 
 export function RunAutoStartInstances():Promise<Array<string>>;
 
@@ -104,6 +116,8 @@ export function SetProxy(arg1:string):Promise<void>;
 
 export function SetUIWidths(arg1:main.UIWidths):Promise<void>;
 
+export function SetUpdateSettings(arg1:main.UpdateSettings):Promise<void>;
+
 export function SortInstances():Promise<void>;
 
 export function StopInstance(arg1:string):Promise<void>;
@@ -113,5 +127,9 @@ export function TogglePlugin(arg1:string,arg2:boolean):Promise<void>;
 export function UninstallPlugin(arg1:string,arg2:string):Promise<main.MarketOpResult>;
 
 export function UninstallSelfRestartPlugin(arg1:string):Promise<main.MarketOpResult>;
+
+export function UpdateAppliedVersion():Promise<string>;
+
+export function UpdateOpRunning():Promise<boolean>;
 
 export function UpdatePlugin(arg1:string,arg2:string,arg3:boolean):Promise<main.MarketOpResult>;

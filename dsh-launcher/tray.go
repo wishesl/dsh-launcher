@@ -58,6 +58,9 @@ func (a *App) startTray() {
 
 			mShow := systray.AddMenuItem("显示主界面", "Show DSH Launcher")
 			mHide := systray.AddMenuItem("隐藏", "Hide DSH Launcher to tray")
+			// 自更新入口的"稳定二级入口"：mac 布局与内嵌 DSH 视图下顶栏没有版本 pill，
+			// 托盘这一项是那些场景里唯一的检查更新入口（见《版本升级实现方案.md》§6.1）。
+			mUpdate := systray.AddMenuItem("检查更新", "Check for DSH Launcher updates")
 			systray.AddSeparator()
 
 			// Per-instance submenu: one checkbox-style item per instance;
@@ -85,6 +88,11 @@ func (a *App) startTray() {
 						a.showWindow()
 					case <-mHide.ClickedCh:
 						a.hideWindow()
+					case <-mUpdate.ClickedCh:
+						// 只负责把窗口拉到前台并通知前端开弹窗；真正的检查由前端发起
+						// （弹窗里能看到进度与三态结论，托盘不适合承载这些）。
+						a.showWindow()
+						a.emit("dsh:update-open", nil)
 					case <-mQuit.ClickedCh:
 						a.requestQuit()
 					}

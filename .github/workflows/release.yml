@@ -126,6 +126,15 @@ jobs:
           path: dist
           merge-multiple: true
 
+      # 启动器应用内更新（update.go）按 SHA256SUMS 校验下载到的二进制：没有这个资产时
+      # 更新器会拒绝安装（宁可让用户走「打开 Release 页」，也不用没校验的 exe）。
+      # 必须在下载之后、发布之前生成，并且只对 dsh-launcher-* 取哈希（避免把自己算进去）。
+      - name: Generate SHA256SUMS
+        working-directory: dist
+        run: |
+          sha256sum dsh-launcher-* > SHA256SUMS
+          cat SHA256SUMS
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:

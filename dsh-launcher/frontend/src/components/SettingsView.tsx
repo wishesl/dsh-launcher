@@ -7,6 +7,10 @@ interface Props {
   appDataPath: string;
   layout: LayoutMode;
   onSetLayout: (mode: LayoutMode) => Promise<void>;
+  /** 启动器自身版本（顶栏 pill 同源）；显示在「关于与更新」里。 */
+  launcherVersion: string;
+  /** 打开「DSH Launcher 更新」弹窗（mac 布局 / 内嵌视图下 pill 不可见，这里是稳定入口）。 */
+  onOpenUpdate: () => void;
 }
 
 function ToolRow({ tool, checking }: { tool: ToolStatus | undefined; checking: boolean }) {
@@ -31,7 +35,14 @@ function ToolRow({ tool, checking }: { tool: ToolStatus | undefined; checking: b
   );
 }
 
-export default function SettingsView({ showToast, appDataPath, layout, onSetLayout }: Props) {
+export default function SettingsView({
+  showToast,
+  appDataPath,
+  layout,
+  onSetLayout,
+  launcherVersion,
+  onOpenUpdate,
+}: Props) {
   const [env, setEnv] = useState<EnvReport | null>(null);
   const [checking, setChecking] = useState(true);
   const [installing, setInstalling] = useState(false);
@@ -233,6 +244,30 @@ export default function SettingsView({ showToast, appDataPath, layout, onSetLayo
           </button>
         </div>
         <p className="desc">当前：<b className="mono">{layoutLabel(layoutMode)}</b>（保存后立即生效）</p>
+      </div>
+
+      <div className="settings-section">
+        <h3>关于与更新</h3>
+        <p className="desc">
+          当前启动器版本：
+          <b className="mono">
+            {launcherVersion
+              ? /^\d/.test(launcherVersion)
+                ? `v${launcherVersion}`
+                : launcherVersion
+              : '未知'}
+          </b>
+          。更新从 GitHub Releases 获取，下载后会就地替换启动器（退出后下次打开生效）。
+        </p>
+        <div className="row">
+          <button className="btn btn-accent" onClick={onOpenUpdate}>
+            检查更新
+          </button>
+        </div>
+        <p className="desc">
+          顶栏左上角的版本号也可以直接点开同一个弹窗（Mac 布局与内嵌 DSH 视图下没有这个 pill，
+          用这里的按钮；系统托盘菜单里也有「检查更新」）。
+        </p>
       </div>
 
       <div className="settings-section">

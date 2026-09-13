@@ -1,11 +1,14 @@
 import {
   AddFavorite,
   ApproveBuilds,
+  CancelLauncherUpdate,
   CancelMarketOp,
   CheckEnvironment,
+  CheckLauncherUpdate,
   CheckPluginUpdates,
   DetectLocalVersion,
   DirectoryExists,
+  DownloadLauncherUpdate,
   FetchMarketCatalog,
   GenerateShareCode,
   GetAppDataPath,
@@ -19,6 +22,7 @@ import {
   GetUIWidths,
   GetMarketSettings,
   GetProxySettings,
+  GetUpdateSettings,
   HideToTray,
   ImportShareCode,
   InstallPnpm,
@@ -30,6 +34,7 @@ import {
   ListFavorites,
   ListInstalledPlugins,
   MarketOpRunning,
+  OpenReleasePage,
   ParseShareCode,
   ProbeServices,
   QueryRegistry,
@@ -38,6 +43,7 @@ import {
   RemoveInstance,
   ReorderInstances,
   RequestClose,
+  RestartLauncherNow,
   RunAutoStartInstances,
   SaveInstance,
   SelectDirectory,
@@ -47,11 +53,14 @@ import {
   SetLayout,
   SetMarketRegistryURL,
   SetProxy,
+  SetUpdateSettings,
   SetUIWidths,
   StopInstance,
   TogglePlugin,
   UninstallPlugin,
   UninstallSelfRestartPlugin,
+  UpdateAppliedVersion,
+  UpdateOpRunning,
   UpdatePlugin,
 } from '../wailsjs/go/main/App';
 import { EventsOff, EventsOn } from '../wailsjs/runtime/runtime';
@@ -63,6 +72,7 @@ import type {
   FavoritePlugin,
   Instance,
   InstalledPlugin,
+  LauncherRelease,
   LogEvent,
   LayoutMode,
   MarketCatalog,
@@ -78,6 +88,8 @@ import type {
   StatusEvent,
   UIWidths,
   UpdateCheckResult,
+  UpdateSettings,
+  UpdateStatusEvent,
 } from './types';
 
 // Typed wrappers around the Wails-generated bindings, plus event wiring.
@@ -156,6 +168,21 @@ export const api = {
   // 启动器**验证过**的 DSH 版本（只用于推荐：打标签 / 表单提示。能不能用始终由能力探测决定）
   getBestFitVersion: (): Promise<string> => GetBestFitVersion(),
 
+  // ---- 启动器自更新（GitHub Releases；见 update.go 与《版本升级实现方案.md》）----
+  // 只读检查：**永不 reject** —— 失败写在 LauncherRelease.err 里，前端按三态中性渲染。
+  checkLauncherUpdate: (force: boolean): Promise<LauncherRelease> =>
+    CheckLauncherUpdate(force) as any,
+  // 下载 → sha256 校验 → 就地替换运行中的 exe；完成后是"已就位，下次启动生效"。
+  downloadLauncherUpdate: (): Promise<void> => DownloadLauncherUpdate(),
+  cancelLauncherUpdate: (): Promise<boolean> => CancelLauncherUpdate(),
+  // 「立即重启生效」：新进程等旧进程退出后接管（会停掉托管的 DSH 实例，前端负责二次确认）。
+  restartLauncherNow: (): Promise<void> => RestartLauncherNow(),
+  openReleasePage: (): Promise<void> => OpenReleasePage(),
+  updateOpRunning: (): Promise<boolean> => UpdateOpRunning(),
+  updateAppliedVersion: (): Promise<string> => UpdateAppliedVersion(),
+  getUpdateSettings: (): Promise<UpdateSettings> => GetUpdateSettings() as any,
+  setUpdateSettings: (s: UpdateSettings): Promise<void> => SetUpdateSettings(s as any),
+
   // 兼容性探测：这台实例上各项能力"到底能不能用"（本地读取，不发网络请求）
   getCapabilities: (instanceId: string): Promise<CapabilityReport> => GetCapabilities(instanceId),
 
@@ -217,6 +244,27 @@ export const api = {
   },
   offEnvLog(): void {
     EventsOff('dsh:env-log');
+  },
+
+  // ---- 启动器自更新（弹窗内自带完整日志，见 AGENTS.md §0.1 的例外说明）----
+  onUpdateLog(cb: (e: MarketLogEvent) => void): void {
+    EventsOn('dsh:update-log', cb);
+  },
+  offUpdateLog(): void {
+    EventsOff('dsh:update-log');
+  },
+  onUpdateStatus(cb: (e: UpdateStatusEvent) => void): void {
+    EventsOn('dsh:update-status', cb);
+  },
+  offUpdateStatus(): void {
+    EventsOff('dsh:update-status');
+  },
+  /** 托盘「检查更新」：窗口已被拉到前台，前端负责开弹窗并发起检查。 */
+  onUpdateOpen(cb: () => void): void {
+    EventsOn('dsh:update-open', cb);
+  },
+  offUpdateOpen(): void {
+    EventsOff('dsh:update-open');
   },
 };
 

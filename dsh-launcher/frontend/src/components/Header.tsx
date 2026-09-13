@@ -33,6 +33,10 @@ interface Props {
   onCloseRequest: () => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
+  /** 有新版本可用（或已有就位的更新）：版本 pill 变强调色 + 红点。 */
+  updateAvailable: boolean;
+  /** 点版本 pill → 打开「DSH Launcher 更新」弹窗（自更新主入口）。 */
+  onOpenUpdate: () => void;
 }
 
 export default function Header({
@@ -55,6 +59,8 @@ export default function Header({
   onCloseRequest,
   collapsed,
   onToggleCollapse,
+  updateAvailable,
+  onOpenUpdate,
 }: Props) {
   // Ready = the configured port actually serves DSH (service state), NOT the
   // launcher's process status — so an externally-started DSH on the same port
@@ -75,9 +81,19 @@ export default function Header({
           <img className="brand-logo-img" src={dshLogo} alt="DSH Launcher" draggable={false} />
           <h1 className="brand-name">DSH Launcher</h1>
           {launcherVersion && (
-            <span className="brand-ver mono">
+            /* 版本 pill 就是自更新入口：「点版本号看版本/升级」比把它藏进某个菜单更自然。
+               有更新时变强调色 + 红点（这是唯一的"有新版"信号）—— mac 布局与内嵌视图下
+               这块品牌区不渲染，那两种场景走设置页 / 托盘的「检查更新」。 */
+            <button
+              type="button"
+              className={`brand-ver mono ${updateAvailable ? 'brand-ver-update' : ''}`}
+              onClick={onOpenUpdate}
+              title={updateAvailable ? '有新版本可用 —— 点击查看更新' : '点击查看版本与更新'}
+              aria-label="版本与更新"
+            >
               {/^\d/.test(launcherVersion) ? `v${launcherVersion}` : launcherVersion}
-            </span>
+              {updateAvailable && <span className="update-dot" aria-hidden />}
+            </button>
           )}
         </div>
       )}

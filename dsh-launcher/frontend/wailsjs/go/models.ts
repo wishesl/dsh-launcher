@@ -287,6 +287,82 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class UpdateAssetRef {
+	    name: string;
+	    size: number;
+	    url: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateAssetRef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.size = source["size"];
+	        this.url = source["url"];
+	    }
+	}
+	export class LauncherRelease {
+	    current: string;
+	    latest: string;
+	    hasUpdate: boolean;
+	    comparable: boolean;
+	    prerelease: boolean;
+	    name: string;
+	    notes: string;
+	    publishedAt: string;
+	    htmlUrl: string;
+	    asset: UpdateAssetRef;
+	    supported: boolean;
+	    supportNote: string;
+	    checkedAt: string;
+	    cached: boolean;
+	    skipped: boolean;
+	    err: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new LauncherRelease(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.current = source["current"];
+	        this.latest = source["latest"];
+	        this.hasUpdate = source["hasUpdate"];
+	        this.comparable = source["comparable"];
+	        this.prerelease = source["prerelease"];
+	        this.name = source["name"];
+	        this.notes = source["notes"];
+	        this.publishedAt = source["publishedAt"];
+	        this.htmlUrl = source["htmlUrl"];
+	        this.asset = this.convertValues(source["asset"], UpdateAssetRef);
+	        this.supported = source["supported"];
+	        this.supportNote = source["supportNote"];
+	        this.checkedAt = source["checkedAt"];
+	        this.cached = source["cached"];
+	        this.skipped = source["skipped"];
+	        this.err = source["err"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class MarketPlugin {
 	    name: string;
 	    owner: string;
@@ -509,6 +585,7 @@ export namespace main {
 	        this.log = source["log"];
 	    }
 	}
+	
 	export class UpdateCheck {
 	    name: string;
 	    current: string;
@@ -576,6 +653,24 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class UpdateSettings {
+	    autoCheck: boolean;
+	    includePrerelease: boolean;
+	    skippedVersion: string;
+	    sourceRepo: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateSettings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.autoCheck = source["autoCheck"];
+	        this.includePrerelease = source["includePrerelease"];
+	        this.skippedVersion = source["skippedVersion"];
+	        this.sourceRepo = source["sourceRepo"];
+	    }
 	}
 
 }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { api, errMsg } from './api';
 import { BrowserOpenURL, Environment } from '../wailsjs/runtime/runtime';
-import type { CapabilityReport, ExitChoice, Instance, LayoutMode, LogEvent, LogTab, MarketOpState, RegistryInfo, ServiceState } from './types';
+import type { CapabilityReport, ExitChoice, Instance, LauncherRelease, LayoutMode, LogEvent, LogTab, MarketOpState, RegistryInfo, ServiceState, UpdateOpState, UpdateSettings } from './types';
 import { clamp, capsAlert, embedGateReason, maskUrlSecrets } from './util';
 import Header from './components/Header';
 import Sidebar, { type ViewKey } from './components/Sidebar';
@@ -15,9 +15,29 @@ import MaskPluginsDialog from './components/MaskPluginsDialog';
 import ExitDialog from './components/ExitDialog';
 import LogDrawer from './components/LogDrawer';
 import Resizer from './components/Resizer';
+import UpdateDialog from './components/UpdateDialog';
 
 type ModalState = { mode: 'new' } | { mode: 'edit'; instance: Instance } | null;
 type Toast = { msg: string; kind: 'ok' | 'error' } | null;
+
+/** 自更新运行态的初始值（形态对齐 MarketOpState）。 */
+const EMPTY_UPDATE_OP: UpdateOpState = {
+  running: false,
+  state: '',
+  phase: '',
+  percent: 0,
+  bytes: 0,
+  total: 0,
+  error: '',
+  appliedVersion: '',
+};
+
+const EMPTY_UPDATE_SETTINGS: UpdateSettings = {
+  autoCheck: true,
+  includePrerelease: false,
+  skippedVersion: '',
+  sourceRepo: '',
+};
 
 // ---- 三栏可拖拽宽度 ----
 // 两条缝分别控制左栏（菜单）与右栏（运行日志）；值持久化在 settings.json
@@ -135,6 +155,34 @@ export default function App() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
+  // 自更新：读偏好 + 恢复"正在下载 / 已就位"状态（与市场任务的挂载恢复同构）。
+  useEffect(() => {
+    let active = true;
+    api
+      .getUpdateSettings()
+      .then((s) => {
+        if (active) setUpdateSettings(s);
+      })
+      .catch(() => undefined);
+    api
+      .updateOpRunning()
+      .then((running) => {
+        if (active && running) {
+          setUpdateOp((o) => ({ ...o, running: true, state: 'running', phase: 'download' }));
+        }
+      })
+      .catch(() => undefined);
+    api
+      .updateAppliedVersion()
+      .then((v) => {
+        if (active && v) setUpdateOp((o) => ({ ...o, appliedVersion: v }));
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // 用户在设置里切换布局：保存偏好并立即应用（''=自动→按系统）。
   const onSetLayout = useCallback(
     async (mode: LayoutMode) => {
@@ -150,6 +198,14 @@ export default function App() {
   // Plugin-market operation stream (hoisted so the drawer can show it too).
   const [marketLogs, setMarketLogs] = useState<string[]>([]);
   const [marketOp, setMarketOp] = useState<MarketOpState>({ running: false, kind: '', target: '' });
+  // ---- 启动器自更新（点版本 pill / 设置页 / 托盘都开这个弹窗）----
+  // 弹窗自带完整日志是 AGENTS.md §0.1 的唯一显式例外（见《版本升级实现方案.md》§6.3）。
+  const [updateOpen, setUpdateOpen] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<LauncherRelease | null>(null);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateSettings, setUpdateSettings] = useState<UpdateSettings>(EMPTY_UPDATE_SETTINGS);
+  const [updateLogs, setUpdateLogs] = useState<string[]>([]);
+  const [updateOp, setUpdateOp] = useState<UpdateOpState>(EMPTY_UPDATE_OP);
   const [modal, setModal] = useState<ModalState>(null);
   // 实例「屏蔽插件」弹窗：正在选择屏蔽名单的实例。
   const [maskFor, setMaskFor] = useState<Instance | null>(null);
@@ -160,6 +216,9 @@ export default function App() {
 
   const logsRef = useRef<Record<string, LogEvent[]>>({});
   const marketLogsRef = useRef<string[]>([]);
+  const updateLogsRef = useRef<string[]>([]);
+  // 启动后自检只跑一次：改偏好（或 StrictMode 双挂载）不该反复打 GitHub（匿名限流 60/h）。
+  const updateAutoChecked = useRef(false);
   const toastTimer = useRef<number | undefined>(undefined);
   // "本次启动不再提示": remembered exit choice for THIS app run only —
   // deliberately not persisted, the chooser asks again on next launch.
@@ -205,6 +264,101 @@ export default function App() {
   const setMarketRunning = useCallback((running: boolean) => {
     setMarketOp((o) => ({ ...o, running }));
   }, []);
+
+  // ---- 启动器自更新（版本 pill / 设置页 / 托盘 → 同一个弹窗）----
+
+  const clearUpdateLogs = useCallback(() => {
+    updateLogsRef.current = [];
+    setUpdateLogs([]);
+  }, []);
+
+  // 只读检查：后端把失败原因写进 info.err（三态中性渲染），所以这里不需要错误弹窗。
+  const checkUpdate = useCallback(
+    async (force: boolean) => {
+      setUpdateChecking(true);
+      try {
+        setUpdateInfo(await api.checkLauncherUpdate(force));
+      } catch (e) {
+        showToast('检查更新失败: ' + errMsg(e), 'error');
+      } finally {
+        setUpdateChecking(false);
+      }
+    },
+    [showToast]
+  );
+
+  const openUpdate = useCallback(() => {
+    setUpdateOpen(true);
+    void checkUpdate(true);
+  }, [checkUpdate]);
+
+  const closeUpdate = useCallback(() => setUpdateOpen(false), []);
+
+  const startUpdate = useCallback(async () => {
+    // 每轮安装都从干净日志开始：上一次的失败原因别和新一轮混在一起。
+    updateLogsRef.current = [];
+    setUpdateLogs([]);
+    setUpdateOp({ ...EMPTY_UPDATE_OP, running: true, state: 'running', phase: 'check' });
+    try {
+      await api.downloadLauncherUpdate();
+      // 「已就位」的版本号由后端记着（本次运行内），这里主动捞一次 —— 否则要等重启
+      // 才发现弹窗里没有「立即重启生效」按钮。
+      const applied = await api.updateAppliedVersion().catch(() => '');
+      setUpdateOp((o) => ({
+        ...o,
+        running: false,
+        state: 'done',
+        phase: 'apply',
+        percent: 100,
+        appliedVersion: applied || o.appliedVersion,
+      }));
+      showToast('更新已就位 —— 退出启动器后下次打开即生效');
+    } catch (e) {
+      // 失败/取消的正文已经在弹窗日志里（dsh:update-status），这里只收敛状态，不重复弹 toast。
+      const msg = errMsg(e);
+      const cancelled = msg.includes('取消');
+      setUpdateOp((o) => ({
+        ...o,
+        running: false,
+        state: cancelled ? 'cancelled' : 'failed',
+        error: cancelled ? '' : msg,
+      }));
+    }
+  }, [showToast]);
+
+  const cancelUpdate = useCallback(() => {
+    api.cancelLauncherUpdate().catch(() => undefined);
+  }, []);
+
+  const restartLauncher = useCallback(async () => {
+    try {
+      await api.restartLauncherNow();
+    } catch (e) {
+      showToast(errMsg(e), 'error');
+    }
+  }, [showToast]);
+
+  const openReleasePage = useCallback(() => {
+    api.openReleasePage().catch(() => undefined);
+  }, []);
+
+  const saveUpdateSettings = useCallback(
+    async (next: UpdateSettings) => {
+      setUpdateSettings(next);
+      try {
+        await api.setUpdateSettings(next);
+      } catch (e) {
+        showToast('保存更新设置失败: ' + errMsg(e), 'error');
+      }
+    },
+    [showToast]
+  );
+
+  const skipUpdateVersion = useCallback(async () => {
+    if (!updateInfo) return;
+    await saveUpdateSettings({ ...updateSettings, skippedVersion: updateInfo.latest });
+    showToast(`已跳过 v${updateInfo.latest}`);
+  }, [updateInfo, updateSettings, saveUpdateSettings, showToast]);
 
   const refresh = useCallback(async () => {
     try {
@@ -299,6 +453,30 @@ export default function App() {
         setExitAsk(true);
       }
     });
+    // 启动器自更新：完整日志 + 进度状态 + 托盘「检查更新」的开启通知。
+    // 日志只进弹窗（AGENTS.md §0.1 的显式例外，见《版本升级实现方案.md》§6.3）。
+    api.onUpdateLog((e) => {
+      const arr = [...updateLogsRef.current.slice(-400), e.line];
+      updateLogsRef.current = arr;
+      setUpdateLogs(arr);
+    });
+    api.onUpdateStatus((e) => {
+      setUpdateOp((o) => ({
+        ...o,
+        running: e.state === 'running',
+        state: e.state,
+        phase: e.phase,
+        percent: e.percent ?? 0,
+        bytes: e.bytes ?? 0,
+        total: e.total ?? 0,
+        error: e.error ?? '',
+      }));
+    });
+    // 托盘「检查更新」：后端已经把窗口拉到前台，这里开弹窗并重新检查。
+    api.onUpdateOpen(() => {
+      setUpdateOpen(true);
+      void checkUpdate(true);
+    });
     // Auto-start must run only AFTER the listeners above are registered —
     // Wails events emitted before subscription are dropped.
     api.runAutoStartInstances()
@@ -317,8 +495,27 @@ export default function App() {
       api.offMarketLog();
       api.offMarketStatus();
       api.offCloseRequest();
+      api.offUpdateLog();
+      api.offUpdateStatus();
+      api.offUpdateOpen();
     };
-  }, [showToast, openLogs]);
+  }, [showToast, openLogs, checkUpdate]);
+
+  // 启动后延迟 8 秒自检一次（可在弹窗里关掉）。只跑一次：改偏好 / StrictMode 双挂载都不该
+  // 反复打 GitHub（匿名限流 60 次/小时/IP）。检查只读，绝不自动下载。
+  useEffect(() => {
+    if (updateAutoChecked.current) return;
+    updateAutoChecked.current = true;
+    const timer = window.setTimeout(() => {
+      api
+        .getUpdateSettings()
+        .then((s) => {
+          if (s.autoCheck) void checkUpdate(false);
+        })
+        .catch(() => undefined);
+    }, 8000);
+    return () => window.clearTimeout(timer);
+  }, [checkUpdate]);
 
   const start = async (id: string) => {
     setBusyId(id);
@@ -664,6 +861,13 @@ export default function App() {
     });
   }, []);
 
+  // 自更新：pill 的红点语义 = 有新版本，或本次运行已经装好待生效。
+  const updateAvailable = !!updateInfo?.hasUpdate || !!updateOp.appliedVersion;
+  // 「立即重启生效」的代价提示要用真实实例数。
+  const runningInstances = instances.filter(
+    (i) => i.status === 'starting' || i.status === 'running' || i.status === 'ready'
+  ).length;
+
   return (
     <div className={`app ${os === 'mac' ? 'os-mac' : 'os-win'}`}>
       <Header
@@ -686,6 +890,8 @@ export default function App() {
         onCloseRequest={requestClose}
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsed((v) => !v)}
+        updateAvailable={updateAvailable}
+        onOpenUpdate={openUpdate}
       />
 
       <div
@@ -793,6 +999,8 @@ export default function App() {
               appDataPath={appDataPath}
               layout={layoutPref}
               onSetLayout={onSetLayout}
+              launcherVersion={launcherVersion}
+              onOpenUpdate={openUpdate}
             />
           )}
         </div>
@@ -857,6 +1065,25 @@ export default function App() {
       )}
 
       {exitAsk && <ExitDialog onClose={() => setExitAsk(false)} onChoose={chooseExit} />}
+
+      <UpdateDialog
+        open={updateOpen}
+        info={updateInfo}
+        checking={updateChecking}
+        op={updateOp}
+        logs={updateLogs}
+        settings={updateSettings}
+        runningInstances={runningInstances}
+        onClose={closeUpdate}
+        onCheck={() => void checkUpdate(true)}
+        onStart={() => void startUpdate()}
+        onCancel={cancelUpdate}
+        onRestart={() => void restartLauncher()}
+        onOpenRelease={openReleasePage}
+        onSkip={() => void skipUpdateVersion()}
+        onClearLogs={clearUpdateLogs}
+        onSettings={(s) => void saveUpdateSettings(s)}
+      />
 
       {toast && (
         <div className={`toast ${toast.kind === 'error' ? 'toast-error' : ''}`}>{toast.msg}</div>
