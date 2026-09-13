@@ -66,29 +66,36 @@ export default function Header({
     <header className="app-header">
       {/* win/linux 布局：logo 上移顶栏左侧（mac 布局默认隐藏）。
           单行字标：旧版的两行「DSH Launcher / DeepSeek Harness 启动器」在 58px 顶栏里
-          既重复又压秤，这句话降级成整块的 title 提示。 */}
-      <div className="brand header-brand" title="DeepSeek Harness 启动器">
-        <img className="brand-logo-img" src={dshLogo} alt="DSH Launcher" draggable={false} />
-        <h1 className="brand-name">DSH Launcher</h1>
-        {launcherVersion && (
-          <span className="brand-ver mono">
-            {/^\d/.test(launcherVersion) ? `v${launcherVersion}` : launcherVersion}
-          </span>
-        )}
-      </div>
+          既重复又压秤，这句话降级成整块的 title 提示。
+          ⚠️ 内嵌 DSH 视图（embedMode）下品牌块与「收起菜单」都不渲染：那时左栏菜单整块让位给
+          iframe（见 App.tsx 的 !embedMode 分支），收起/展开没有任何可见效果，点了等于空点。
+          顶栏本身仍是 --wails-draggable: drag，去掉这两块只是多出一片可拖拽的空白。 */}
+      {!embedMode && (
+        <div className="brand header-brand" title="DeepSeek Harness 启动器">
+          <img className="brand-logo-img" src={dshLogo} alt="DSH Launcher" draggable={false} />
+          <h1 className="brand-name">DSH Launcher</h1>
+          {launcherVersion && (
+            <span className="brand-ver mono">
+              {/^\d/.test(launcherVersion) ? `v${launcherVersion}` : launcherVersion}
+            </span>
+          )}
+        </div>
+      )}
       <WinControls onCloseRequest={onCloseRequest} />
-      <button
-        className="side-collapse"
-        onClick={onToggleCollapse}
-        title={collapsed ? '展开菜单' : '收起菜单'}
-        aria-label={collapsed ? '展开菜单' : '收起菜单'}
-      >
-        {collapsed ? (
-          <ChevronsRight size={16} strokeWidth={1.75} aria-hidden />
-        ) : (
-          <ChevronsLeft size={16} strokeWidth={1.75} aria-hidden />
-        )}
-      </button>
+      {!embedMode && (
+        <button
+          className="side-collapse"
+          onClick={onToggleCollapse}
+          title={collapsed ? '展开菜单' : '收起菜单'}
+          aria-label={collapsed ? '展开菜单' : '收起菜单'}
+        >
+          {collapsed ? (
+            <ChevronsRight size={16} strokeWidth={1.75} aria-hidden />
+          ) : (
+            <ChevronsLeft size={16} strokeWidth={1.75} aria-hidden />
+          )}
+        </button>
+      )}
 
       <div className="header-right">
         {/* DSH 快捷状态 + 重启 */}
@@ -138,15 +145,19 @@ export default function Header({
         >
           <RotateCw size={16} strokeWidth={1.75} aria-hidden />
         </button>
-        <button
-          className={`btn btn-icon log-toggle-btn ${logsOpen ? 'btn-accent' : 'btn-ghost'}`}
-          onClick={onToggleLogs}
-          title={logsOpen ? '收起右侧运行日志面板' : '打开右侧运行日志面板（实例启动 / 插件安装时自动弹出）'}
-          aria-label={logsOpen ? '收起日志' : '运行日志'}
-        >
-          {logsLive && <span className="live-dot" title="有实例正在启动或有任务运行中" />}
-          <Terminal size={16} strokeWidth={1.75} aria-hidden />
-        </button>
+        {/* 运行日志开关。内嵌态右栏日志整块没渲染（App.tsx 的 LogDrawer 在 !embedMode 分支里），
+            切 logsOpen 不会有任何可见变化 —— 所以内嵌态不渲染这个按钮，只留「刷新 / 退出」。 */}
+        {!embedMode && (
+          <button
+            className={`btn btn-icon log-toggle-btn ${logsOpen ? 'btn-accent' : 'btn-ghost'}`}
+            onClick={onToggleLogs}
+            title={logsOpen ? '收起右侧运行日志面板' : '打开右侧运行日志面板（实例启动 / 插件安装时自动弹出）'}
+            aria-label={logsOpen ? '收起日志' : '运行日志'}
+          >
+            {logsLive && <span className="live-dot" title="有实例正在启动或有任务运行中" />}
+            <Terminal size={16} strokeWidth={1.75} aria-hidden />
+          </button>
+        )}
         {embedMode ? (
           /* 内嵌模式：这一组换成「刷新 / 退出」，下半区不再放工具条 */
           <>
