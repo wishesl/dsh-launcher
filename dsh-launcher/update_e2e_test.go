@@ -34,9 +34,14 @@ func TestUpdateAgainstRealRelease(t *testing.T) {
 	}
 
 	// 装成"上一个版本"，这样线上最新版会被判定为有更新。
-	const currentVersion = "0.5.1"
+	// 用 DSH_UPDATE_E2E_FROM 指定起始版本（默认 0.5.1）—— 每次发新版后拿"上一个已发布版本"
+	// 跑一遍，验证的正是用户从旧版升上来的那条真实路径。
+	currentVersion := os.Getenv("DSH_UPDATE_E2E_FROM")
+	if currentVersion == "" {
+		currentVersion = "0.5.1"
+	}
 	if _, err := parseVersion(currentVersion); err != nil {
-		t.Fatal(err)
+		t.Fatalf("DSH_UPDATE_E2E_FROM 不是合法版本号: %q", currentVersion)
 	}
 
 	tmp := t.TempDir()
