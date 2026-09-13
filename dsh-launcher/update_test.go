@@ -410,3 +410,150 @@ func TestUpdateRefusesBadChecksum(t *testing.T) {
 		t.Errorf("校验失败不该标记已就位, got %q", v)
 	}
 }
+
+// ghStats 记录假 GitHub 上每个通道被打了多少次（用来断言"先取校验和""API 优先""会重试"）。
+type ghStats struct{ apiAsset, browserAsset, apiSums, browserSums int32 }
+
+// fakeGitHubResilience 带 id 的假 Release：同时提供
+//   - api.github.com 风格的资产端点 /repos/o/r/releases/assets/<id>
+//   - github.com 风格的 /dl/<name>
+//
+// 并可以分别让它们失败，用来验证多通道 + 重试 + 先取校验和。
+func fakeGitHubResilience(t *testing.T, payload []byte, failAPIAsset, failBrowserAsset, failAllSums bool) (string, *ghStats) {
+	t.Helper()
+	assetName, ok := updateAssetName(runtime.GOOS, runtime.GOARCH)
+	if !ok {
+		t.Skipf("当前平台 %s/%s 没有 CI 产物，跳过", runtime.GOOS, runtime.GOARCH)
+	}
+	sum := sha256.Sum256(payload)
+	sumHex := hex.EncodeToString(sum[:])
+	st := &ghStats{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/o/r/releases/latest":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"tag_name": "v0.6.0", "name": "v0.6.0", "body": "notes",
+				"published_at": "2026-09-13T05:57:11Z", "html_url": "https://example.test/r",
+				"assets": []map[string]interface{}{
+					{"id": 101, "name": assetName, "size": len(payload), "browser_download_url": "http://" + r.Host + "/dl/" + assetName},
+					{"id": 102, "name": sumsAssetName, "size": 72, "browser_download_url": "http://" + r.Host + "/dl/" + sumsAssetName},
+				},
+			})
+		case r.URL.Path == "/repos/o/r/releases/assets/101":
+			atomic.AddInt32(&st.apiAsset, 1)
+			if failAPIAsset {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			_, _ = w.Write(payload)
+		case r.URL.Path == "/repos/o/r/releases/assets/102":
+			atomic.AddInt32(&st.apiSums, 1)
+			if failAllSums {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			_, _ = w.Write([]byte(sumHex + "  " + assetName + "\n"))
+		case r.URL.Path == "/dl/"+assetName:
+			atomic.AddInt32(&st.browserAsset, 1)
+			if failBrowserAsset {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			_, _ = w.Write(payload)
+		case r.URL.Path == "/dl/"+sumsAssetName:
+			atomic.AddInt32(&st.browserSums, 1)
+			if failAllSums {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			_, _ = w.Write([]byte(sumHex + "  " + assetName + "\n"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL, st
+}
+
+// TestUpdatePrefersAPIEndpoint：API 资产端点可用时就走它（真机实测 github.com 才是那个会超时的）。
+func TestUpdatePrefersAPIEndpoint(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("应用内就地替换目前只在 Windows 实现")
+	}
+	payload := []byte("NEW-BINARY")
+	base, st := fakeGitHubResilience(t, payload, false, false, false)
+	self := filepath.Join(t.TempDir(), "dsh-launcher.exe")
+	if err := os.WriteFile(self, []byte("OLD"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := newUpdateTestApp(t, base, self)
+
+	if err := a.DownloadLauncherUpdate(); err != nil {
+		t.Fatalf("下载安装失败: %v", err)
+	}
+	if got, _ := os.ReadFile(self); !bytes.Equal(got, payload) {
+		t.Fatalf("exe 未被替换: %q", got)
+	}
+	if n := atomic.LoadInt32(&st.apiAsset); n != 1 {
+		t.Errorf("API 端点应被命中 1 次, got %d", n)
+	}
+	if n := atomic.LoadInt32(&st.browserAsset); n != 0 {
+		t.Errorf("API 通时不该去碰 github.com 下载地址, got %d 次", n)
+	}
+}
+
+// TestUpdateFallsBackWhenAPIAssetFails：API 端点挂了（502）→ 每个地址重试 2 次后换浏览器地址，最终成功。
+func TestUpdateFallsBackWhenAPIAssetFails(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("应用内就地替换目前只在 Windows 实现")
+	}
+	payload := []byte("NEW-BINARY-FALLBACK")
+	base, st := fakeGitHubResilience(t, payload, true, false, false)
+	self := filepath.Join(t.TempDir(), "dsh-launcher.exe")
+	if err := os.WriteFile(self, []byte("OLD"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := newUpdateTestApp(t, base, self)
+
+	if err := a.DownloadLauncherUpdate(); err != nil {
+		t.Fatalf("有备用通道时不该失败: %v", err)
+	}
+	if got, _ := os.ReadFile(self); !bytes.Equal(got, payload) {
+		t.Fatalf("exe 未被替换: %q", got)
+	}
+	if n := atomic.LoadInt32(&st.apiAsset); n != 2 {
+		t.Errorf("API 端点应重试 2 次, got %d", n)
+	}
+	if n := atomic.LoadInt32(&st.browserAsset); n != 1 {
+		t.Errorf("应退回浏览器地址 1 次, got %d", n)
+	}
+}
+
+// TestUpdateFailsFastBeforeDownloadingAsset：校验和两条通道都拿不到时，
+// 直接失败在 verify 阶段 —— 不能先把 12 MB 下完再报错（真机踩过这个浪费）。
+func TestUpdateFailsFastBeforeDownloadingAsset(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("应用内就地替换目前只在 Windows 实现")
+	}
+	payload := []byte("NEW-BINARY")
+	base, st := fakeGitHubResilience(t, payload, false, false, true)
+	self := filepath.Join(t.TempDir(), "dsh-launcher.exe")
+	if err := os.WriteFile(self, []byte("OLD"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := newUpdateTestApp(t, base, self)
+
+	if err := a.DownloadLauncherUpdate(); err == nil {
+		t.Fatal("拿不到校验和时必须失败")
+	}
+	if n := atomic.LoadInt32(&st.apiAsset) + atomic.LoadInt32(&st.browserAsset); n != 0 {
+		t.Errorf("校验和拿不到时不该下载资产, got %d 次", n)
+	}
+	if got, _ := os.ReadFile(self); string(got) != "OLD" {
+		t.Errorf("失败时不该动原 exe: %q", got)
+	}
+	// 校验和两条通道都试过（API + 浏览器）
+	if atomic.LoadInt32(&st.apiSums) == 0 || atomic.LoadInt32(&st.browserSums) == 0 {
+		t.Errorf("校验和应把两条通道都试过: api=%d browser=%d", st.apiSums, st.browserSums)
+	}
+}

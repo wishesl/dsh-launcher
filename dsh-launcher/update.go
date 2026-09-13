@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,6 +51,7 @@ const (
 
 // ghAsset / ghRelease 是 GitHub Releases API 的子集（只取我们用的字段）。
 type ghAsset struct {
+	ID   int64  `json:"id"`
 	Name string `json:"name"`
 	Size int64  `json:"size"`
 	URL  string `json:"browser_download_url"`
@@ -79,6 +81,9 @@ type UpdateAssetRef struct {
 	Name string `json:"name"`
 	Size int64  `json:"size"`
 	URL  string `json:"url"`
+	// assetID 是 GitHub 的资产 id：用来拼 api.github.com 的资产下载端点
+	// （真机踩过：github.com 直连会超时/被重置，而 api.github.com 通）。不导出给前端。
+	assetID int64
 }
 
 // LauncherRelease 是启动器**自己**的版本视图（与 DSH 的 RegistryInfo 无关）。
@@ -107,6 +112,7 @@ type LauncherRelease struct {
 	// sumsURL 不暴露给前端（Wails 不序列化非导出字段）：校验和资产的地址，
 	// 只在下一次下载时用，因为"哪个资产是校验和"只有 API 响应知道。
 	sumsURL string
+	sumsID  int64
 }
 
 // UpdateStatus 走 dsh:update-status：弹窗的进度条 + 状态机。
@@ -331,13 +337,30 @@ func (a *App) DownloadLauncherUpdate() error {
 	}
 	part := filepath.Join(dir, rel.Asset.Name+".part")
 	tmp := filepath.Join(dir, rel.Asset.Name)
+	client := a.proxyHTTPClient(updateDownloadTimeout)
 
+	// ---- 先把校验和拿到手（几百字节） ----
+	// 顺序很重要：真机踩过"12 MB 资产下完了、SHA256SUMS 却因 github.com 抖动超时"，
+	// 整包白下、还得从头再来。现在拿不到校验和就直接失败，不浪费用户的流量和时间。
+	a.emitUpdateStatus(UpdateStatus{State: "running", Phase: "verify"})
+	a.updateLog("读取 " + sumsAssetName + " 校验和…")
+	want, err := a.fetchExpectedSumRetry(ctx, client, rel)
+	if err != nil {
+		if ctx.Err() != nil {
+			a.emitUpdateStatus(UpdateStatus{State: "cancelled", Phase: "verify"})
+			a.updateLog("已取消")
+			return fmt.Errorf("已取消")
+		}
+		return a.failUpdate("verify", err.Error()+a.netHint())
+	}
+	a.updateLog("校验和已就绪 " + shortHash(want))
+
+	// ---- 下载 ----
 	a.updateLog("目标资产 " + rel.Asset.Name + "（" + humanSize(rel.Asset.Size) + "）")
 	a.updateLog("下载中 → " + part)
 	a.emitUpdateStatus(UpdateStatus{State: "running", Phase: "download", Total: rel.Asset.Size})
 
-	client := a.proxyHTTPClient(updateDownloadTimeout)
-	got, err := downloadToFile(ctx, client, rel.Asset.URL, part, rel.Asset.Size, func(written, total int64) {
+	got, err := a.downloadAssetRetry(ctx, client, rel, part, func(written, total int64) {
 		pct := 0
 		if total > 0 {
 			pct = int(written * 100 / total)
@@ -353,16 +376,10 @@ func (a *App) DownloadLauncherUpdate() error {
 		}
 		return a.failUpdate("download", err.Error()+a.netHint())
 	}
-	a.updateLog("下载完成 " + humanSize(int64(lenOfFile(part))) + "，sha256 " + shortHash(got))
+	a.updateLog("下载完成 " + humanSize(lenOfFile(part)) + "，sha256 " + shortHash(got))
 
 	// ---- 校验 ----
 	a.emitUpdateStatus(UpdateStatus{State: "running", Phase: "verify", Percent: 100})
-	a.updateLog("读取 " + sumsAssetName + " 校验和…")
-	want, err := fetchExpectedSum(ctx, client, rel.sumsURL, rel.Asset.Name)
-	if err != nil {
-		_ = os.Remove(part)
-		return a.failUpdate("verify", err.Error())
-	}
 	if !strings.EqualFold(want, got) {
 		_ = os.Remove(part)
 		return a.failUpdate("verify", "sha256 校验不匹配（下载可能被截断或被篡改），已丢弃该文件")
@@ -543,10 +560,11 @@ func buildLauncherRelease(rel *ghRelease, current, goos, goarch, skipped string)
 	if name, ok := updateAssetName(goos, goarch); ok {
 		for _, as := range rel.Assets {
 			if as.Name == name {
-				out.Asset = UpdateAssetRef{Name: as.Name, Size: as.Size, URL: as.URL}
+				out.Asset = UpdateAssetRef{Name: as.Name, Size: as.Size, URL: as.URL, assetID: as.ID}
 			}
 			if as.Name == sumsAssetName {
 				out.sumsURL = as.URL
+				out.sumsID = as.ID
 			}
 		}
 	}
@@ -601,6 +619,10 @@ func downloadToFile(ctx context.Context, client *http.Client, url, dest string, 
 		return "", err
 	}
 	req.Header.Set("User-Agent", "dsh-launcher/"+strings.TrimSpace(version))
+	if isAPIAssetURL(url) {
+		// api.github.com 的资产端点必须显式要二进制，否则它只回 JSON 元数据。
+		req.Header.Set("Accept", "application/octet-stream")
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("下载失败：%w", err)
@@ -639,26 +661,134 @@ func downloadToFile(ctx context.Context, client *http.Client, url, dest string, 
 
 // fetchExpectedSum 取 SHA256SUMS 里对应资产的哈希。缺失即报错（没有校验就不装）。
 func fetchExpectedSum(ctx context.Context, client *http.Client, url, assetName string) (string, error) {
+	if strings.TrimSpace(url) == "" {
+		return "", fmt.Errorf("Release 里没有 %s 资产", sumsAssetName)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("User-Agent", "dsh-launcher/"+strings.TrimSpace(version))
+	if isAPIAssetURL(url) {
+		req.Header.Set("Accept", "application/octet-stream")
+	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("无法获取 %s：%w", sumsAssetName, err)
+		return "", fmt.Errorf("请求失败：%w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("无法获取 %s：HTTP %d", sumsAssetName, resp.StatusCode)
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return "", fmt.Errorf("读取 %s 失败：%w", sumsAssetName, err)
+		return "", fmt.Errorf("读取失败：%w", err)
 	}
 	sum := parseSums(string(body), assetName)
 	if sum == "" {
 		return "", fmt.Errorf("%s 里没有 %s 的哈希，无法校验完整性", sumsAssetName, assetName)
+	}
+	return sum, nil
+}
+
+// ---------------------------------------------------------------------------
+// 下载通道：多地址 + 重试
+//
+// 真机实测（国内直连）：api.github.com 稳定可达，而 github.com 的 releases/download
+// 会间歇性超时/被重置，同一个 Release 里一个资产成功、下一个就失败。所以：
+//   - 首选 api.github.com 的资产端点（它会 302 到同一个 CDN），失败再退回浏览器下载地址；
+//   - 每个地址各重试若干次，把过程写进弹窗日志，用户能看到"换地址/重试"而不是干等。
+// ---------------------------------------------------------------------------
+
+const updateAttemptsPerURL = 2
+
+// isAPIAssetURL 判断是不是 api.github.com 的资产端点。
+func isAPIAssetURL(u string) bool {
+	return strings.Contains(u, "/releases/assets/")
+}
+
+// assetAPIURL 由资产 id 拼出 API 下载端点（GitHub 会 302 到 CDN）。
+func (a *App) assetAPIURL(id int64) string {
+	if id <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s/repos/%s/releases/assets/%d", updateAPIBase, a.updateRepo(), id)
+}
+
+// hostsOf 给日志用：只显示主机名，别把长 URL 塞进弹窗。
+func hostOf(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return raw
+	}
+	return u.Host
+}
+
+// withCandidates 依次尝试候选地址，每个地址最多 attempts 次；返回最后一次的错误。
+func withCandidates(ctx context.Context, urls []string, attempts int, logf func(string), fn func(url string) error) error {
+	var lastErr error
+	tried := 0
+	for i, u := range urls {
+		if strings.TrimSpace(u) == "" {
+			continue
+		}
+		tried++
+		for attempt := 1; attempt <= attempts; attempt++ {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			err := fn(u)
+			if err == nil {
+				return nil
+			}
+			lastErr = err
+			if attempt < attempts {
+				logf(fmt.Sprintf("下载通道 %s 第 %d 次失败，重试…", hostOf(u), attempt))
+				time.Sleep(time.Duration(attempt) * 700 * time.Millisecond)
+			}
+		}
+		if i+1 < len(urls) {
+			logf("换备用通道：" + hostOf(urls[i+1]))
+		}
+	}
+	if tried == 0 {
+		return fmt.Errorf("没有可用的下载地址")
+	}
+	return lastErr
+}
+
+// downloadAssetRetry 下载资产：API 端点优先 → 浏览器地址兜底，各自重试。
+func (a *App) downloadAssetRetry(ctx context.Context, client *http.Client, rel LauncherRelease, dest string, progress func(int64, int64)) (string, error) {
+	urls := []string{a.assetAPIURL(rel.Asset.assetID), rel.Asset.URL}
+	var hash string
+	err := withCandidates(ctx, urls, updateAttemptsPerURL, a.updateLog, func(u string) error {
+		sum, err := downloadToFile(ctx, client, u, dest, rel.Asset.Size, progress)
+		if err != nil {
+			return err
+		}
+		hash = sum
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return hash, nil
+}
+
+// fetchExpectedSumRetry 取校验和：同样多通道 + 重试（它只有几百字节，先取能省下一次白下载）。
+func (a *App) fetchExpectedSumRetry(ctx context.Context, client *http.Client, rel LauncherRelease) (string, error) {
+	urls := []string{a.assetAPIURL(rel.sumsID), rel.sumsURL}
+	var sum string
+	err := withCandidates(ctx, urls, updateAttemptsPerURL, a.updateLog, func(u string) error {
+		s, err := fetchExpectedSum(ctx, client, u, rel.Asset.Name)
+		if err != nil {
+			return err
+		}
+		sum = s
+		return nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("无法获取 %s：%w", sumsAssetName, err)
 	}
 	return sum, nil
 }
