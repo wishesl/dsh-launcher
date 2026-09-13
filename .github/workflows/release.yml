@@ -97,7 +97,10 @@ jobs:
         shell: bash
         run: |
           cd dsh-launcher/build/bin
-          zip -r -q ../../../${{ matrix.artifact }} dsh-launcher.app
+          # 用 ditto 而不是 zip：.app 里有符号链接（Frameworks 的 Versions/Current 之类），
+          # `zip -r` 会把链接展开成实体文件、权限位也可能丢；启动器的应用内更新要解包这个包，
+          # ditto 是 macOS 上打 .app 的标准做法（保留符号链接 / 权限位 / 资源分叉）。
+          ditto -c -k --sequesterRsrc --keepParent dsh-launcher.app ../../../${{ matrix.artifact }}
 
       - name: Package Linux binary
         if: runner.os == 'Linux'

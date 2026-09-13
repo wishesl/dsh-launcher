@@ -391,17 +391,35 @@ func (a *App) DownloadLauncherUpdate() error {
 		return a.failUpdate("verify", "无法保存安装包："+err.Error())
 	}
 
-	// ---- 替换 ----
+	// ---- 解包（macOS 的 .app 包 / Linux 的 tar.gz 里的二进制）----
 	a.emitUpdateStatus(UpdateStatus{State: "running", Phase: "apply", Percent: 100})
+	stageDir := filepath.Join(dir, "staged-"+rel.Latest)
+	_ = os.RemoveAll(stageDir)
+	if err := os.MkdirAll(stageDir, 0o755); err != nil {
+		return a.failUpdate("apply", "无法创建解包目录："+err.Error())
+	}
+	payload, err := stageUpdatePayload(tmp, stageDir, runtime.GOOS)
+	if err != nil {
+		_ = os.RemoveAll(stageDir)
+		return a.failUpdate("apply", err.Error())
+	}
+	if payload != tmp {
+		a.updateLog("已解包 → " + filepath.Base(payload))
+	}
+
+	// ---- 替换 ----
 	self, err := updateSelfPath()
 	if err != nil {
+		_ = os.RemoveAll(stageDir)
 		return a.failUpdate("apply", "无法定位启动器自身："+err.Error())
 	}
 	a.updateLog("就地替换 " + self)
-	if err := applyUpdateExecutable(self, tmp); err != nil {
+	if err := applyUpdate(self, payload, runtime.GOOS); err != nil {
+		_ = os.RemoveAll(stageDir)
 		return a.failUpdate("apply", err.Error())
 	}
-	_ = os.Remove(tmp) // 装完就删安装包；删不掉（被占用）也无所谓，下次启动会清
+	_ = os.Remove(tmp)         // 装完就删安装包；删不掉（被占用）也无所谓，下次启动会清
+	_ = os.RemoveAll(stageDir) // 解包目录同理
 
 	updateApplied.Store(true)
 	appliedVersion.Store(rel.Latest)
@@ -599,12 +617,18 @@ func updateAssetName(goos, goarch string) (string, bool) {
 	return "", false
 }
 
-// updateAppliable 报告本平台能否"就地替换"（M2 只做 Windows；其它平台走下载页）。
+// updateAppliable 报告本平台能否应用内更新（M4 起三平台都支持）：
+//   - windows：裸 exe —— 重命名运行中的文件后把新的写回原路径
+//   - linux  ：tar.gz 里的裸二进制 —— 同一套（Linux 直接覆盖运行中的可执行文件会 ETXTBSY）
+//   - darwin ：zip 里的 .app 包 —— 整包重命名替换（沿用用户原来的包名）
+//
+// 其它 GOOS（CI 没有对应产物）一律 false，走「打开 Release 页」。
 func updateAppliable(goos string) (bool, string) {
-	if goos == "windows" {
+	switch goos {
+	case "windows", "darwin", "linux":
 		return true, ""
 	}
-	return false, "当前平台暂不支持应用内更新，请用「打开 Release 页」手动下载"
+	return false, "当前平台（" + goos + "）没有官方产物，请用「打开 Release 页」手动下载"
 }
 
 // ---------------------------------------------------------------------------
@@ -869,12 +893,16 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
-// cleanupUpdateLeftovers 在启动时清理上一次自更新留下的 .old 与半截 .part。
+// cleanupUpdateLeftovers 在启动时清理上一次自更新留下的残留：
+// exe 旁边的 `.old`（Windows/Linux 是文件，macOS 是整个 .app 包目录）、
+// 下载目录里的 `.part` / `.old` / `staged-*`。
 // 只做 best-effort：删不掉不是错误（老进程可能还没退干净）。
 func cleanupUpdateLeftovers() {
-	// exe 旁边的 .old：上一个进程退出后这里才有权删。
 	if self, err := os.Executable(); err == nil {
-		_ = os.Remove(self + ".old")
+		_ = os.RemoveAll(self + ".old")
+		if bundle := appBundleRoot(self); bundle != "" {
+			_ = os.RemoveAll(bundle + ".old") // macOS：整包替换留下的旧包
+		}
 	}
 	// 下载缓存目录在配置目录下（可能与 exe 不同盘），单独扫一遍。
 	if dir, err := configDirPath(); err == nil {
@@ -884,12 +912,12 @@ func cleanupUpdateLeftovers() {
 			return
 		}
 		for _, e := range entries {
-			if e.IsDir() {
+			name := e.Name()
+			if !strings.HasSuffix(name, ".part") && !strings.HasSuffix(name, ".old") && !strings.HasPrefix(name, "staged-") {
 				continue
 			}
-			if strings.HasSuffix(e.Name(), ".part") || strings.HasSuffix(e.Name(), ".old") {
-				_ = os.Remove(filepath.Join(upd, e.Name()))
-			}
+			// RemoveAll 对文件和目录都成立（解包目录必须递归删）。
+			_ = os.RemoveAll(filepath.Join(upd, name))
 		}
 	}
 }

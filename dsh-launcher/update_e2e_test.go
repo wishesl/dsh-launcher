@@ -5,12 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 )
@@ -29,9 +29,6 @@ func TestUpdateAgainstRealRelease(t *testing.T) {
 	if os.Getenv("DSH_UPDATE_E2E") == "" {
 		t.Skip("默认跳过真机端到端；设 DSH_UPDATE_E2E=1 显式开启")
 	}
-	if runtime.GOOS != "windows" {
-		t.Skip("应用内就地替换目前只在 Windows 实现")
-	}
 
 	// 装成"上一个版本"，这样线上最新版会被判定为有更新。
 	// 用 DSH_UPDATE_E2E_FROM 指定起始版本（默认 0.5.1）—— 每次发新版后拿"上一个已发布版本"
@@ -45,10 +42,8 @@ func TestUpdateAgainstRealRelease(t *testing.T) {
 	}
 
 	tmp := t.TempDir()
-	self := filepath.Join(tmp, "dsh-launcher.exe")
-	if err := os.WriteFile(self, []byte("OLD-LAUNCHER-BINARY"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	// 假启动器按当前平台的真实安装形态造：Windows/Linux 是裸文件，macOS 是 .app 包。
+	self := selfPathForTest(t, tmp)
 
 	oldVersion := version
 	oldSelf := updateSelfPath
@@ -95,26 +90,74 @@ func TestUpdateAgainstRealRelease(t *testing.T) {
 
 	got, err := os.ReadFile(self)
 	if err != nil {
-		t.Fatalf("替换后读不到 exe: %v", err)
+		t.Fatalf("替换后读不到启动器本体: %v", err)
 	}
-	if bytes.Equal(got, []byte("OLD-LAUNCHER-BINARY")) {
-		t.Fatal("exe 没有被替换")
+	if bytes.Equal(got, []byte(oldSelfBody)) {
+		t.Fatal("启动器没有被替换")
 	}
-	if int64(len(got)) != rel.Asset.Size {
-		t.Fatalf("替换后的 exe 大小 %d 与 Release 资产 %d 不一致", len(got), rel.Asset.Size)
+	if len(got) == 0 {
+		t.Fatal("替换后的启动器是空的")
 	}
-	// 独立复算一遍哈希：确认真的是 Release 上那个文件（而不是"下到一半也算成功"）。
-	// 复核用自己的 HTTP 客户端（同样吃代理）：不复用被测代码的下载路径。
+
+	// 独立核对：不复用被测代码的下载/解包路径，用自己的 HTTP 客户端把**资产本体**下下来算哈希。
 	client := e2eHTTPClient()
-	sum := sha256.Sum256(got)
-	if err := verifyAgainstRealSums(t, client, rel.Asset.Name, hex.EncodeToString(sum[:])); err != nil {
-		t.Fatalf("独立校验失败: %v", err)
+	kind := updatePayloadKind(rel.Asset.Name)
+	var checked int
+	if kind == "raw" {
+		// Windows：落地的东西就是资产本体，直接对替换后的文件算哈希。
+		sum := sha256.Sum256(got)
+		if err := verifyAgainstRealSums(t, client, rel.Asset.Name, hex.EncodeToString(sum[:])); err != nil {
+			t.Fatalf("独立校验失败: %v", err)
+		}
+		if int64(len(got)) != rel.Asset.Size {
+			t.Fatalf("替换后的文件大小 %d 与 Release 资产 %d 不一致", len(got), rel.Asset.Size)
+		}
+		checked = len(got)
+		t.Logf("✅ 真机链路通过：%s → %s（裸二进制），替换后 %d 字节，sha256 %s…",
+			rel.Current, rel.Latest, len(got), hex.EncodeToString(sum[:])[:12])
+	} else {
+		// Linux(.tar.gz) / macOS(.zip)：核对**压缩包**的哈希（解包正确性由单测覆盖），
+		// 并确认落地出来的内容非空。
+		archiveSum, n, err := downloadAndHash(t, client, rel.Asset.URL)
+		if err != nil {
+			t.Fatalf("独立下载资产失败: %v", err)
+		}
+		if n != rel.Asset.Size {
+			t.Fatalf("独立下载大小 %d 与 Release 声明 %d 不一致", n, rel.Asset.Size)
+		}
+		if err := verifyAgainstRealSums(t, client, rel.Asset.Name, archiveSum); err != nil {
+			t.Fatalf("独立校验失败: %v", err)
+		}
+		if int64(len(got)) == rel.Asset.Size {
+			t.Logf("提示：解包后的本体大小恰好等于压缩包大小（%d），属巧合", len(got))
+		}
+		checked = len(got)
+		t.Logf("✅ 真机链路通过：%s → %s（%s），压缩包 sha256 %s…，解包后 %d 字节",
+			rel.Current, rel.Latest, kind, archiveSum[:12], len(got))
 	}
 	if v := a.UpdateAppliedVersion(); v != rel.Latest {
 		t.Errorf("已就位版本 = %q, want %q", v, rel.Latest)
 	}
-	t.Logf("✅ 真机链路通过：%s → %s，替换后 %d 字节，sha256 %s…",
-		rel.Current, rel.Latest, len(got), hex.EncodeToString(sum[:])[:12])
+	_ = checked
+}
+
+// downloadAndHash 用自己的客户端流式下载并算 sha256（不落盘、不复用产品代码的下载器）。
+func downloadAndHash(t *testing.T, client *http.Client, url string) (string, int64, error) {
+	t.Helper()
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", 0, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	h := sha256.New()
+	n, err := io.Copy(h, resp.Body)
+	if err != nil {
+		return "", 0, err
+	}
+	return hex.EncodeToString(h.Sum(nil)), n, nil
 }
 
 // e2eHTTPClient 是复核用的客户端：同样走 DSH_UPDATE_E2E_PROXY（受限网络下必须如此）。

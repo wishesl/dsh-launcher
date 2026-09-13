@@ -1,7 +1,10 @@
 package main
 
 import (
+	"archive/tar"
+	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -39,18 +42,30 @@ func TestUpdateAssetName(t *testing.T) {
 	}
 }
 
-func TestBuildLauncherReleaseHasUpdate(t *testing.T) {
-	rel := &ghRelease{
+// fakeReleaseWithPlatformAsset 造一个"本平台资产齐备"的假 Release。
+// 资产名必须用 updateAssetName 推出来 —— 早先硬编码 windows 资产名，
+// 在 Linux 上跑就整条用例失真（Windows 上恰好一直看不出问题）。
+func fakeReleaseWithPlatformAsset(t *testing.T) *ghRelease {
+	t.Helper()
+	name, ok := updateAssetName(runtime.GOOS, runtime.GOARCH)
+	if !ok {
+		t.Skipf("当前平台 %s/%s 没有 CI 产物，跳过", runtime.GOOS, runtime.GOARCH)
+	}
+	return &ghRelease{
 		TagName:     "v0.6.0",
 		Name:        "v0.6.0",
 		Body:        "  本轮变化：…  ",
 		PublishedAt: "2026-09-13T05:57:11Z",
 		HTMLURL:     "https://github.com/wishesl/dsh-launcher/releases/tag/v0.6.0",
 		Assets: []ghAsset{
-			{Name: "dsh-launcher-windows-amd64.exe", Size: 100, URL: "https://example.test/a.exe"},
+			{Name: name, Size: 100, URL: "https://example.test/asset"},
 			{Name: sumsAssetName, Size: 64, URL: "https://example.test/SHA256SUMS"},
 		},
 	}
+}
+
+func TestBuildLauncherReleaseHasUpdate(t *testing.T) {
+	rel := fakeReleaseWithPlatformAsset(t)
 	out := buildLauncherRelease(rel, "0.5.1", runtime.GOOS, runtime.GOARCH, "")
 	if !out.Comparable || !out.HasUpdate {
 		t.Fatalf("expected comparable+hasUpdate, got %+v", out)
@@ -61,12 +76,11 @@ func TestBuildLauncherReleaseHasUpdate(t *testing.T) {
 	if out.Notes != "本轮变化：…" {
 		t.Errorf("Notes 应去掉首尾空白, got %q", out.Notes)
 	}
-	// Windows 上资产齐备 → 可应用内更新；其它平台按 updateAppliable 的结论。
-	wantSupported := runtime.GOOS == "windows"
-	if out.Supported != wantSupported {
-		t.Errorf("Supported = %v, want %v (%s/%s)", out.Supported, wantSupported, runtime.GOOS, runtime.GOARCH)
+	// Windows / macOS / Linux 都支持应用内更新（M4）；资产齐备时就必须判定为可升级。
+	if !out.Supported {
+		t.Errorf("资产齐备时应支持应用内更新: %s", out.SupportNote)
 	}
-	if out.Supported && out.Asset.Name == "" {
+	if out.Asset.Name == "" {
 		t.Error("Supported 为真时必须有本平台资产")
 	}
 	if out.sumsURL == "" {
@@ -75,15 +89,7 @@ func TestBuildLauncherReleaseHasUpdate(t *testing.T) {
 }
 
 func TestBuildLauncherReleaseThreeStates(t *testing.T) {
-	base := func() *ghRelease {
-		return &ghRelease{
-			TagName: "v0.6.0",
-			Assets: []ghAsset{
-				{Name: "dsh-launcher-windows-amd64.exe", Size: 100, URL: "https://example.test/a.exe"},
-				{Name: sumsAssetName, Size: 64, URL: "https://example.test/SHA256SUMS"},
-			},
-		}
-	}
+	base := func() *ghRelease { return fakeReleaseWithPlatformAsset(t) }
 
 	// ① dev 构建：不参与比较（但也别谎报"有更新"）
 	dev := buildLauncherRelease(base(), "dev", runtime.GOOS, runtime.GOARCH, "")
@@ -118,13 +124,17 @@ func TestBuildLauncherReleaseThreeStates(t *testing.T) {
 	}
 }
 
-func TestUpdateAppliableOnlyWindows(t *testing.T) {
-	if ok, _ := updateAppliable("windows"); !ok {
-		t.Error("windows 应支持就地替换")
+func TestUpdateAppliable(t *testing.T) {
+	// M4 起三平台都能应用内更新：Windows 换 exe、Linux 换裸二进制、macOS 换整个 .app 包。
+	for _, goos := range []string{"windows", "darwin", "linux"} {
+		if ok, note := updateAppliable(goos); !ok || note != "" {
+			t.Errorf("%s 应支持应用内更新（note=%q）", goos, note)
+		}
 	}
-	for _, goos := range []string{"darwin", "linux"} {
+	// CI 没有产物的平台一律不支持，并且必须给出原因（走「打开 Release 页」）。
+	for _, goos := range []string{"freebsd", "openbsd", "plan9"} {
 		if ok, note := updateAppliable(goos); ok || note == "" {
-			t.Errorf("%s 目前不支持应用内更新，且必须给出原因", goos)
+			t.Errorf("%s 没有官方产物，应不支持且给出原因", goos)
 		}
 	}
 }
@@ -276,7 +286,10 @@ func fakeGitHub(t *testing.T, payload []byte, tamper bool) (base string, downloa
 	if !ok {
 		t.Skipf("当前平台 %s/%s 没有 CI 产物，跳过", runtime.GOOS, runtime.GOARCH)
 	}
-	sum := sha256.Sum256(payload)
+	// 校验和算的是**实际提供下载的字节**（归档形态下就是压缩包本身）——
+	// 拿未打包的 payload 去算，在 Windows（裸 exe）上恰好对，Linux/macOS 上必错。
+	blob := platformAssetBlob(t, assetName, payload)
+	sum := sha256.Sum256(blob)
 	sumHex := hex.EncodeToString(sum[:])
 	if tamper {
 		sumHex = strings.Repeat("0", 64)
@@ -292,13 +305,13 @@ func fakeGitHub(t *testing.T, payload []byte, tamper bool) (base string, downloa
 				"published_at": "2026-09-13T05:57:11Z",
 				"html_url":     "https://example.test/releases/tag/v0.6.0",
 				"assets": []map[string]interface{}{
-					{"name": assetName, "size": len(payload), "browser_download_url": "http://" + r.Host + "/dl/" + assetName},
+					{"name": assetName, "size": len(blob), "browser_download_url": "http://" + r.Host + "/dl/" + assetName},
 					{"name": sumsAssetName, "size": 72, "browser_download_url": "http://" + r.Host + "/dl/" + sumsAssetName},
 				},
 			})
 		case "/dl/" + assetName:
 			atomic.AddInt32(&hits, 1)
-			_, _ = w.Write(payload)
+			_, _ = w.Write(blob)
 		case "/dl/" + sumsAssetName:
 			_, _ = w.Write([]byte(sumHex + "  " + assetName + "\n"))
 		default:
@@ -307,6 +320,74 @@ func fakeGitHub(t *testing.T, payload []byte, tamper bool) (base string, downloa
 	}))
 	t.Cleanup(srv.Close)
 	return srv.URL, &hits
+}
+
+// platformAssetBlob 把"新版二进制"打成 Release 里的真实形态（命名与 release.yml 一致）：
+//   - windows：裸 exe
+//   - linux  ：tar.gz（成员名 dsh-launcher）
+//   - darwin ：zip（dsh-launcher.app/Contents/MacOS/dsh-launcher）
+//
+// 这样同一套集成测试在三个平台上都跑的是"真实形态"，而不是只测 Windows 那条路。
+func platformAssetBlob(t *testing.T, assetName string, payload []byte) []byte {
+	t.Helper()
+	switch updatePayloadKind(assetName) {
+	case "targz":
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		tw := tar.NewWriter(gz)
+		if err := tw.WriteHeader(&tar.Header{Name: "dsh-launcher", Mode: 0o755, Size: int64(len(payload)), Typeflag: tar.TypeReg}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(payload); err != nil {
+			t.Fatal(err)
+		}
+		_ = tw.Close()
+		_ = gz.Close()
+		return buf.Bytes()
+	case "zip":
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		hdr := &zip.FileHeader{Name: "dsh-launcher.app/Contents/MacOS/dsh-launcher", Method: zip.Deflate}
+		hdr.SetMode(0o755)
+		w, err := zw.CreateHeader(hdr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(payload); err != nil {
+			t.Fatal(err)
+		}
+		if err := zw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return buf.Bytes()
+	default:
+		return payload
+	}
+}
+
+// oldSelfBody 是假启动器的初始内容：断言"失败时原样不动 / 成功后变成新版"时用它。
+const oldSelfBody = "OLD-LAUNCHER-BINARY"
+
+// selfPathForTest 造一个"当前安装形态"的假启动器（macOS 造出 .app 包结构），
+// 返回可执行文件路径；内容先写成 OLD，供"替换后应为新版"的断言用。
+func selfPathForTest(t *testing.T, root string) string {
+	t.Helper()
+	var exe string
+	switch runtime.GOOS {
+	case "darwin":
+		exe = filepath.Join(root, "DSH Launcher.app", "Contents", "MacOS", "dsh-launcher")
+	case "windows":
+		exe = filepath.Join(root, "dsh-launcher.exe")
+	default:
+		exe = filepath.Join(root, "dsh-launcher")
+	}
+	if err := os.MkdirAll(filepath.Dir(exe), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(exe, []byte(oldSelfBody), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return exe
 }
 
 // newUpdateTestApp 造一个"配置目录在临时目录里"的 App，并把包级变量临时改掉：
@@ -338,16 +419,10 @@ func newUpdateTestApp(t *testing.T, apiBase, self string) *App {
 // TestUpdateFullFlow 跑完整链路：检查 → 下载 → sha256 校验 → 就地替换 → "已就位"。
 // 这是 M2 的核心验收（真机上再跑一次，见方案 §7）。
 func TestUpdateFullFlow(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("应用内就地替换目前只在 Windows 实现（M4 才做跨平台）")
-	}
 	payload := []byte("NEW-LAUNCHER-BINARY-PAYLOAD")
 	base, downloads := fakeGitHub(t, payload, false)
 
-	self := filepath.Join(t.TempDir(), "dsh-launcher.exe")
-	if err := os.WriteFile(self, []byte("OLD-BINARY"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	self := selfPathForTest(t, t.TempDir())
 	a := newUpdateTestApp(t, base, self)
 
 	rel := a.CheckLauncherUpdate(true)
@@ -387,23 +462,17 @@ func TestUpdateFullFlow(t *testing.T) {
 
 // TestUpdateRefusesBadChecksum 校验和不对时必须拒绝安装，并且**不动**原 exe。
 func TestUpdateRefusesBadChecksum(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("应用内就地替换目前只在 Windows 实现")
-	}
 	payload := []byte("TAMPERED-PAYLOAD")
 	base, _ := fakeGitHub(t, payload, true)
 
-	self := filepath.Join(t.TempDir(), "dsh-launcher.exe")
-	if err := os.WriteFile(self, []byte("OLD-BINARY"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	self := selfPathForTest(t, t.TempDir())
 	a := newUpdateTestApp(t, base, self)
 
 	if err := a.DownloadLauncherUpdate(); err == nil {
 		t.Fatal("校验和不匹配时必须报错")
 	}
 	got, err := os.ReadFile(self)
-	if err != nil || string(got) != "OLD-BINARY" {
+	if err != nil || string(got) != oldSelfBody {
 		t.Fatalf("校验失败时不该动原 exe, got %q err=%v", got, err)
 	}
 	if v := a.UpdateAppliedVersion(); v != "" {
@@ -425,7 +494,8 @@ func fakeGitHubResilience(t *testing.T, payload []byte, failAPIAsset, failBrowse
 	if !ok {
 		t.Skipf("当前平台 %s/%s 没有 CI 产物，跳过", runtime.GOOS, runtime.GOARCH)
 	}
-	sum := sha256.Sum256(payload)
+	blob := platformAssetBlob(t, assetName, payload)
+	sum := sha256.Sum256(blob)
 	sumHex := hex.EncodeToString(sum[:])
 	st := &ghStats{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -435,7 +505,7 @@ func fakeGitHubResilience(t *testing.T, payload []byte, failAPIAsset, failBrowse
 				"tag_name": "v0.6.0", "name": "v0.6.0", "body": "notes",
 				"published_at": "2026-09-13T05:57:11Z", "html_url": "https://example.test/r",
 				"assets": []map[string]interface{}{
-					{"id": 101, "name": assetName, "size": len(payload), "browser_download_url": "http://" + r.Host + "/dl/" + assetName},
+					{"id": 101, "name": assetName, "size": len(blob), "browser_download_url": "http://" + r.Host + "/dl/" + assetName},
 					{"id": 102, "name": sumsAssetName, "size": 72, "browser_download_url": "http://" + r.Host + "/dl/" + sumsAssetName},
 				},
 			})
@@ -445,7 +515,7 @@ func fakeGitHubResilience(t *testing.T, payload []byte, failAPIAsset, failBrowse
 				w.WriteHeader(http.StatusBadGateway)
 				return
 			}
-			_, _ = w.Write(payload)
+			_, _ = w.Write(blob)
 		case r.URL.Path == "/repos/o/r/releases/assets/102":
 			atomic.AddInt32(&st.apiSums, 1)
 			if failAllSums {
@@ -459,7 +529,7 @@ func fakeGitHubResilience(t *testing.T, payload []byte, failAPIAsset, failBrowse
 				w.WriteHeader(http.StatusBadGateway)
 				return
 			}
-			_, _ = w.Write(payload)
+			_, _ = w.Write(blob)
 		case r.URL.Path == "/dl/"+sumsAssetName:
 			atomic.AddInt32(&st.browserSums, 1)
 			if failAllSums {
@@ -477,15 +547,9 @@ func fakeGitHubResilience(t *testing.T, payload []byte, failAPIAsset, failBrowse
 
 // TestUpdatePrefersAPIEndpoint：API 资产端点可用时就走它（真机实测 github.com 才是那个会超时的）。
 func TestUpdatePrefersAPIEndpoint(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("应用内就地替换目前只在 Windows 实现")
-	}
 	payload := []byte("NEW-BINARY")
 	base, st := fakeGitHubResilience(t, payload, false, false, false)
-	self := filepath.Join(t.TempDir(), "dsh-launcher.exe")
-	if err := os.WriteFile(self, []byte("OLD"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	self := selfPathForTest(t, t.TempDir())
 	a := newUpdateTestApp(t, base, self)
 
 	if err := a.DownloadLauncherUpdate(); err != nil {
@@ -504,15 +568,9 @@ func TestUpdatePrefersAPIEndpoint(t *testing.T) {
 
 // TestUpdateFallsBackWhenAPIAssetFails：API 端点挂了（502）→ 每个地址重试 2 次后换浏览器地址，最终成功。
 func TestUpdateFallsBackWhenAPIAssetFails(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("应用内就地替换目前只在 Windows 实现")
-	}
 	payload := []byte("NEW-BINARY-FALLBACK")
 	base, st := fakeGitHubResilience(t, payload, true, false, false)
-	self := filepath.Join(t.TempDir(), "dsh-launcher.exe")
-	if err := os.WriteFile(self, []byte("OLD"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	self := selfPathForTest(t, t.TempDir())
 	a := newUpdateTestApp(t, base, self)
 
 	if err := a.DownloadLauncherUpdate(); err != nil {
@@ -532,15 +590,9 @@ func TestUpdateFallsBackWhenAPIAssetFails(t *testing.T) {
 // TestUpdateFailsFastBeforeDownloadingAsset：校验和两条通道都拿不到时，
 // 直接失败在 verify 阶段 —— 不能先把 12 MB 下完再报错（真机踩过这个浪费）。
 func TestUpdateFailsFastBeforeDownloadingAsset(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("应用内就地替换目前只在 Windows 实现")
-	}
 	payload := []byte("NEW-BINARY")
 	base, st := fakeGitHubResilience(t, payload, false, false, true)
-	self := filepath.Join(t.TempDir(), "dsh-launcher.exe")
-	if err := os.WriteFile(self, []byte("OLD"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	self := selfPathForTest(t, t.TempDir())
 	a := newUpdateTestApp(t, base, self)
 
 	if err := a.DownloadLauncherUpdate(); err == nil {
@@ -549,7 +601,7 @@ func TestUpdateFailsFastBeforeDownloadingAsset(t *testing.T) {
 	if n := atomic.LoadInt32(&st.apiAsset) + atomic.LoadInt32(&st.browserAsset); n != 0 {
 		t.Errorf("校验和拿不到时不该下载资产, got %d 次", n)
 	}
-	if got, _ := os.ReadFile(self); string(got) != "OLD" {
+	if got, _ := os.ReadFile(self); string(got) != oldSelfBody {
 		t.Errorf("失败时不该动原 exe: %q", got)
 	}
 	// 校验和两条通道都试过（API + 浏览器）
