@@ -292,7 +292,7 @@ func (a *App) DownloadLauncherUpdate() error {
 	rel := a.CheckLauncherUpdate(true)
 	a.updateLog("当前版本 " + rel.Current + "，线上最新 " + orDash(rel.Latest))
 	if rel.Err != "" {
-		return a.failUpdate("check", rel.Err)
+		return a.failUpdate("check", rel.Err+a.netHint())
 	}
 	if !rel.Comparable {
 		return a.failUpdate("check", "本地构建（未注入版本号）不参与自动更新，请用「打开 Release 页」")
@@ -351,7 +351,7 @@ func (a *App) DownloadLauncherUpdate() error {
 			a.updateLog("已取消")
 			return fmt.Errorf("已取消")
 		}
-		return a.failUpdate("download", err.Error())
+		return a.failUpdate("download", err.Error()+a.netHint())
 	}
 	a.updateLog("下载完成 " + humanSize(int64(lenOfFile(part))) + "，sha256 " + shortHash(got))
 
@@ -802,6 +802,15 @@ func (a *App) failUpdate(phase, msg string) error {
 	a.updateLog("✗ " + msg)
 	a.emitUpdateStatus(UpdateStatus{State: "failed", Phase: phase, Error: msg})
 	return fmt.Errorf("%s", msg)
+}
+
+// netHint 在没配代理时补一句人话。真机实测过：受限网络里 api.github.com 往往能通，
+// 但 releases/download 的资产下载会直接超时 —— 用户看到的只是一句 "wsarecv: ..."，猜不到是网络。
+func (a *App) netHint() string {
+	if a.proxyURL() != "" {
+		return ""
+	}
+	return "（当前没有配置网络代理；受限网络下可在「设置 → 网络代理」填好代理后重试，或用「打开 Release 页」手动下载）"
 }
 
 type progressWriter struct {
