@@ -1258,17 +1258,20 @@ body.resizing .log-drawer { transition: none; }
 button.brand-ver {
   font-family: inherit;
   cursor: pointer;
+  /* 用 flex 把文字和红点真正对齐：inline + vertical-align: middle 在
+     line-height:1 的 10.5px 小 pill 上会偏下（用户看出来的那点歪）。 */
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   transition: border-color .15s, color .15s, background .15s;
 }
 button.brand-ver:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .brand-ver-update { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .brand-ver .update-dot {
-  display: inline-block;
+  flex: none;
   width: 6px; height: 6px;
-  margin-left: 5px;
   border-radius: 50%;
   background: var(--red);
-  vertical-align: middle;
 }
 
 .update-modal { width: min(620px, calc(100vw - 48px)); }
