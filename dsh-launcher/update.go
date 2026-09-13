@@ -251,7 +251,21 @@ func (a *App) CheckLauncherUpdate(force bool) LauncherRelease {
 	defer cancel()
 	client := a.proxyHTTPClient(updateAPITimeout)
 
-	rel, newETag, status, err := fetchLatestRelease(ctx, client, a.updateRepo(), st.IncludePrerelease, etag)
+	// 检查也重试两次：真机（含 WSL）见过 api.github.com 偶发 "unexpected EOF"，
+	// 一次抖动就报"查询失败"太脆 —— 检查是只读的，重试没有任何副作用。
+	var rel *ghRelease
+	var newETag string
+	var status int
+	var err error
+	for attempt := 1; attempt <= 2; attempt++ {
+		rel, newETag, status, err = fetchLatestRelease(ctx, client, a.updateRepo(), st.IncludePrerelease, etag)
+		if err == nil {
+			break
+		}
+		if attempt < 2 {
+			time.Sleep(700 * time.Millisecond)
+		}
+	}
 	if err != nil {
 		out.Err = "查询 GitHub 失败：" + err.Error()
 		return out

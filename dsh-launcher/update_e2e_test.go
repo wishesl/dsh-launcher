@@ -1,16 +1,21 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -169,6 +174,118 @@ func e2eHTTPClient() *http.Client {
 		}
 	}
 	return &http.Client{Timeout: 60 * time.Second, Transport: tr}
+}
+
+// TestExtractRealDarwinAsset 是** macOS 分支能拿到的最强证据**（这台机器没有 mac）：
+// 拿线上真实的 darwin 产物（CI 用 ditto 打的 zip），用产品自己的解包器解开，检查
+//   - 解出来的是 dsh-launcher.app 包
+//   - Contents/Info.plist 在
+//   - Contents/MacOS/<可执行> 有可执行位，且是 Mach-O（魔数校验）
+//   - 包里的符号链接被还原成链接（ditto 打的包会有）
+//
+// 仍然没验证的只剩"macOS 上 rename 一个正在运行的 .app"这条 OS 语义（三平台同策略，已在
+// Windows/Linux 上真机验证过同样的手法）。
+//
+//	DSH_UPDATE_E2E=1 go test -run TestExtractRealDarwinAsset -v ./...
+//
+// countZipSymlinks 数一个 zip 里的条目总数与符号链接条目数（权威来源：归档本身）。
+func countZipSymlinks(t *testing.T, archivePath string) (links, total int) {
+	t.Helper()
+	zr, err := zip.OpenReader(archivePath)
+	if err != nil {
+		t.Fatalf("读 zip 失败: %v", err)
+	}
+	defer zr.Close()
+	for _, f := range zr.File {
+		total++
+		if f.Mode()&os.ModeSymlink != 0 {
+			links++
+		}
+	}
+	return links, total
+}
+
+func TestExtractRealDarwinAsset(t *testing.T) {
+	if os.Getenv("DSH_UPDATE_E2E") == "" {
+		t.Skip("默认跳过真机用例；设 DSH_UPDATE_E2E=1 显式开启")
+	}
+	client := e2eHTTPClient()
+	rel := fetchReleaseDocForTest(t, client)
+
+	name, ok := updateAssetName("darwin", "arm64")
+	if !ok {
+		t.Fatalf("darwin/arm64 应有对应资产")
+	}
+	var url, wantSize string
+	var size int64
+	for _, as := range rel.Assets {
+		if as.Name == name {
+			url, size = as.URL, as.Size
+			wantSize = as.Name
+		}
+	}
+	if url == "" {
+		t.Fatalf("线上 Release 里没有 %s", name)
+	}
+
+	archive := filepath.Join(t.TempDir(), name)
+	if _, err := downloadToFile(context.Background(), client, url, archive, size, nil); err != nil {
+		t.Fatalf("下载 %s 失败：%v", wantSize, err)
+	}
+	dest := t.TempDir()
+	appDir, err := extractZipPayload(archive, dest)
+	if err != nil {
+		t.Fatalf("解包真实 mac 产物失败：%v", err)
+	}
+	if !strings.HasSuffix(appDir, ".app") {
+		t.Fatalf("应解出 .app 包, got %s", appDir)
+	}
+	plist := filepath.Join(appDir, "Contents", "Info.plist")
+	if _, err := os.Stat(plist); err != nil {
+		t.Errorf("包结构不对，缺 Info.plist: %v", err)
+	}
+	macOSDir := filepath.Join(appDir, "Contents", "MacOS")
+	entries, err := os.ReadDir(macOSDir)
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("Contents/MacOS 不可读或为空: %v", err)
+	}
+	exe := filepath.Join(macOSDir, entries[0].Name())
+	info, err := os.Stat(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Windows 上观察不到 POSIX 权限位（FS 不存），只在类 Unix 上断言。
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+		t.Errorf("包内可执行文件没有可执行位: %v", info.Mode())
+	}
+	magic, err := os.ReadFile(exe)
+	if err != nil || len(magic) < 4 {
+		t.Fatal("读不出可执行文件头")
+	}
+	// Mach-O 魔数：64 位小端 cffaedfe / 通用二进制 cafebabe
+	if !(bytes.Equal(magic[:4], []byte{0xcf, 0xfa, 0xed, 0xfe}) || bytes.Equal(magic[:4], []byte{0xca, 0xfe, 0xba, 0xbe})) {
+		t.Errorf("解出来的不是 Mach-O：% x", magic[:4])
+	}
+
+	// 符号链接：先数压缩包里到底有没有（ditto 打的 .app 可能有 Frameworks 的 Versions/Current 之类），
+	// 再确认解包后同样多（Windows 建链接需要特权，那条路径在 Windows 上会直接报错，所以只在类 Unix 断言）。
+	zipLinks, zipEntries := countZipSymlinks(t, archive)
+	links := 0
+	_ = filepath.WalkDir(appDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			links++
+		}
+		return nil
+	})
+	if runtime.GOOS != "windows" && links != zipLinks {
+		t.Errorf("符号链接数量不一致：压缩包 %d，解包后 %d", zipLinks, links)
+	}
+	t.Logf("压缩包条目 %d，其中符号链接 %d；解包后链接 %d", zipEntries, zipLinks, links)
+	t.Logf("✅ 真实 mac 产物解包通过：%s（%s，%d 字节），包内符号链接 %d 个，可执行文件 %s",
+		rel.TagName, name, size, links, entries[0].Name())
 }
 
 // verifyAgainstRealSums 直接问 GitHub 要 SHA256SUMS（不复用被测代码的下载路径），
