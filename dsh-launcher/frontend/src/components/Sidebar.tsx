@@ -50,30 +50,8 @@ export default function Sidebar({ view, onNavigate, collapsed, width, instances 
         </div>
       </div>
 
-      {NAV.map((n) => {
-        const Icon = n.icon;
-        return (
-          <div
-            key={n.key}
-            className={`side-nav ${view === n.key ? 'active' : ''}`}
-            role="tab"
-            aria-selected={view === n.key}
-            tabIndex={0}
-            onClick={() => onNavigate(n.key)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                onNavigate(n.key);
-              }
-            }}
-          >
-            <Icon className="nav-ico" size={18} strokeWidth={1.75} aria-hidden />
-            <span className="nav-label">{n.label}</span>
-          </div>
-        );
-      })}
-
-      {/* 状态概览卡：填左栏下半部分的空档。收起态只渲染一行计数（图标模式）。 */}
+      {/* 状态概览卡：放在导航项上方，作为左栏第一屏的"仪表盘"。
+          收起态只渲染一个小圆点（图标模式）。 */}
       {!collapsed ? (
         <div className="side-status">
           <div className="side-status-head">
@@ -112,6 +90,29 @@ export default function Sidebar({ view, onNavigate, collapsed, width, instances 
           <span className={`side-status-dot ${running.length > 0 ? 'on' : ''}`} />
         </div>
       )}
+
+      {NAV.map((n) => {
+        const Icon = n.icon;
+        return (
+          <div
+            key={n.key}
+            className={`side-nav ${view === n.key ? 'active' : ''}`}
+            role="tab"
+            aria-selected={view === n.key}
+            tabIndex={0}
+            onClick={() => onNavigate(n.key)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onNavigate(n.key);
+              }
+            }}
+          >
+            <Icon className="nav-ico" size={18} strokeWidth={1.75} aria-hidden />
+            <span className="nav-label">{n.label}</span>
+          </div>
+        );
+      })}
 
       <div className="sidebar-foot">DSH Launcher · 本地管理工具</div>
     </nav>
