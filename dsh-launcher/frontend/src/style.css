@@ -328,9 +328,10 @@ html, body, #root {
 }
 .sidebar-foot { margin-top: auto; font-size: 11px; color: var(--text-3); padding: 10px 12px; }
 
-/* 「运行状态概览卡」：放在导航项上方，作为左栏第一屏的"仪表盘"。
-   不抢导航的视觉权重 —— 浅底 + 小字。 */
+/* 「运行状态概览卡」：用 margin-top:auto 推到 sidebar 最底部，紧贴 footer。
+   导航项在顶部，状态卡在底部，中间自然留白。 */
 .side-status {
+  margin-top: auto;
   margin-bottom: 4px;
   padding: 10px 10px;
   background: var(--panel-2);
