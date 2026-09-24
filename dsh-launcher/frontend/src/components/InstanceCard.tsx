@@ -140,7 +140,7 @@ export default function InstanceCard({
       className={`instance-card ${st.rail} ${activeLog ? 'active' : ''} ${landed ? 'inst-landed' : ''}`}
       data-inst-id={instance.id}
     >
-      {/* 行 1：手柄 | 名称 | 状态 | 版本/源 | 服务 | ⋯ */}
+      {/* 行 1：身份信息 —— 手柄 | 名称 | 状态 | 版本 | 来源 | 自启 ... 服务 tag | ⋯ */}
       <div className="instance-top">
         <button
           type="button"
@@ -183,28 +183,17 @@ export default function InstanceCard({
 
         <span className="instance-top-spacer" />
 
-        {/* 主操作按钮：启动/停止 + 打开（不再单独占一行 URL 条，因为地址都一样） */}
-        {isRunning ? (
-          <button className="btn btn-sm" onClick={() => onStop(instance.id)} disabled={isBusy}>
-            停止
-          </button>
-        ) : (
-          <button className="btn btn-primary btn-sm" onClick={() => onStart(instance.id)} disabled={isBusy}>
-            启动
-          </button>
+        {/* 运行中的实例才显示「已就绪/未就绪」tag（停止的实例端口没监听，显示这个没意义） */}
+        {isRunning && (
+          <span
+            className={`tag ${svcTag.cls}`}
+            title={`${svcTag.title}\n${metaTip}`}
+            onClick={() => onCopyUrl(displayUrl)}
+            style={{ cursor: 'pointer' }}
+          >
+            {svcTag.text}
+          </span>
         )}
-        <button
-          className="btn btn-sm"
-          onClick={() => onOpen(displayUrl)}
-          disabled={!canOpen}
-          title={openTitle}
-        >
-          打开
-        </button>
-
-        <span className={`tag ${svcTag.cls}`} title={`${svcTag.title}\n${metaTip}`} onClick={() => onCopyUrl(displayUrl)} style={{ cursor: 'pointer' }}>
-          {svcTag.text}
-        </span>
 
         {/* ⋯ 菜单：低频操作全收这里 */}
         <div className="inst-menu" ref={menuRef}>
@@ -268,6 +257,27 @@ export default function InstanceCard({
             </div>
           )}
         </div>
+      </div>
+
+      {/* 行 2：主操作 —— 启动/停止 + 打开（左对齐，与身份信息的缩进对齐） */}
+      <div className="instance-actions-row">
+        {isRunning ? (
+          <button className="btn btn-sm" onClick={() => onStop(instance.id)} disabled={isBusy}>
+            ■ 停止
+          </button>
+        ) : (
+          <button className="btn btn-primary btn-sm" onClick={() => onStart(instance.id)} disabled={isBusy}>
+            ▶ 启动
+          </button>
+        )}
+        <button
+          className="btn btn-sm"
+          onClick={() => onOpen(displayUrl)}
+          disabled={!canOpen}
+          title={openTitle}
+        >
+          打开
+        </button>
       </div>
     </div>
   );

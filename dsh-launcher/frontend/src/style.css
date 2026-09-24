@@ -589,6 +589,12 @@ body.reordering { cursor: grabbing; user-select: none; }
 .instance-top-spacer { flex: 1 1 auto; }
 .instance-state { margin-left: auto; }
 
+/* 行 2：主操作区 —— 与行 1 手柄对齐，左对齐，不再 spacer 推开 */
+.instance-actions-row {
+  display: flex; align-items: center; gap: 8px;
+  padding-left: 24px; /* 对齐手柄宽度（20px + margin-left:-4px ≈ 24px） */
+}
+
 /* status badge: colored dot + label */
 .status-badge {
   display: inline-flex; align-items: center; gap: 5px;
