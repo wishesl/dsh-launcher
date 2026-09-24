@@ -26,7 +26,7 @@ func (a *App) GetLauncherVersion() string {
 // 验证过一个新版本之后改这里，或用构建参数覆盖：
 //
 //	wails build -ldflags "-X main.bestFitDSHVersion=0.1.6-rc.1"
-var bestFitDSHVersion = "0.1.5-rc.2"
+var bestFitDSHVersion = "0.1.7-rc.2"
 
 // GetBestFitVersion 返回启动器最佳适配的 DSH 版本（版本列表 / 实例表单打标签用）。
 func (a *App) GetBestFitVersion() string {

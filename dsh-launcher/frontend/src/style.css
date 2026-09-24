@@ -61,24 +61,27 @@ html, body, #root {
 .app {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 14px;
+  /* 顶栏与下方大卡之间的空隙删掉：两张卡上下贴住，只在底部留一口气 */
+  gap: 0;
+  padding: 14px 14px 14px 14px;
   height: 100vh;
   overflow: hidden;
   background: var(--bg);
 }
 
-/* 顶部状态栏（三个点 + 展开按钮 + 状态内容）与下面卡片同属一张大卡风格 */
+/* 顶部状态栏（三个点 + 展开按钮 + 状态内容）与下面卡片同属一张大卡风格。
+   高度压到 44px：原来 58px 偏高，chips 内容实际只占 ~30px。
+   与下方大卡之间不留 gap，所以圆角只保留上沿（下沿与 .app-main 贴住）。 */
 .app-header {
-  height: 58px;
+  height: 44px;
   flex: none;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 0 16px 0 14px;
-  border-bottom: none;
+  border-bottom: 1px solid var(--border);
   background: var(--panel);
-  border-radius: 14px;
+  border-radius: 14px 14px 0 0;
   box-shadow: var(--shadow-card);
   /* Frameless 窗口：整个 header 作为拖拽区域，可拖动窗口 */
   --wails-draggable: drag;
@@ -98,14 +101,15 @@ html, body, #root {
 .app.os-win .win-controls { order: 3; margin-left: 0; margin-right: 4px; }
 .app.os-win .app-header { padding-left: 16px; }
 
-/* 右侧大卡片：中间内容 + 右侧日志，横向两列，整体为一卡 */
+/* 右侧大卡片：中间内容 + 右侧日志，横向两列，整体为一卡。
+   上沿与顶栏贴住（无 gap），所以上圆角去掉，只保留下沿。 */
 .app-main {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: row;
   background: var(--panel);
-  border-radius: 14px;
+  border-radius: 0 0 14px 14px;
   box-shadow: var(--shadow-card);
   overflow: hidden;
 }
@@ -296,7 +300,11 @@ html, body, #root {
   display: flex; flex-direction: column; gap: 4px;
   padding: 14px 10px;
   background: var(--panel);
-  border-radius: 14px;
+  /* 只有左下角圆角：顶栏压在上方（上沿直角），右沿靠分割线（直角），
+     让它和顶栏、右栏形成一个整体，只在窗口最左下角收出圆角与外框呼应。 */
+  border-radius: 0 0 0 14px;
+  /* 左/右分割线：比默认 border 更深一档，让两栏边界一眼能看出来。 */
+  border-right: 1px solid #c8cddb;
   box-shadow: var(--shadow-card);
   overflow: hidden;
 }
@@ -1243,10 +1251,25 @@ body.resizing .log-drawer { transition: none; }
   color: #b91c1c;
 }
 
-::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-thumb { background: #c4cad8; border-radius: 6px; }
-::-webkit-scrollbar-thumb:hover { background: #aab2c4; }
+/* 全局滚动条：窄、淡、默认隐藏；只有 hover 到内容区或滚动条本身时才浮现。
+   - 宽 6px（原 9px），颜色用浅灰，避免抢眼。
+   - 默认 thumb 透明，等鼠标移到滚动容器上才显色 → 实现"不滑动时隐藏"。
+   - Firefox 用 scrollbar-width/color 对应同样的行为。 */
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 6px;
+}
+*:hover::-webkit-scrollbar-thumb { background: #d3d8e3; }
+*:hover::-webkit-scrollbar-thumb:hover { background: #b3bacb; }
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+*:hover {
+  scrollbar-color: #d3d8e3 transparent;
+}
 
 /* ============================================================
    启动器自更新（顶栏版本 pill + 更新弹窗）—— 见《版本升级实现方案.md》
