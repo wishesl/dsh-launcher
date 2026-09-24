@@ -7,7 +7,7 @@
  *
  * 重启完成后（新进程 boot，本插件重新挂载）：
  *   读取 pending.json，向发起会话投递「重启完成」消息并唤醒该会话继续。
- *   首选 agent 级 `agent.followup()` + `source.kind='plugin'` + `form='notice'`：模型看到完整
+ *   首选 agent 级 `agent.followup()` + `source.kind='plugin:dsh-self-mcp'` + `form='notice'`：模型看到完整
  *   正文，界面把该条渲染成 inject 折叠行（不是用户气泡）；该通道不可用时回退旧的
  *   `sessionController.prompt()`（界面是用户气泡）以保证消息一定送到。
  *   两条通道都复用产品自己的消息路径，不手工改事件日志。
@@ -169,15 +169,18 @@ function boundSummary(summary) {
  *  直接依赖，装载期解析失败会连工具一起挂掉。这里只依赖 node:crypto 的 randomUUID——
  *  inbox 投影对该消息用 z.custom() 校验，唯一硬要求是 id 全局唯一。
  *
- *  `source.kind='plugin'` + `form='notice'` 是产品既有的语义通道：模型看到完整 content，
- *  客户端（dsh-client-ui-chat 的 contextProvenance/contextForm）把该条渲染成 inject 折叠行，
- *  并在折叠行上显示 summary——因此不会以「用户气泡」出现在转录里。 */
+ *  消息来源形态（v4，producer-owned）：
+ *    `source.kind='plugin:dsh-self-mcp'` + `form='notice'` 是产品既有的语义通道：模型看到完整 content，
+ *    客户端（dsh-client-ui-chat 的 contextProvenance/contextForm）把该条渲染成 inject 折叠行，
+ *    并在折叠行上显示 summary——因此不会以「用户气泡」出现在转录里。
+ *    （V3 时代用的是 `kind:'plugin', plugin:<name>` 包装；v4 已硬性拒绝 kind==='plugin'，
+ *    未在白名单里的第三方插件按 producerKind 规则落到 `plugin:<name>`。） */
 function createPluginNotice(text, summary) {
 	return deepFreeze({
 		id: randomUUID(),
 		role: "user",
 		content: [{ type: "text", text }],
-		source: { kind: "plugin", plugin: name, form: "notice", summary: boundSummary(summary) },
+		source: { kind: `plugin:${name}`, form: "notice", summary: boundSummary(summary) },
 	});
 }
 

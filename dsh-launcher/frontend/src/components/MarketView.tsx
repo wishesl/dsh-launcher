@@ -269,6 +269,12 @@ export default function MarketView({
     return m;
   }, [updates]);
   const updatable = updates?.updatable ?? 0;
+  // 内置插件 dsh-self-mcp：current = 已装副本版本（.dsh-builtin 里的 package.json），
+  // latest = 启动器内嵌版本。两者不一致时给出「更新」入口 —— 内置插件唯一的升级路径。
+  const builtinCheck = updatesByName.get('dsh-self-mcp');
+  const builtinInstalledVer = builtinCheck?.current ?? '';
+  const builtinBundledVer = builtinCheck?.latest ?? '';
+  const builtinHasUpdate = !!builtinCheck?.hasUpdate;
 
   useEffect(() => {
     loadCatalog(false);
@@ -488,7 +494,11 @@ export default function MarketView({
       if (r.already) {
         showToast(r.error || '该插件已安装');
       } else if (r.ok) {
-        showToast('已安装 dsh-self-mcp，重启实例后生效（实例表单可勾选「启用自管理重启」）');
+        showToast(
+          builtinHasUpdate
+            ? `已把 dsh-self-mcp 覆盖为内置 v${builtinBundledVer}，重启实例后生效`
+            : '已安装/重新安装 dsh-self-mcp，重启实例后生效（实例表单可勾选「启用自管理重启」）'
+        );
         if (wasRunning) {
           showToast('正在重新启动实例…');
           await api.launchInstance(targetId);
@@ -503,6 +513,8 @@ export default function MarketView({
     } finally {
       setBusy(false);
       loadInstalled();
+      // 重装后重新比对「已装副本 vs 内置版本」，让「更新到 vX」按钮及时消失。
+      checkUpdates(false);
     }
   };
 
@@ -890,22 +902,49 @@ export default function MarketView({
               <div className="installed-head">
                 <span className="installed-name">dsh-self-mcp</span>
                 <span className="pill tag-local">launcher 内置</span>
-                <span className="installed-version mono">v0.1.0</span>
+                {(selfRestartInstalled ? builtinInstalledVer : builtinBundledVer) && (
+                  <span className="installed-version mono">
+                    v{selfRestartInstalled ? builtinInstalledVer : builtinBundledVer}
+                  </span>
+                )}
+                {builtinHasUpdate && builtinBundledVer && (
+                  <span className="version-update mono">→ v{builtinBundledVer}</span>
+                )}
               </div>
               <div className="installed-desc">
                 自管理重启：启动后各实例可在表单勾选「启用自管理重启」，模型获得 dsh-restart 工具；
                 重启完成后自动向发起会话注入「重启完成」并继续，用于调试需要重启才生效的插件。
+                内置视图（伪桌面版）依赖本插件的会话校验放宽。
               </div>
               <div className="installed-sub">
                 <span className="mono">{selfRestartInstalled ? '已安装到全局 profile' : '未安装'}</span>
                 <span> · 未勾选的实例不挂载，无残留</span>
+                {builtinHasUpdate && (
+                  <span className="pill tag-warn">
+                    已装副本 v{builtinInstalledVer} 旧于内置 v{builtinBundledVer}
+                  </span>
+                )}
               </div>
             </div>
             <div className="installed-actions">
               {selfRestartInstalled ? (
-                <button className="btn btn-danger" onClick={uninstallSelfRestart} disabled={marketOp.running || busy}>
-                  卸载
-                </button>
+                <>
+                  <button
+                    className={builtinHasUpdate ? 'btn btn-primary' : 'btn btn-ghost'}
+                    onClick={installSelfRestart}
+                    disabled={marketOp.running || busy}
+                    title={
+                      builtinHasUpdate
+                        ? `用启动器内置的 v${builtinBundledVer} 覆盖当前已装副本（内置插件唯一的升级路径）`
+                        : '重新解出内置源码并重装（幂等）'
+                    }
+                  >
+                    {builtinHasUpdate ? `更新到 v${builtinBundledVer}` : '重新安装'}
+                  </button>
+                  <button className="btn btn-danger" onClick={uninstallSelfRestart} disabled={marketOp.running || busy}>
+                    卸载
+                  </button>
+                </>
               ) : (
                 <button className="btn btn-primary" onClick={installSelfRestart} disabled={marketOp.running || busy}>
                   安装到全局

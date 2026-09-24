@@ -547,16 +547,24 @@ func (a *App) CheckPluginUpdates(force bool) (*UpdateCheckResult, error) {
 		}
 		switch {
 		case name == selfRestartPluginName:
-			// Launcher-bundled plugin: the comparison needs no network at all.
+			// Launcher-bundled plugin: the comparison needs no network at all,
+			// and the reinstall action IS supported (re-materialize the embedded
+			// source + pnpm add) — see UpdatePlugin's builtin branch. Keeping
+			// Runnable=false here is what left pre-relax copies un-upgradable.
 			row.Kind = "builtin"
 			row.Latest = builtinLatest
 			row.Remote = name
 			row.Current = builtinCurrent
-			row.Runnable = false
-			if builtinLatest != "" && builtinCurrent != "" {
-				row.HasUpdate = compareSemver(builtinCurrent, builtinLatest) < 0
-				row.Jump = jumpType(builtinCurrent, builtinLatest)
+			if row.Current == "" {
+				// .dsh-builtin 被手工删掉 / 装法异常时，退回读实际加载的那份副本
+				// （node_modules/<name>），否则这里读不到版本就永远不提示更新。
+				row.Current = readInstalledVersion(name)
 			}
+			if builtinLatest != "" && row.Current != "" {
+				row.HasUpdate = compareSemver(row.Current, builtinLatest) < 0
+				row.Jump = jumpType(row.Current, builtinLatest)
+			}
+			row.Runnable = row.HasUpdate
 		case row.Kind == "linked":
 			// A file:/link: dependency is the user's working checkout.
 			row.Kind = "linked"
@@ -633,6 +641,25 @@ func fillNpmVerdict(row *UpdateCheck, spec, latest string) {
 	row.Risky = !row.InRange || row.Jump == "major" || row.Jump == "prerelease"
 }
 
+// reinstallBuiltinSelfRestart refreshes an installed built-in plugin from the
+// launcher's embedded copy. UpdatePlugin already holds the marketBusy flag and
+// has required the target instance to be stopped, so this only re-materializes
+// the source and re-runs the pnpm install pipeline (which runInstall drives,
+// including its own running/done status events).
+func (a *App) reinstallBuiltinSelfRestart(instanceID, name string) (*MarketOpResult, error) {
+	a.mu.Lock()
+	inst := a.store.find(instanceID)
+	a.mu.Unlock()
+	if inst == nil {
+		return nil, fmt.Errorf("实例不存在: %s", instanceID)
+	}
+	from, to := materializedBuiltinVersion(), embeddedBuiltinVersion()
+	a.emit("dsh:market-log", map[string]string{
+		"line": fmt.Sprintf("重装内置插件 %s：v%s → v%s（重新解出内嵌源码 + pnpm 重新安装）", name, from, to),
+	})
+	return a.installBundledSelfRestart(inst)
+}
+
 // UpdatePlugin updates one installed plugin to the newest npm version.
 //
 // allowRisky gates the destructive shapes (major bump / spec rewrite): the
@@ -667,7 +694,10 @@ func (a *App) UpdatePlugin(instanceID, name string, allowRisky bool) (*MarketOpR
 	kind := pluginKind(spec)
 	switch {
 	case name == selfRestartPluginName || kind == "builtin":
-		return nil, fmt.Errorf("内置插件更新将在后续版本支持（当前可先「卸载」再「安装到全局」）")
+		// 内置插件「更新」= 重新物化内嵌源码 + 走常规 pnpm 安装流程。这是旧副本
+		// （缺能力上报 / 缺内嵌放宽）唯一的升级路径；此前这里直接拒绝，
+		// 于是用户装了旧副本就再也升不上来。
+		return a.reinstallBuiltinSelfRestart(instanceID, name)
 	case kind == "linked":
 		return nil, fmt.Errorf("本地开发插件（%s）不支持自动更新，请在你的源码目录自行更新", spec)
 	case kind == "github":

@@ -20,7 +20,7 @@ dsh-launcher（监督者）
   └─ 读 pending.json → 首选「agent 级 followup + plugin/notice 来源」投递
        · 模型看到完整正文
        · 界面渲染为 inject 折叠行（label=dsh-self-mcp + 一行 summary），不是用户气泡
-       · 依据：source.kind='plugin' + form='notice' 走 dsh-client-ui-chat
+       · 依据：source.kind='plugin:dsh-self-mcp' + form='notice' （v4 producer-owned，DSH 0.1.7-rc.2 起 kind:'plugin' 被拒） 走 dsh-client-ui-chat
          的 contextProvenance()/contextForm() 分支（只有 kind==='user' 才是用户气泡）
      失败则回退 sessionController.prompt()（界面是用户气泡），保证消息一定送到
      两条通道都在进程内、复用产品自己的消息路径，不经 /api

@@ -79,9 +79,31 @@ func extractEmbeddedSelfRestart(profileDir string) (string, error) {
 	return dest, nil
 }
 
+// installBundledSelfRestart materializes the embedded plugin and runs the
+// regular pnpm install for it. Callers own the marketBusy single-flight flag
+// and the stopped-instance preflight.
+//
+// Deliberately NOT a no-op when dsh-self-mcp is already installed: re-running
+// it is the ONLY way an existing copy gets upgraded in place. A user who
+// installed the plugin before `relaxEmbedAuth` existed would otherwise keep a
+// copy without the embedded-view auth relax forever (内嵌视图 → 永久 401).
+// The old code dead-ended here with `Already` and returned before the pnpm
+// step, so `pnpm add` never re-linked the refreshed source.
+func (a *App) installBundledSelfRestart(inst *Instance) (*MarketOpResult, error) {
+	profile := marketProfileDir()
+	dir, err := extractEmbeddedSelfRestart(profile)
+	if err != nil {
+		msg := "解出内置插件失败: " + err.Error()
+		a.emitMarketStatus(MarketOpStatus{State: "failed", Kind: "install", Target: selfRestartPluginName, Error: msg})
+		return &MarketOpResult{OK: false, Error: msg}, nil
+	}
+	return a.runInstall(inst, "file:"+filepath.ToSlash(dir))
+}
+
 // InstallSelfRestartPlugin installs the launcher-bundled dsh-self-mcp into the
-// shared profile using the regular pnpm pipeline. Mirrors InstallPlugin's
-// guards and status events.
+// shared profile using the regular pnpm pipeline. Re-running it refreshes an
+// already-installed copy in place（幂等解出 + pnpm 重新链接），这正是内置插件
+// 能「更新」的实现方式（见 market_update.go 的 builtin 分支与插件更新方案 §3.4/M3）。
 func (a *App) InstallSelfRestartPlugin(instanceID string) (*MarketOpResult, error) {
 	if !marketBusy.CompareAndSwap(false, true) {
 		return nil, fmt.Errorf("已有插件操作正在进行，请稍候或取消")
@@ -95,23 +117,13 @@ func (a *App) InstallSelfRestartPlugin(instanceID string) (*MarketOpResult, erro
 
 	a.emitMarketStatus(MarketOpStatus{State: "running", Kind: "install", Target: selfRestartPluginName})
 	a.emit("dsh:market-log", map[string]string{"line": "正在解出内置插件…"})
-
-	profile := marketProfileDir()
-	dir, err := extractEmbeddedSelfRestart(profile)
-	if err != nil {
-		msg := "解出内置插件失败: " + err.Error()
-		a.emitMarketStatus(MarketOpStatus{State: "failed", Kind: "install", Target: selfRestartPluginName, Error: msg})
-		return &MarketOpResult{OK: false, Error: msg}, nil
+	if from, to := materializedBuiltinVersion(), embeddedBuiltinVersion(); from != "" && to != "" && from != to {
+		a.emit("dsh:market-log", map[string]string{
+			"line": fmt.Sprintf("检测到已装副本 v%s 与内置 v%s 不一致，将覆盖为内置版本", from, to),
+		})
 	}
 
-	installed, _ := readInstalledPlugins()
-	if _, ok := installed[selfRestartPluginName]; ok {
-		msg := "该插件已安装（启用与否由各实例的「自管理重启」开关决定）"
-		a.emitMarketStatus(MarketOpStatus{State: "failed", Kind: "install", Target: selfRestartPluginName, Error: msg})
-		return &MarketOpResult{OK: false, Already: true, Error: msg}, nil
-	}
-
-	return a.runInstall(inst, "file:"+filepath.ToSlash(dir))
+	return a.installBundledSelfRestart(inst)
 }
 
 // UninstallSelfRestartPlugin removes dsh-self-mcp from the shared profile via

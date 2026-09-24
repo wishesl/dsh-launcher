@@ -299,7 +299,11 @@ func TestCheckPluginUpdates(t *testing.T) {
 }
 
 // TestUpdatePluginRejects covers the guard rails that do not need a live
-// instance: unknown plugins, linked/github/builtin kinds and risky gating.
+// instance: unknown plugins, linked/github kinds and risky gating.
+//
+// builtin (dsh-self-mcp) is deliberately NOT here any more: it is updatable
+// now, and exercising it would run a real pnpm install. Its verdict is covered
+// side-effect-free by TestBuiltinUpdateVerdict.
 func TestUpdatePluginRejects(t *testing.T) {
 	profile := t.TempDir()
 	restoreDir := marketProfileDir
@@ -324,7 +328,6 @@ func TestUpdatePluginRejects(t *testing.T) {
 	}{
 		{"dsh-local", "本地开发插件"},
 		{"dsh-git", "重新安装"},
-		{"dsh-self-mcp", "内置插件"},
 		{"not-installed", "插件未安装"},
 		{"", "不能为空"},
 	}
@@ -339,5 +342,51 @@ func TestUpdatePluginRejects(t *testing.T) {
 	// plugins, so the case has to use a plain npm spec to reach that branch.
 	if _, err := app.UpdatePlugin("missing", "dsh-npmish", true); err == nil || !strings.Contains(err.Error(), "实例不存在") {
 		t.Errorf("UpdatePlugin with unknown instance: %v", err)
+	}
+}
+
+// TestBuiltinUpdateVerdict covers the launcher-bundled plugin's verdict: an
+// older materialized copy must come back runnable — the built-in reinstall is
+// the ONLY path that carries a fix like relaxEmbedAuth to users who installed
+// before it existed — while a copy matching the embedded version must not
+// offer an update. Pure check: no pnpm runs here.
+func TestBuiltinUpdateVerdict(t *testing.T) {
+	profile := t.TempDir()
+	restoreDir := marketProfileDir
+	marketProfileDir = func() string { return profile }
+	defer func() { marketProfileDir = restoreDir }()
+
+	writeProfileJSON(t, profile, "package.json", map[string]any{
+		"dependencies": map[string]string{selfRestartPluginName: "file:C:/tmp/dsh-self-mcp"},
+	})
+	app := &App{}
+	builtinPath := filepath.Join(".dsh-builtin", "dsh-self-mcp", "package.json")
+
+	// 旧副本 → 可更新且可执行。
+	writeProfileJSON(t, profile, builtinPath, map[string]any{"version": "0.0.1"})
+	res, err := app.CheckPluginUpdates(true)
+	if err != nil {
+		t.Fatalf("CheckPluginUpdates: %v", err)
+	}
+	row := findUpdateCheck(res, selfRestartPluginName)
+	if row == nil {
+		t.Fatalf("builtin row missing: %+v", res.Plugins)
+	}
+	if row.Kind != "builtin" || row.Current != "0.0.1" || !row.HasUpdate || !row.Runnable {
+		t.Errorf("outdated builtin must be runnable: %+v", *row)
+	}
+	if row.Latest != embeddedBuiltinVersion() {
+		t.Errorf("builtin latest = %q, want embedded %q", row.Latest, embeddedBuiltinVersion())
+	}
+
+	// 与内置同版本 → 不提示更新、不可执行。
+	writeProfileJSON(t, profile, builtinPath, map[string]any{"version": embeddedBuiltinVersion()})
+	res, err = app.CheckPluginUpdates(true)
+	if err != nil {
+		t.Fatalf("CheckPluginUpdates (same version): %v", err)
+	}
+	row = findUpdateCheck(res, selfRestartPluginName)
+	if row == nil || row.HasUpdate || row.Runnable {
+		t.Errorf("up-to-date builtin must not be runnable: %+v", row)
 	}
 }
