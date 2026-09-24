@@ -1,4 +1,4 @@
-import { History, Server, Store, Settings } from 'lucide-react';
+import { History, Server, Store, Settings, Plus } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import dshLogo from '../assets/dsh.svg';
 import type { Instance } from '../types';
@@ -14,6 +14,8 @@ interface Props {
   width?: number;
   /** 所有实例（用于「运行状态」概览卡）。收起态不渲染这块。 */
   instances?: Instance[];
+  /** 新建实例按钮（左栏顶部主操作）。 */
+  onAddInstance?: () => void;
 }
 
 const NAV: { key: ViewKey; label: string; icon: LucideIcon }[] = [
@@ -25,7 +27,7 @@ const NAV: { key: ViewKey; label: string; icon: LucideIcon }[] = [
 
 const RUNNING_SET = new Set(['running', 'starting', 'ready']);
 
-export default function Sidebar({ view, onNavigate, collapsed, width, instances = [] }: Props) {
+export default function Sidebar({ view, onNavigate, collapsed, width, instances = [], onAddInstance }: Props) {
   // 运行中（含启动中/就绪）的实例：给左栏一块概览卡，把"现在有几台在跑"
   // 从主内容区的胶囊里解放出来，免得左栏下半部分空着。
   const running = instances.filter((i) => RUNNING_SET.has(i.status));
@@ -49,6 +51,31 @@ export default function Sidebar({ view, onNavigate, collapsed, width, instances 
           <h1 className="brand-name">DSH Launcher</h1>
         </div>
       </div>
+
+      {/* 主操作按钮：在导航项最上面，给左栏顶部一个视觉重心。
+          收起态只渲染一个 + 号按钮。 */}
+      {onAddInstance && (
+        collapsed ? (
+          <button
+            type="button"
+            className="side-add-collapsed"
+            onClick={onAddInstance}
+            title="新建实例"
+            aria-label="新建实例"
+          >
+            <Plus size={18} strokeWidth={2} aria-hidden />
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="side-add-btn"
+            onClick={onAddInstance}
+          >
+            <Plus size={16} strokeWidth={2.25} aria-hidden />
+            新建实例
+          </button>
+        )
+      )}
 
       {NAV.map((n) => {
         const Icon = n.icon;

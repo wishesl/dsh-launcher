@@ -310,7 +310,8 @@ html, body, #root {
 }
 .side-nav {
   display: flex; align-items: center; gap: 11px;
-  padding: 9px 11px;
+  /* 拉高导航项：从 9px 上下 padding 提到 14px，让左栏上半部分不再挤成一小撮 */
+  padding: 14px 11px;
   border: 1px solid transparent;
   border-radius: 10px;
   color: var(--text-2);
@@ -325,6 +326,27 @@ html, body, #root {
   width: 20px; height: 20px; flex: none;
   display: grid; place-items: center;
   color: inherit;
+}
+
+/* 「新建实例」主按钮：左栏顶部唯一的主操作，用 accent 实心 */
+.side-add-btn {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  background: var(--accent); color: #fff;
+  border: 0; border-radius: 10px;
+  font-size: 13px; font-weight: 600;
+  cursor: pointer;
+  transition: background .12s;
+}
+.side-add-btn:hover { background: var(--accent-strong); }
+.side-add-collapsed {
+  display: grid; place-items: center;
+  width: 100%; aspect-ratio: 1;
+  margin-bottom: 6px;
+  background: var(--accent); color: #fff;
+  border: 0; border-radius: 10px;
+  cursor: pointer;
 }
 /* footer 紧跟状态卡下方（不再自己抢 margin-top:auto，否则两个 auto 会把空间平分） */
 .sidebar-foot { font-size: 11px; color: var(--text-3); padding: 10px 12px 4px; }

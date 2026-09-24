@@ -912,6 +912,7 @@ export default function App() {
               collapsed={collapsed}
               width={collapsed ? undefined : sidebarShown}
               instances={instances}
+              onAddInstance={() => setModal({ mode: 'new' })}
             />
             <Resizer
               side="left"
