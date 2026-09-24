@@ -65,9 +65,6 @@ export default function InstancesView({
   capsAlertCount,
   onOpenCompat,
 }: Props) {
-  const running = instances.filter(
-    (i) => i.status === 'running' || i.status === 'starting' || i.status === 'ready'
-  ).length;
   const liveCount = Object.values(logs).reduce((n, arr) => n + arr.length, 0);
 
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -329,9 +326,8 @@ export default function InstancesView({
           兼容性检查
           {capsAlertCount > 0 && <span className="compat-badge">{capsAlertCount}</span>}
         </button>
-        <div className="status-strip" title="运行中 / 实例总数">
-          <span>运行 <b className="live">{running}</b> / <b>{instances.length}</b></span>
-          <span className="muted">·</span>
+        {/* 状态栏：左栏已经有「运行中 X 台」概览，这里只留日志行数（独特信息） */}
+        <div className="status-strip" title="日志总行数（所有实例）">
           <span>日志 <b>{liveCount}</b> 行</span>
         </div>
         <button className="btn btn-primary" onClick={onAdd}>+ 添加实例</button>

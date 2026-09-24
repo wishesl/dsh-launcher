@@ -911,6 +911,7 @@ export default function App() {
               onNavigate={setView}
               collapsed={collapsed}
               width={collapsed ? undefined : sidebarShown}
+              instances={instances}
             />
             <Resizer
               side="left"
