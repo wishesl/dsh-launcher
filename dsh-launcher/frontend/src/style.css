@@ -328,27 +328,29 @@ html, body, #root {
   color: inherit;
 }
 
-/* 「新建实例」主按钮：左栏顶部唯一的主操作，用 accent 实心。
-   用负 margin 抵消 sidebar 的左右 10px padding，让按钮通栏撑到 sidebar 边缘，
-   避免它看起来像个缩在中间的小长条。 */
+/* 「新建实例」按钮：参考 DSH web 的「新会话」——白底 + 浅边框，
+   不撑到 sidebar 边缘，保持呼吸感。 */
 .side-add-btn {
   display: flex; align-items: center; justify-content: center; gap: 8px;
-  padding: 14px 12px;
-  margin: 0 -10px 10px;
-  background: var(--accent); color: #fff;
-  border: 0; border-radius: 12px;
-  font-size: 14px; font-weight: 600;
-  letter-spacing: .3px;
+  padding: 11px 12px;
+  margin-bottom: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 13.5px; font-weight: 600;
   cursor: pointer;
-  transition: background .12s;
+  transition: background .12s, border-color .12s;
 }
-.side-add-btn:hover { background: var(--accent-strong); }
+.side-add-btn:hover { background: var(--panel-2); border-color: var(--text-3); }
 .side-add-collapsed {
   display: grid; place-items: center;
   width: 100%; aspect-ratio: 1;
   margin-bottom: 6px;
-  background: var(--accent); color: #fff;
-  border: 0; border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
   cursor: pointer;
 }
 /* footer 紧跟状态卡下方（不再自己抢 margin-top:auto，否则两个 auto 会把空间平分） */
