@@ -367,7 +367,7 @@ export default function InstancesView({
               onCopyUrl={onCopyUrl}
               onEdit={onEdit}
               onDelete={onDelete}
-              onToggleLog={onSelectLog}
+              onSelectLog={onSelectLog}
               onToggleAutoStart={onToggleAutoStart}
             />
           )

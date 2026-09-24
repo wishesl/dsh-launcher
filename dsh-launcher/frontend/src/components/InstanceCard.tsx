@@ -1,5 +1,6 @@
+import { useEffect, useRef, useState } from 'react';
 import type { Instance, RegistryInfo, ServiceState } from '../types';
-import { GripVertical } from 'lucide-react';
+import { GripVertical, MoreHorizontal } from 'lucide-react';
 import { getWebUrl } from '../util';
 import Switch from './Switch';
 
@@ -21,7 +22,7 @@ interface Props {
   onCopyUrl: (url: string) => void;
   onEdit: (inst: Instance) => void;
   onDelete: (id: string) => void;
-  onToggleLog: (id: string) => void;
+  onSelectLog: (id: string) => void;
   onToggleAutoStart: (id: string, v: boolean) => void;
 }
 
@@ -60,7 +61,7 @@ export default function InstanceCard({
   onCopyUrl,
   onEdit,
   onDelete,
-  onToggleLog,
+  onSelectLog,
   onToggleAutoStart,
 }: Props) {
   const st = STATUS_META[instance.status] ?? STATUS_META.stopped;
@@ -72,7 +73,14 @@ export default function InstanceCard({
   const pkgMgr = instance.pkgMgr || 'local';
   const isSource = !!instance.source; // 源码启动：目录内源码 + 自定义命令
 
-  const outdated = !isSource && instance.localVersion && registry && registry.latest && instance.localVersion !== registry.latest;
+  // "有新版"判定：本地副本既不等于 latest 稳定版、也不等于 next 预发布版，才算落后。
+  // 之前只跟 latest 比，导致比 latest 还新的 rc 版也被误标成"有新版"。
+  const outdated = !isSource
+    && instance.localVersion
+    && registry
+    && registry.latest
+    && instance.localVersion !== registry.latest
+    && instance.localVersion !== registry.next;
   const needsInstall = !isSource && pkgMgr === 'local' && !instance.localVersion;
 
   // Service state (decoupled from process state): only a reachable port gives
@@ -83,11 +91,11 @@ export default function InstanceCard({
   const canOpen = !!svcUrl;
   const svcTag =
     service == null
-      ? { text: '服务检测中…', cls: 'tag-muted', title: '正在检测端口服务…' }
+      ? { text: '检测中', cls: 'tag-muted', title: '正在检测端口服务…' }
       : service.reachable
-        ? { text: '服务已就绪', cls: 'tag-ok', title: '配置端口当前可访问 DSH 服务' }
+        ? { text: '已就绪', cls: 'tag-ok', title: '配置端口当前可访问 DSH 服务' }
         : {
-            text: '服务未就绪',
+            text: '未就绪',
             cls: 'tag-warn',
             title: service.url
               ? `端口 ${service.url} 当前未响应`
@@ -101,13 +109,39 @@ export default function InstanceCard({
         ? '--port 0 自动选端口，等待进程输出实际地址后可点击'
         : '服务未就绪（端口未响应），无法打开';
 
+  // ⋯ 下拉：收纳低频操作（安装 / 屏蔽 / 日志 / 编辑 / 删除）。
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [menuOpen]);
+
+  // 给 tooltip 用的完整 meta 串（鼠标悬停在版本/URL 行时看到）。
+  const metaTip = [
+    `目录：${instance.directory}`,
+    instance.localVersion ? `本地副本：${instance.localVersion}${outdated ? '（有新版）' : ''}` : '本地无副本',
+    instance.pid > 0 ? `PID ${instance.pid}` : null,
+    instance.extraArgs ? `args: ${instance.extraArgs}` : null,
+    instance.selfRestart ? 'self-restart' : null,
+  ].filter(Boolean).join('\n');
+
   return (
     <div
       className={`instance-card ${st.rail} ${activeLog ? 'active' : ''} ${landed ? 'inst-landed' : ''}`}
       data-inst-id={instance.id}
     >
+      {/* 行 1：手柄 | 名称 | 状态 | 版本/源 | 服务 | ⋯ */}
       <div className="instance-top">
-        {/* 排序手柄：拖它重排实例顺序（键盘可用 ↑/↓）。 */}
         <button
           type="button"
           className="inst-grip"
@@ -118,14 +152,18 @@ export default function InstanceCard({
         >
           <GripVertical size={14} strokeWidth={2} aria-hidden />
         </button>
-        <span className="instance-name" title={instance.directory}>{instance.name}</span>
+        <span className="instance-name" title={metaTip}>{instance.name}</span>
         <span className={`status-badge ${st.cls}`}>
           <span className="status-dot" />
           {st.label}
         </span>
         {!isSource && (
-          <span className={`pill pill-version ${instance.version === 'latest' ? 'pill-accent' : ''}`}>
+          <span
+            className={`pill pill-version ${instance.version === 'latest' ? 'pill-accent' : ''}`}
+            title={`启动版本：${instance.version}${outdated ? '（本地副本有新版）' : ''}`}
+          >
             {instance.version === 'latest' ? 'latest' : instance.version}
+            {outdated && <span className="pill-dot-warn" />}
           </span>
         )}
         <span
@@ -134,6 +172,7 @@ export default function InstanceCard({
         >
           {isSource ? 'code' : 'npm'}
         </span>
+
         <label
           className="autostart-toggle"
           title="随启动器自动启动此实例：打开 DSH Launcher 时自动拉起"
@@ -141,97 +180,101 @@ export default function InstanceCard({
           <Switch checked={instance.autoStart} onChange={(v) => onToggleAutoStart(instance.id, v)} />
           自启
         </label>
+
+        <span className="instance-top-spacer" />
+
+        <span className={`tag ${svcTag.cls}`} title={svcTag.title}>{svcTag.text}</span>
+
+        {/* ⋯ 菜单：低频操作全收这里 */}
+        <div className="inst-menu" ref={menuRef}>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm inst-menu-btn"
+            onClick={() => setMenuOpen((v) => !v)}
+            title="更多操作"
+            aria-label="更多操作"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+          >
+            <MoreHorizontal size={14} strokeWidth={2} aria-hidden />
+          </button>
+          {menuOpen && (
+            <div className="inst-menu-pop" role="menu">
+              {!isRunning && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={`inst-menu-item ${needsInstall ? 'accent' : ''}`}
+                  onClick={() => { setMenuOpen(false); onInstall(instance.id); }}
+                  disabled={isBusy}
+                >
+                  {needsInstall ? '安装到目录（首次）' : '重新安装到目录'}
+                </button>
+              )}
+              <button
+                type="button"
+                role="menuitem"
+                className="inst-menu-item"
+                onClick={() => { setMenuOpen(false); onMask(instance); }}
+              >
+                屏蔽插件…
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={`inst-menu-item ${activeLog ? 'active' : ''}`}
+                onClick={() => { setMenuOpen(false); onSelectLog(instance.id); }}
+              >
+                查看日志
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="inst-menu-item"
+                onClick={() => { setMenuOpen(false); onEdit(instance); }}
+              >
+                编辑…
+              </button>
+              <div className="inst-menu-sep" />
+              <button
+                type="button"
+                role="menuitem"
+                className="inst-menu-item danger"
+                onClick={() => { setMenuOpen(false); onDelete(instance.id); }}
+              >
+                删除…
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="instance-dir" title={instance.directory}>{instance.directory}</div>
-
+      {/* 行 2：URL + 主操作（启动/停止、打开） */}
       <div className="instance-url-row">
-        <span className="meta-item">web:</span>
         <code
           className={`mono url-text ${svcUrl ? 'url-runtime' : ''}`}
-          title={svcUrl ? 'DSH 服务当前地址（点击复制）' : 'DSH web 地址（点击复制）'}
+          title={`${svcUrl ? 'DSH 服务当前地址（点击复制）' : 'DSH web 地址（点击复制）'}\n${metaTip}`}
           onClick={() => onCopyUrl(displayUrl)}
         >
           {displayUrl}
         </code>
-        <span className={`tag ${svcTag.cls}`} title={svcTag.title}>{svcTag.text}</span>
+        {isRunning ? (
+          <button className="btn btn-sm" onClick={() => onStop(instance.id)} disabled={isBusy}>
+            停止
+          </button>
+        ) : (
+          <button className="btn btn-primary btn-sm" onClick={() => onStart(instance.id)} disabled={isBusy}>
+            启动
+          </button>
+        )}
         <button
-          className="btn btn-primary btn-sm"
+          className="btn btn-sm"
           onClick={() => onOpen(displayUrl)}
           disabled={!canOpen}
           title={openTitle}
         >
           打开
         </button>
-      </div>
-
-      <div className="instance-meta">
-        {isSource ? (
-          <>
-            {instance.localVersion && (
-              <span className="meta-item" title="目录内 node_modules 中实际安装的 DSH 版本">
-                本地副本 <b>{instance.localVersion}</b>
-              </span>
-            )}
-            <span className="meta-item mono" title="启动命令（点击「启动」执行）；「安装到目录」执行初始化+构建">
-              启动: {instance.startCmd || 'pnpm dsh web'}
-            </span>
-          </>
-        ) : instance.localVersion ? (
-          <span className="meta-item" title="目录内 node_modules 中实际安装的 DSH 版本（npx 优先使用它）">
-            本地副本 <b>{instance.localVersion}</b>
-            {outdated && <span className="tag-warn">有新版</span>}
-          </span>
-        ) : (
-          <span className={`meta-item ${needsInstall ? 'meta-warn' : ''}`}>
-            {needsInstall ? '本地副本未安装 — 点「安装到目录」' : '本地无副本（将从 registry 拉取）'}
-          </span>
-        )}
-        {instance.pid > 0 && <span className="meta-item">PID {instance.pid}</span>}
-        {instance.extraArgs && <span className="meta-item mono">args: {instance.extraArgs}</span>}
-        {instance.selfRestart && <span className="meta-item mono">self-restart</span>}
-      </div>
-
-      <div className="instance-actions">
-        {isRunning ? (
-          <button className="btn btn-danger" onClick={() => onStop(instance.id)} disabled={isBusy}>
-            停止
-          </button>
-        ) : (
-          <button className="btn btn-primary" onClick={() => onStart(instance.id)} disabled={isBusy}>
-            启动
-          </button>
-        )}
-        {!isRunning && (
-          <button
-            className={`btn ${needsInstall ? 'btn-accent' : 'btn-ghost'}`}
-            onClick={() => onInstall(instance.id)}
-            disabled={isBusy}
-            title={isSource
-              ? '执行初始化+构建命令（默认 pnpm install + pnpm run build）'
-              : needsInstall
-                ? '把该版本真实安装进目录（生成可读源码 node_modules）'
-                : '重新安装该版本到目录（生成可读源码）'}
-          >
-            安装到目录
-          </button>
-        )}
-        <button
-          className="btn btn-ghost"
-          onClick={() => onMask(instance)}
-          title="选择该实例启动时临时屏蔽的插件（仅本次启动生效，不改全局开关，停止后恢复）"
-        >
-          屏蔽插件
-        </button>
-        <button
-          className={`btn btn-ghost ${activeLog ? 'active-log-btn' : ''}`}
-          onClick={() => onToggleLog(instance.id)}
-          title="在右侧运行日志面板查看该实例的日志"
-        >
-          查看日志
-        </button>
-        <button className="btn btn-ghost" onClick={() => onEdit(instance)}>编辑</button>
-        <button className="btn btn-ghost danger-text" onClick={() => onDelete(instance.id)}>删除</button>
       </div>
     </div>
   );

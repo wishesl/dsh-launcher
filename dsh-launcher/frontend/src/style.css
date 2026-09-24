@@ -479,72 +479,127 @@ body.reordering { cursor: grabbing; user-select: none; }
 
 .instance-card {
   --rail: #b6bdcc;
-  display: flex; flex-direction: column; gap: 9px;
+  display: flex; flex-direction: column; gap: 8px;
   background: var(--panel);
   border: 1px solid var(--border-soft);
   border-left: 4px solid var(--rail);
   border-radius: 12px;
-  padding: 13px 16px 13px 18px;
+  /* 紧凑模式：从 13/16 收到 10/14，gap 同步收 */
+  padding: 10px 14px 10px 16px;
   box-shadow: var(--shadow-card);
   transition: box-shadow .15s, border-color .15s;
 }
 .instance-card:hover { box-shadow: 0 4px 16px rgba(20, 27, 46, .08); border-color: var(--border); }
 .instance-card.active { box-shadow: 0 0 0 3px var(--accent-soft); border-color: var(--accent); }
 
-.instance-top { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
-.instance-name { font-weight: 700; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.instance-top { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-width: 0; }
+.instance-name {
+  font-weight: 700; font-size: 14px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 220px;
+}
+.instance-top-spacer { flex: 1 1 auto; }
 .instance-state { margin-left: auto; }
 
 /* status badge: colored dot + label */
 .status-badge {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 3px 10px;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 9px;
   border-radius: 999px;
-  font-size: 12px; font-weight: 600;
+  font-size: 11.5px; font-weight: 600;
+  flex: none;
 }
 .sb-running, .sb-ready { color: var(--green); background: var(--green-soft); }
 .sb-starting, .sb-stopping, .sb-restarting { color: var(--amber); background: var(--amber-soft); animation: pulse 1.2s infinite; }
 .sb-crashed { color: var(--red); background: var(--red-soft); }
 .sb-stopped { color: var(--text-3); background: var(--panel-3); }
-.status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.status-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 
 .pill {
-  border-radius: 999px; padding: 2px 9px; font-size: 11.5px;
+  border-radius: 999px; padding: 1px 8px; font-size: 11px;
   font-family: var(--mono); background: var(--panel-2); border: 1px solid var(--border); color: var(--text-2);
+  flex: none;
+  display: inline-flex; align-items: center; gap: 5px;
 }
 .pill-accent { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 .pill-version { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
-
-.autostart-toggle {
-  display: inline-flex; align-items: center; gap: 5px;
-  margin-left: 4px;
-  font-size: 12px; color: var(--text-3);
-  cursor: pointer; white-space: nowrap; user-select: none;
+/* 版本 pill 上的"有新版"小圆点：比独立 tag 省一行位置 */
+.pill-dot-warn {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 0 2px var(--amber-soft);
 }
-.autostart-toggle input { accent-color: var(--accent); cursor: pointer; margin: 0; }
-.autostart-toggle:hover { color: var(--text-2); }
 
-.instance-dir {
-  font-size: 12.5px; color: var(--text-2);
-  font-family: var(--mono);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+/* ⋯ 菜单：定位 + 弹出层 */
+.inst-menu { position: relative; flex: none; }
+.inst-menu-btn {
+  padding: 4px 6px; min-width: 26px;
+  color: var(--text-3);
 }
+.inst-menu-btn:hover { color: var(--text); }
+.inst-menu-pop {
+  position: absolute; right: 0; top: calc(100% + 4px);
+  min-width: 170px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-pop);
+  padding: 4px;
+  z-index: 30;
+  display: flex; flex-direction: column;
+}
+.inst-menu-item {
+  display: block; width: 100%; text-align: left;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  background: transparent; border: 0; border-radius: 6px;
+  color: var(--text); cursor: pointer;
+}
+.inst-menu-item:hover:not(:disabled) { background: var(--panel-2); }
+.inst-menu-item:disabled { opacity: .5; cursor: not-allowed; }
+.inst-menu-item.active { color: var(--accent); background: var(--accent-soft); }
+.inst-menu-item.accent { color: var(--accent); font-weight: 600; }
+.inst-menu-item.danger { color: var(--red); }
+.inst-menu-item.danger:hover:not(:disabled) { background: var(--red-soft); }
+.inst-menu-sep {
+  height: 1px; margin: 4px 6px;
+  background: var(--border-soft);
+}
+
 .instance-url-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 10px;
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px;
   background: var(--panel-2);
   border: 1px solid var(--border-soft);
-  border-radius: 9px;
+  border-radius: 8px;
 }
 .url-text {
   flex: 1; min-width: 0;
-  font-size: 12.5px; color: var(--accent);
+  font-size: 12px; color: var(--text-2);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   cursor: pointer;
 }
-.url-text:hover { text-decoration: underline; }
+.url-text:hover { text-decoration: underline; color: var(--accent); }
 .url-runtime { color: var(--accent); }
-.instance-meta { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+/* 旧 meta 行 / dir 行 / 旧 actions 行已删除（合并到 tooltip / ⋯ 菜单）；保留选择器以免其他地方引用崩溃 */
+.instance-meta, .instance-dir, .instance-actions { display: none; }
+/* 自启开关：紧凑模式下放回第一行 npm pill 后面，缩一点 */
+.autostart-toggle {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; color: var(--text-3);
+  cursor: pointer; white-space: nowrap; user-select: none;
+  flex: none;
+}
+.autostart-toggle:hover { color: var(--text-2); }
+/* 卡片里的自启开关缩到 28x16，避免 40x22 把第一行撑高 */
+.autostart-toggle .switch-track { width: 28px; height: 16px; }
+.autostart-toggle .switch-track::after {
+  top: 1px; left: 1px;
+  width: 12px; height: 12px;
+}
+.autostart-toggle .switch input:checked + .switch-track::after {
+  transform: translateX(12px);
+}
 .meta-item { font-size: 12px; color: var(--text-3); }
 .meta-item b { color: var(--text); font-family: var(--mono); font-weight: 600; }
 .meta-warn { color: var(--amber); font-weight: 600; }
