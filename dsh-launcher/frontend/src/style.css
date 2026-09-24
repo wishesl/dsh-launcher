@@ -328,14 +328,17 @@ html, body, #root {
   color: inherit;
 }
 
-/* 「新建实例」主按钮：左栏顶部唯一的主操作，用 accent 实心 */
+/* 「新建实例」主按钮：左栏顶部唯一的主操作，用 accent 实心。
+   用负 margin 抵消 sidebar 的左右 10px padding，让按钮通栏撑到 sidebar 边缘，
+   避免它看起来像个缩在中间的小长条。 */
 .side-add-btn {
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 10px 12px;
-  margin-bottom: 6px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 14px 12px;
+  margin: 0 -10px 10px;
   background: var(--accent); color: #fff;
-  border: 0; border-radius: 10px;
-  font-size: 13px; font-weight: 600;
+  border: 0; border-radius: 12px;
+  font-size: 14px; font-weight: 600;
+  letter-spacing: .3px;
   cursor: pointer;
   transition: background .12s;
 }
