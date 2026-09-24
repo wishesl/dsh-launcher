@@ -52,6 +52,12 @@ export default function InstanceForm({ registry, bestFit, editing, onClose, onSa
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  // --no-open：默认开启（启动器自己管内嵌视图/打开浏览器，DSH 自己弹浏览器反而多余）。
+  // 从已有 extraArgs 里解析出来，避免编辑老实例时把已有的 --no-open 当成"用户输入的参数"重复加。
+  const [noOpen, setNoOpen] = useState<boolean>(() => {
+    const args = (editing?.extraArgs ?? '').split(/\s+/).filter(Boolean);
+    return args.includes('--no-open');
+  });
   const dirInputRef = useRef<HTMLInputElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
 
@@ -200,6 +206,13 @@ export default function InstanceForm({ registry, bestFit, editing, onClose, onSa
         payload.buildCmd = (form.buildCmd || '').trim() || DEFAULT_SOURCE_BUILD;
         payload.startCmd = (form.startCmd || '').trim() || DEFAULT_SOURCE_START;
       }
+      // 把 --no-open 从用户输入的 extraArgs 里剥出来，按开关状态重新拼上 ——
+      // 避免"用户关了开关但 extraArgs 里还留着 --no-open"或者"开了开关但没拼上"的双写问题。
+      const userArgs = form.extraArgs
+        .split(/\s+/)
+        .filter((a) => a && a !== '--no-open')
+        .join(' ');
+      payload.extraArgs = [userArgs, noOpen ? '--no-open' : ''].filter(Boolean).join(' ');
       const finalVersion = sourceMode
         ? 'latest'
         : (versionMode === 'latest' ? 'latest' : (form.version.trim() || 'latest'));
@@ -451,14 +464,28 @@ export default function InstanceForm({ registry, bestFit, editing, onClose, onSa
           <div className="field">
             <span className="field-label">附加参数 <span className="muted">（可选）</span></span>
             <input
-              value={form.extraArgs}
+              value={form.extraArgs
+                .split(/\s+/)
+                .filter((a) => a && a !== '--no-open')
+                .join(' ')}
               onChange={(e) => set({ extraArgs: e.target.value })}
               placeholder="如 --port 3081（将追加到 dsh web 之后）"
             />
             <div className="field-hint">
               最终命令示例：
-              <code className="mono">{form.pkgMgr === 'local' ? 'npx @deepseek-ai/dsh' : (form.pkgMgr === 'npx' ? 'npx -y' : 'pnpm dlx')} {form.pkgMgr === 'local' ? '' : '@deepseek-ai/dsh@' + (versionMode === 'latest' ? 'latest' : (form.version || '…'))} web{form.extraArgs ? ' ' + form.extraArgs : ''}</code>
+              <code className="mono">{form.pkgMgr === 'local' ? 'npx @deepseek-ai/dsh' : (form.pkgMgr === 'npx' ? 'npx -y' : 'pnpm dlx')} {form.pkgMgr === 'local' ? '' : '@deepseek-ai/dsh@' + (versionMode === 'latest' ? 'latest' : (form.version || '…'))} web{form.extraArgs.split(/\s+/).filter((a) => a && a !== '--no-open').join(' ') ? ' ' + form.extraArgs.split(/\s+/).filter((a) => a && a !== '--no-open').join(' ') : ''}{noOpen ? ' --no-open' : ''}</code>
             </div>
+          </div>
+
+          <div className="form-autostart">
+            <Switch
+              checked={noOpen}
+              onChange={setNoOpen}
+            />
+            <span>
+              启动时不自动打开浏览器
+              <span className="muted">（--no-open：DSH 启动后不弹浏览器，由启动器自己管内嵌视图 / 打开按钮）</span>
+            </span>
           </div>
           </>
           )}

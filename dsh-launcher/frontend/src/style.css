@@ -1264,7 +1264,8 @@ body.resizing .log-drawer { transition: none; }
   z-index: 100;
 }
 .modal {
-  width: min(560px, calc(100vw - 48px));
+  /* 加宽到 760px：版本启动表单字段较多，560px 太窄容易折行 */
+  width: min(760px, calc(100vw - 48px));
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 14px;
