@@ -326,7 +326,8 @@ html, body, #root {
   display: grid; place-items: center;
   color: inherit;
 }
-.sidebar-foot { margin-top: auto; font-size: 11px; color: var(--text-3); padding: 10px 12px; }
+/* footer 紧跟状态卡下方（不再自己抢 margin-top:auto，否则两个 auto 会把空间平分） */
+.sidebar-foot { font-size: 11px; color: var(--text-3); padding: 10px 12px 4px; }
 
 /* 「运行状态概览卡」：用 margin-top:auto 推到 sidebar 最底部，紧贴 footer。
    导航项在顶部，状态卡在底部，中间自然留白。 */
