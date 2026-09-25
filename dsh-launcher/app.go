@@ -79,13 +79,26 @@ func (a *App) startup(ctx context.Context) {
 	a.autoStartIDs.Store(autoStart)
 
 	// Restore last window geometry (defaults remain when unset).
-	if st := a.settings.get(); st.WinW > 200 && st.WinH > 150 {
-		runtime.WindowSetSize(ctx, st.WinW, st.WinH)
+	st0 := a.settings.get()
+	w, h := st0.WinW, st0.WinH
+	if w < 200 {
+		w = 1280
 	}
-	if st := a.settings.get(); st.WinX != 0 || st.WinY != 0 {
-		if x, y := st.WinX, st.WinY; x > -30000 && y > -30000 {
-			runtime.WindowSetPosition(ctx, x, y)
+	if h < 150 {
+		h = 820
+	}
+	runtime.WindowSetSize(ctx, w, h)
+
+	// 校验窗口位置：用户之前把窗口拖到副屏，后来副屏拔掉/改分辨率，那个坐标就成了"在屏幕外"。
+	// 简单兜底：x 在 [-2000, 4096]、y 在 [-1000, 2160] 之外就强制挪到主屏中央。
+	if st0.WinX != 0 || st0.WinY != 0 {
+		x, y := st0.WinX, st0.WinY
+		inRange := x > -2000 && x < 4096 && y > -1000 && y < 2160
+		if !inRange {
+			x = (1920 - w) / 2
+			y = (1080 - h) / 3
 		}
+		runtime.WindowSetPosition(ctx, x, y)
 	}
 
 	// Install the system tray icon + menu.
