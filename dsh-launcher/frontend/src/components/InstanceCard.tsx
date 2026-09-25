@@ -153,6 +153,8 @@ export default function InstanceCard({
         <GripVertical size={16} strokeWidth={2} aria-hidden />
       </button>
 
+      {/* 主体列：行 1（身份）+ 行 2（操作）包成一列，手柄在左、这列在右 */}
+      <div className="instance-body">
       {/* 行 1：身份信息 —— 名称 | 状态 | 版本 | 来源 | 自启 ... 服务 tag | ⋯ */}
       <div className="instance-top">
         <span className="instance-name" title={metaTip}>{instance.name}</span>
@@ -283,6 +285,7 @@ export default function InstanceCard({
           打开
         </button>
       </div>
+      </div>{/* /.instance-body */}
     </div>
   );
 }
