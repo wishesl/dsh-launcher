@@ -543,10 +543,12 @@ body.reordering { cursor: grabbing; user-select: none; }
   to { opacity: 1; transform: none; }
 }
 
-/* 排序手柄：平时很淡，悬停/聚焦才显形，避免和卡片里的按钮抢注意力。 */
+/* 排序手柄：平时很淡，悬停/聚焦才显形，避免和卡片里的按钮抢注意力。
+   height 改为 100% 让它在卡片内拉满一竖（而不是只占 20px 小方块）。 */
 .inst-grip {
   flex: none;
-  width: 20px; height: 20px; margin-left: -4px;
+  width: 22px; align-self: stretch;
+  margin-left: -4px;
   display: grid; place-items: center;
   padding: 0;
   border: 0; border-radius: 5px;

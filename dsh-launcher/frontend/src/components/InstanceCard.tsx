@@ -150,7 +150,7 @@ export default function InstanceCard({
           onPointerDown={(e) => onDragHandleDown(e, instance.id)}
           onKeyDown={(e) => onDragHandleKeyDown(e, instance.id)}
         >
-          <GripVertical size={14} strokeWidth={2} aria-hidden />
+          <GripVertical size={16} strokeWidth={2} aria-hidden />
         </button>
         <span className="instance-name" title={metaTip}>{instance.name}</span>
         <span className={`status-badge ${st.cls}`}>
@@ -259,19 +259,20 @@ export default function InstanceCard({
         </div>
       </div>
 
-      {/* 行 2：主操作 —— 启动/停止 + 打开（左对齐，与身份信息的缩进对齐） */}
+      {/* 行 2：主操作 —— 启动/停止 + 打开（左对齐，与身份信息的缩进对齐）。
+          所有按钮统一用 btn-ghost（白底浅边框），避免深色实心在一排卡片里太突兀。 */}
       <div className="instance-actions-row">
         {isRunning ? (
-          <button className="btn btn-sm" onClick={() => onStop(instance.id)} disabled={isBusy}>
+          <button className="btn btn-ghost btn-sm" onClick={() => onStop(instance.id)} disabled={isBusy}>
             ■ 停止
           </button>
         ) : (
-          <button className="btn btn-primary btn-sm" onClick={() => onStart(instance.id)} disabled={isBusy}>
+          <button className="btn btn-ghost btn-sm" onClick={() => onStart(instance.id)} disabled={isBusy}>
             ▶ 启动
           </button>
         )}
         <button
-          className="btn btn-sm"
+          className="btn btn-ghost btn-sm"
           onClick={() => onOpen(displayUrl)}
           disabled={!canOpen}
           title={openTitle}
