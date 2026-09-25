@@ -78,7 +78,9 @@ func (a *App) startup(ctx context.Context) {
 	a.mu.Unlock()
 	a.autoStartIDs.Store(autoStart)
 
-	// Restore last window geometry (defaults remain when unset).
+	// 窗口尺寸：用上次保存的宽高（没保存就用默认 1280x820）。
+	// 窗口位置：每次启动都强制放主屏幕中央 —— 不再恢复上次坐标，
+	// 否则用户把窗口拖到副屏后拔掉副屏，下次启动窗口就跑到屏幕外了。
 	st0 := a.settings.get()
 	w, h := st0.WinW, st0.WinH
 	if w < 200 {
@@ -88,18 +90,9 @@ func (a *App) startup(ctx context.Context) {
 		h = 820
 	}
 	runtime.WindowSetSize(ctx, w, h)
-
-	// 校验窗口位置：用户之前把窗口拖到副屏，后来副屏拔掉/改分辨率，那个坐标就成了"在屏幕外"。
-	// 简单兜底：x 在 [-2000, 4096]、y 在 [-1000, 2160] 之外就强制挪到主屏中央。
-	if st0.WinX != 0 || st0.WinY != 0 {
-		x, y := st0.WinX, st0.WinY
-		inRange := x > -2000 && x < 4096 && y > -1000 && y < 2160
-		if !inRange {
-			x = (1920 - w) / 2
-			y = (1080 - h) / 3
-		}
-		runtime.WindowSetPosition(ctx, x, y)
-	}
+	// 放主屏幕中央：x = (主屏宽 - 窗口宽) / 2，y = (主屏高 - 窗口高) / 3
+	// （y 用 /3 而不是 /2，让窗口略偏上，看着舒服）。
+	runtime.WindowSetPosition(ctx, (1920-w)/2, (1080-h)/3)
 
 	// Install the system tray icon + menu.
 	a.startTray()
