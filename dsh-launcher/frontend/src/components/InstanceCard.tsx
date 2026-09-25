@@ -140,18 +140,21 @@ export default function InstanceCard({
       className={`instance-card ${st.rail} ${activeLog ? 'active' : ''} ${landed ? 'inst-landed' : ''}`}
       data-inst-id={instance.id}
     >
-      {/* 行 1：身份信息 —— 手柄 | 名称 | 状态 | 版本 | 来源 | 自启 ... 服务 tag | ⋯ */}
+      {/* 拖拽手柄：放在卡片直接子元素层级（不包在行 1 里），用 align-self:stretch
+          让它贯穿整张卡片的高度（从行 1 顶部到行 2 底部）。 */}
+      <button
+        type="button"
+        className="inst-grip"
+        title="拖动调整顺序（也可聚焦后按 ↑ / ↓）"
+        aria-label={`调整「${instance.name}」的顺序`}
+        onPointerDown={(e) => onDragHandleDown(e, instance.id)}
+        onKeyDown={(e) => onDragHandleKeyDown(e, instance.id)}
+      >
+        <GripVertical size={16} strokeWidth={2} aria-hidden />
+      </button>
+
+      {/* 行 1：身份信息 —— 名称 | 状态 | 版本 | 来源 | 自启 ... 服务 tag | ⋯ */}
       <div className="instance-top">
-        <button
-          type="button"
-          className="inst-grip"
-          title="拖动调整顺序（也可聚焦后按 ↑ / ↓）"
-          aria-label={`调整「${instance.name}」的顺序`}
-          onPointerDown={(e) => onDragHandleDown(e, instance.id)}
-          onKeyDown={(e) => onDragHandleKeyDown(e, instance.id)}
-        >
-          <GripVertical size={16} strokeWidth={2} aria-hidden />
-        </button>
         <span className="instance-name" title={metaTip}>{instance.name}</span>
         <span className={`status-badge ${st.cls}`}>
           <span className="status-dot" />

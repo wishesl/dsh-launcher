@@ -543,11 +543,11 @@ body.reordering { cursor: grabbing; user-select: none; }
   to { opacity: 1; transform: none; }
 }
 
-/* 排序手柄：平时很淡，悬停/聚焦才显形，避免和卡片里的按钮抢注意力。
-   height 改为 100% 让它在卡片内拉满一竖（而不是只占 20px 小方块）。 */
+/* 排序手柄：作为卡片直接子元素，align-self:stretch 让它贯穿整张卡片高度。
+   平时很淡，悬停/聚焦才显形。 */
 .inst-grip {
   flex: none;
-  width: 22px; align-self: stretch;
+  width: 26px; align-self: stretch;
   margin-left: -4px;
   display: grid; place-items: center;
   padding: 0;
@@ -569,18 +569,24 @@ body.reordering { cursor: grabbing; user-select: none; }
 
 .instance-card {
   --rail: #b6bdcc;
-  display: flex; flex-direction: column; gap: 8px;
+  display: flex; flex-direction: row; align-items: stretch; gap: 0;
   background: var(--panel);
   border: 1px solid var(--border-soft);
   border-left: 4px solid var(--rail);
   border-radius: 12px;
-  /* 紧凑模式：从 13/16 收到 10/14，gap 同步收 */
-  padding: 10px 14px 10px 16px;
+  /* 紧凑模式：padding 收到 10/14 */
+  padding: 10px 14px 10px 0;
   box-shadow: var(--shadow-card);
   transition: box-shadow .15s, border-color .15s;
 }
 .instance-card:hover { box-shadow: 0 4px 16px rgba(20, 27, 46, .08); border-color: var(--border); }
 .instance-card.active { box-shadow: 0 0 0 3px var(--accent-soft); border-color: var(--accent); }
+
+/* 卡片主体（行 1 + 行 2 包成一列） */
+.instance-body {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
 
 .instance-top { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-width: 0; }
 .instance-name {
@@ -591,10 +597,9 @@ body.reordering { cursor: grabbing; user-select: none; }
 .instance-top-spacer { flex: 1 1 auto; }
 .instance-state { margin-left: auto; }
 
-/* 行 2：主操作区 —— 与行 1 手柄对齐，左对齐，不再 spacer 推开 */
+/* 行 2：主操作区 —— 左对齐（手柄已经在卡片主体外，这里不需要 padding-left） */
 .instance-actions-row {
   display: flex; align-items: center; gap: 8px;
-  padding-left: 24px; /* 对齐手柄宽度（20px + margin-left:-4px ≈ 24px） */
 }
 
 /* status badge: colored dot + label */
@@ -628,11 +633,14 @@ body.reordering { cursor: grabbing; user-select: none; }
 
 /* ⋯ 菜单：定位 + 弹出层 */
 .inst-menu { position: relative; flex: none; }
+/* ⋯ 按钮去掉边框：纯图标、无背景，hover 时只变字色 */
 .inst-menu-btn {
   padding: 4px 6px; min-width: 26px;
   color: var(--text-3);
+  border: 0 !important;
+  background: transparent !important;
 }
-.inst-menu-btn:hover { color: var(--text); }
+.inst-menu-btn:hover { color: var(--text); background: var(--panel-2) !important; }
 .inst-menu-pop {
   position: absolute; right: 0; top: calc(100% + 4px);
   min-width: 170px;
