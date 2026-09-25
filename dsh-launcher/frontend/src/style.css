@@ -409,8 +409,10 @@ html, body, #root {
   cursor: pointer;
 }
 .side-status-more:hover { color: var(--text-2); text-decoration: underline; }
-/* 收起态：只渲染一个小圆点，点击跳到实例页 */
+/* 收起态：只渲染一个小圆点，点击跳到实例页。
+   同样用 margin-top:auto 推到 sidebar 底部（与展开态一致）。 */
 .side-status-collapsed {
+  margin-top: auto;
   display: grid; place-items: center;
   padding: 4px 0 8px;
   cursor: pointer;
