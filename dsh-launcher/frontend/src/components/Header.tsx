@@ -1,5 +1,5 @@
 import type { Instance, RegistryInfo } from '../types';
-import { RotateCw, ChevronsLeft, ChevronsRight, Terminal, Monitor } from 'lucide-react';
+import { RotateCw, ChevronsLeft, ChevronsRight, Terminal, Monitor, LogOut } from 'lucide-react';
 import WinControls from './WinControls';
 import dshLogo from '../assets/dsh.svg';
 
@@ -175,22 +175,24 @@ export default function Header({
           </button>
         )}
         {embedMode ? (
-          /* 内嵌模式：这一组换成「刷新 / 退出」，下半区不再放工具条 */
+          /* 内嵌模式：这一组换成「刷新 / 退出」图标按钮（无文字，与其他图标按钮统一） */
           <>
             <button
-              className="btn btn-ghost embed-refresh-btn"
+              className="btn btn-icon btn-ghost"
               onClick={onRefreshEmbed}
               disabled={!embedReady}
               title={embedTitle ? `重新加载 ${embedTitle}` : '重新加载内嵌页面'}
+              aria-label="刷新内嵌页面"
             >
-              刷新
+              <RotateCw size={16} strokeWidth={1.75} aria-hidden />
             </button>
             <button
-              className="btn btn-accent embed-exit-btn"
+              className="btn btn-icon btn-accent"
               onClick={onToggleEmbed}
               title="退出内嵌视图，回到启动器界面（Esc）"
+              aria-label="退出内嵌视图"
             >
-              退出
+              <LogOut size={16} strokeWidth={1.75} aria-hidden />
             </button>
           </>
         ) : (
