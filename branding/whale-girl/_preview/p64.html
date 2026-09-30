@@ -1,0 +1,159 @@
+<!doctype html><meta charset="utf-8">
+<style>html,body{margin:0;padding:0;background:transparent;overflow:hidden}
+svg{display:block;width:64px;height:64px}</style>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="鲸鱼娘 logo">
+  <title>鲸鱼娘 Logo</title>
+  <defs>
+    <clipPath id="sq"><rect width="512" height="512" rx="122"/></clipPath>
+    <clipPath id="face"><ellipse cx="256" cy="306" rx="150" ry="148"/></clipPath>
+
+    <linearGradient id="gBg" x1="0" y1="0" x2="0.45" y2="1">
+      <stop offset="0" stop-color="#f5faff"/>
+      <stop offset="0.5" stop-color="#dfebfb"/>
+      <stop offset="1" stop-color="#c1d7f6"/>
+    </linearGradient>
+    <radialGradient id="gGlow" cx="0.28" cy="0.16" r="0.8">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gHairBack" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0" stop-color="#4163b0"/>
+      <stop offset="1" stop-color="#20376f"/>
+    </linearGradient>
+    <linearGradient id="gHair" x1="0.15" y1="0" x2="0.75" y2="1">
+      <stop offset="0" stop-color="#7d9ce4"/>
+      <stop offset="0.42" stop-color="#4c6ebd"/>
+      <stop offset="1" stop-color="#2b4784"/>
+    </linearGradient>
+    <linearGradient id="gSkin" x1="0.5" y1="0.1" x2="0.5" y2="1">
+      <stop offset="0" stop-color="#fff8f3"/>
+      <stop offset="0.7" stop-color="#fbe7db"/>
+      <stop offset="1" stop-color="#f7d8c8"/>
+    </linearGradient>
+    <linearGradient id="gFrill" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e2ebfa"/>
+    </linearGradient>
+    <linearGradient id="gFluke" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#9ab8f2"/>
+      <stop offset="0.45" stop-color="#5b7fd0"/>
+      <stop offset="1" stop-color="#3a5aa8"/>
+    </linearGradient>
+    <filter id="fSoft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+    <filter id="fSoft2" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="4"/>
+    </filter>
+  </defs>
+
+  <!-- 背景 -->
+  <g clip-path="url(#sq)">
+    <rect width="512" height="512" fill="url(#gBg)"/>
+    <rect width="512" height="512" fill="url(#gGlow)"/>
+    <ellipse cx="256" cy="580" rx="320" ry="130" fill="#a9c4ea" opacity="0.45" filter="url(#fSoft)"/>
+    <g fill="#ffffff" opacity="0.5">
+      <circle cx="444" cy="424" r="20"/>
+      <circle cx="472" cy="374" r="10"/>
+      <circle cx="410" cy="468" r="7"/>
+      <circle cx="68" cy="428" r="12"/>
+      <circle cx="48" cy="374" r="6"/>
+    </g>
+    <rect x="10" y="10" width="492" height="492" rx="114" fill="none" stroke="#ffffff" stroke-width="6" opacity="0.45"/>
+  </g>
+
+  <!-- 后发 -->
+  <ellipse cx="256" cy="276" rx="186" ry="178" fill="url(#gHairBack)"/>
+
+  <!-- 脸 -->
+  <ellipse cx="256" cy="306" rx="150" ry="148" fill="url(#gSkin)"/>
+  <g clip-path="url(#face)">
+    <ellipse cx="256" cy="296" rx="146" ry="40" fill="#d9a894" opacity="0.15" filter="url(#fSoft)"/>
+  </g>
+
+  <!-- 呆毛 -->
+  <path d="M 238 106 C 212 76 218 38 254 20 C 236 52 242 80 264 108 Z" fill="url(#gHair)"/>
+
+  <!-- 刘海 -->
+  <path fill="url(#gHair)" d="
+    M 96 300
+    C 90 168 154 92 256 92
+    C 358 92 422 168 416 300
+    C 408 258 398 212 382 206
+    C 374 252 366 288 356 294
+    C 346 262 336 214 320 206
+    C 312 248 304 288 292 296
+    C 282 262 268 212 252 200
+    C 244 240 234 286 222 294
+    C 212 256 200 210 184 206
+    C 176 250 168 286 156 294
+    C 146 268 132 224 112 222
+    C 104 254 100 288 96 300
+    Z"/>
+
+  <!-- 发丝高光 -->
+  <path d="M 134 244 C 158 180 208 140 282 136 C 232 160 192 200 172 252 C 162 282 154 296 144 298 C 136 286 134 264 134 244 Z"
+        fill="#a8c4f4" opacity="0.38" filter="url(#fSoft2)"/>
+  <path d="M 300 148 C 340 158 372 186 388 224 C 372 200 344 178 310 168 Z"
+        fill="#a8c4f4" opacity="0.25" filter="url(#fSoft2)"/>
+
+  <!-- 女仆发箍（鲸须花边） -->
+  <g fill="url(#gFrill)">
+    <circle cx="148" cy="206" r="28"/>
+    <circle cx="180" cy="174" r="28"/>
+    <circle cx="216" cy="152" r="29"/>
+    <circle cx="256" cy="144" r="29"/>
+    <circle cx="296" cy="150" r="29"/>
+    <circle cx="334" cy="170" r="28"/>
+    <circle cx="366" cy="200" r="28"/>
+  </g>
+  <path d="M 136 232 C 174 178 214 158 256 158 C 298 158 338 178 376 232"
+        fill="none" stroke="url(#gFrill)" stroke-width="26" stroke-linecap="round"/>
+  <path d="M 142 240 C 178 190 216 172 256 172 C 296 172 334 190 370 240"
+        fill="none" stroke="#cfdcf4" stroke-width="4.5" stroke-linecap="round" opacity="0.9"/>
+
+  <!-- 鲸尾发饰 -->
+  <g transform="translate(400,224) rotate(-30) scale(0.66)">
+    <path d="M 0 36 C -12 10 -36 -12 -66 -32 C -44 0 -22 8 0 8 C 22 8 44 0 66 -32 C 36 -12 12 10 0 36 Z" fill="url(#gFluke)"/>
+    <path d="M -48 -20 C -36 -2 -20 4 -4 6" fill="none" stroke="#bfd3f7" stroke-width="4" stroke-linecap="round" opacity="0.6"/>
+    <path d="M 48 -20 C 36 -2 20 4 4 6" fill="none" stroke="#bfd3f7" stroke-width="4" stroke-linecap="round" opacity="0.6"/>
+    <rect x="-18" y="28" width="36" height="24" rx="12" fill="#33528f"/>
+  </g>
+
+  <!-- 头顶水花 -->
+  <g fill="#ffffff">
+    <circle cx="188" cy="78" r="9" opacity="0.95"/>
+    <circle cx="156" cy="50" r="7" opacity="0.9"/>
+    <circle cx="118" cy="40" r="5" opacity="0.8"/>
+    <circle cx="86" cy="60" r="4" opacity="0.7"/>
+  </g>
+
+  <!-- 腮红 -->
+  <g clip-path="url(#face)">
+    <g filter="url(#fSoft)" opacity="0.8">
+      <ellipse cx="158" cy="380" rx="28" ry="15" fill="#f9ada4"/>
+      <ellipse cx="354" cy="380" rx="28" ry="15" fill="#f9ada4"/>
+    </g>
+  </g>
+
+  <!-- 眼睛 -->
+  <g>
+    <ellipse cx="200" cy="334" rx="26" ry="34" fill="#1e2b4a"/>
+    <ellipse cx="312" cy="334" rx="26" ry="34" fill="#1e2b4a"/>
+    <ellipse cx="200" cy="348" rx="18" ry="18" fill="#3a5aa8" opacity="0.55"/>
+    <ellipse cx="312" cy="348" rx="18" ry="18" fill="#3a5aa8" opacity="0.55"/>
+    <circle cx="190" cy="320" r="8" fill="#ffffff"/>
+    <circle cx="302" cy="320" r="8" fill="#ffffff"/>
+    <circle cx="208" cy="346" r="4" fill="#ffffff" opacity="0.85"/>
+    <circle cx="320" cy="346" r="4" fill="#ffffff" opacity="0.85"/>
+  </g>
+  <path d="M 243 396 C 248 405 253 405 256 398 C 259 405 264 405 269 396"
+        fill="none" stroke="#8a5a52" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>
+
+  <!-- 闪光 -->
+  <g fill="#ffffff" opacity="0.85">
+    <path d="M 452 300 l 4.5 13 13 4.5 -13 4.5 -4.5 13 -4.5 -13 -13 -4.5 13 -4.5 z"/>
+    <path d="M 62 250 l 3 9 9 3 -9 3 -3 9 -3 -9 -9 -3 9 -3 z" opacity="0.7"/>
+  </g>
+</svg>
+
