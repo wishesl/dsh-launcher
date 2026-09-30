@@ -63,8 +63,8 @@ html, body, #root {
   flex-direction: column;
   /* 顶栏与下方大卡之间的空隙删掉：两张卡上下贴住，只在底部留一口气 */
   gap: 0;
-  /* 四周间距收到 2px：外壳几乎贴到窗口边缘 */
-  padding: 2px;
+  /* 四周间距：外壳几乎贴到窗口边缘 */
+  padding: 4px;
   height: 100vh;
   overflow: hidden;
   background: var(--bg);
