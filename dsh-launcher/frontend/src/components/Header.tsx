@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Instance, RegistryInfo } from '../types';
 import { RotateCw, ChevronsLeft, ChevronsRight, Terminal, Monitor, LogOut } from 'lucide-react';
 import WinControls from './WinControls';
-import dshLogo from '../assets/dsh.svg';
+import dshLogo from '../assets/logo.png';
 
 interface Props {
   registry: RegistryInfo | null;

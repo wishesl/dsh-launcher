@@ -1,6 +1,6 @@
 import { History, Server, Store, Settings, Plus } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import dshLogo from '../assets/dsh.svg';
+import dshLogo from '../assets/logo.png';
 import type { Instance } from '../types';
 
 export type ViewKey = 'versions' | 'instances' | 'market' | 'settings';

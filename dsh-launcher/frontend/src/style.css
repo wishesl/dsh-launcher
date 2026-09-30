@@ -206,7 +206,8 @@ html, body, #root {
    在浅色顶栏里读起来像脚手架默认的占位贴纸，也和右侧无边框的 chip 语言打架。 */
 .brand-logo-img {
   width: 28px; height: 28px; flex: none;
-  object-fit: contain;
+  object-fit: cover;
+  border-radius: 6px;
   background: transparent;
 }
 /* 单行字标：原来主标 + 副标题两行，副标题既重复产品名又比主标长，把重心往右拽。 */
