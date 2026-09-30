@@ -1,0 +1,71 @@
+name: bug 报告
+description: 启动器行为不符合预期 / 报错 / 界面异常
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请先搜索[已有 issue](https://github.com/wishesl/dsh-launcher/issues) 避免重复。
+        信息越全，定位越快 —— 版本号和日志是最关键的两样。
+
+  - type: input
+    id: launcher-version
+    attributes:
+      label: 启动器版本
+      description: 顶栏品牌区的版本 pill（`dev` 表示本地构建，也请注明）。
+      placeholder: 0.6.0 / dev
+    validations:
+      required: true
+
+  - type: input
+    id: dsh-version
+    attributes:
+      label: DSH 版本
+      description: 实例运行的 DSH 版本（实例卡片或版本页可见）；不知道可留空。
+      placeholder: 0.2.0-rc.2
+
+  - type: input
+    id: os
+    attributes:
+      label: 操作系统
+      placeholder: Windows 11 23H2
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 尽量最小化复现路径。
+      placeholder: |
+        1. 打开「插件市场」
+        2. 点击 X 插件的「安装」
+        3. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-actual
+    attributes:
+      label: 期望 / 实际
+      placeholder: |
+        期望：安装成功并在右栏看到进度
+        实际：右栏显示 …
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志
+      description: 右栏「运行日志 / 市场任务 / 兼容性」里的相关片段；涉及界面问题可附截图。
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 已搜索过已有 issue，没有重复
+        - label: 用的是最新 Release 版本（或注明了本地构建的具体改动）

@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 使用问题 / 疑问
+    url: https://github.com/wishesl/dsh-launcher/discussions
+    about: 不确定是 bug 还是用法问题时，可以先在这里讨论。

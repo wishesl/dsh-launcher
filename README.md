@@ -1,5 +1,7 @@
 # DSH Launcher
 
+[English](README.en.md) | 简体中文
+
 一个 **跨平台桌面 GUI 启动器**（Windows / macOS / Linux），用于以「指定目录 + 指定版本」的方式启动
 **DeepSeek Harness（DSH）**，并可视化地查询版本、管理实例、装配插件、查看实时日志。
 
@@ -7,7 +9,9 @@ DSH 的启动方式本质是一条 `npx -y @deepseek-ai/dsh@<版本> web` 命令
 启动器把「选目录 + 选版本 + 启动/停止 + 配插件 + 看日志」封装成开箱即用的图形界面，
 还能把 DSH 界面直接**嵌进自己的窗口**当伪桌面版用。
 
+[![CI](https://img.shields.io/github/actions/workflow/status/wishesl/dsh-launcher/ci.yml?branch=master&style=flat-square&label=CI)](https://github.com/wishesl/dsh-launcher/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/wishesl/dsh-launcher?style=flat-square&label=Release)](https://github.com/wishesl/dsh-launcher/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
 ## 界面预览
 
@@ -301,3 +305,12 @@ git push origin v0.1.0
 - [`插件收藏功能实现方案.md`](doc/插件收藏功能实现方案.md) —— 收藏与分享码设计决策
 - [`插件更新功能实现方案.md`](doc/插件更新功能实现方案.md) —— 插件更新检查与执行设计决策
 - [`版本升级实现方案.md`](doc/版本升级实现方案.md) —— 启动器自更新（check → download → verify → apply）设计决策
+
+## 贡献与安全
+
+欢迎 Issue 与 PR —— 贡献流程见 [`CONTRIBUTING.md`](CONTRIBUTING.md)，漏洞报告渠道见 [`SECURITY.md`](SECURITY.md)
+（请勿公开提安全 issue）。
+
+## 许可证
+
+本项目基于 [MIT License](LICENSE) 开源。
