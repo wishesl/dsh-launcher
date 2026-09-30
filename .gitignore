@@ -22,3 +22,7 @@ dsh-launcher/frontend/dist/
 
 # Vendored DSH source checkout (local reference copy, not project source)
 dsh-vsn/
+
+# 本地品牌素材（源文件不入库，成品图标在 dsh-launcher/build/ 下）
+/logo.jpg
+/branding/
