@@ -140,7 +140,7 @@ export default function Header({
           <span className={`dot ${ready ? 'dot-live' : running ? 'dot-warn' : ''}`} />
           {ready ? (
             <button className="dsh-chip-open" onClick={() => onOpenWeb(serviceLive!.url)}>
-              DSH 已就绪 · {serviceLive!.name} · {serviceLive!.url}
+              DSH 已就绪 · {serviceLive!.name}
             </button>
           ) : running ? (
             <span className="chip-label">{dshLive!.status === 'starting' ? 'DSH 启动中…' : 'DSH 运行中…'}</span>
