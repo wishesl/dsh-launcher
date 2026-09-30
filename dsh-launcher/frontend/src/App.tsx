@@ -823,7 +823,7 @@ export default function App() {
       showToast('当前没有运行中的 DSH 实例', 'error');
       return;
     }
-    if (!window.confirm(`确定重启「${dshLive.name}」？运行中的会话会中断，实例目录与插件不变。`)) return;
+    // 不再弹 confirm：用户点「重启 DSH」就是要重启，弹原生 confirm 是 wails.localhost 风格很丑。
     try {
       await api.stopInstance(dshLive.id);
       showToast(`正在重启 ${dshLive.name}…`);
