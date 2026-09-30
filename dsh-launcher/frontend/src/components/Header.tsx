@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import type { Instance, RegistryInfo } from '../types';
 import { RotateCw, ChevronsLeft, ChevronsRight, Terminal, Monitor, LogOut } from 'lucide-react';
 import WinControls from './WinControls';
@@ -67,6 +68,23 @@ export default function Header({
   // still counts and the open button always works when the service is up.
   const ready = !!serviceLive;
   const running = !ready && !!dshLive && dshLive.status !== 'stopped' && dshLive.status !== 'crashed';
+
+  // 内嵌模式下「刷新」按钮的下拉：刷新 iframe / 重启 DSH 进程
+  const [refreshMenuOpen, setRefreshMenuOpen] = useState(false);
+  const refreshMenuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!refreshMenuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!refreshMenuRef.current?.contains(e.target as Node)) setRefreshMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setRefreshMenuOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [refreshMenuOpen]);
 
   return (
     <header className="app-header">
@@ -179,17 +197,46 @@ export default function Header({
           </button>
         )}
         {embedMode ? (
-          /* 内嵌模式：「刷新 / 退出」图标按钮（与其他图标按钮统一，btn-ghost 不再用 btn-accent 粗边框） */
+          /* 内嵌模式：「刷新下拉 / 退出」图标按钮 */
           <>
-            <button
-              className="btn btn-icon btn-ghost"
-              onClick={onRefreshEmbed}
-              disabled={!embedReady}
-              title={embedTitle ? `重新加载 ${embedTitle}` : '重新加载内嵌页面'}
-              aria-label="刷新内嵌页面"
-            >
-              <RotateCw size={16} strokeWidth={1.75} aria-hidden />
-            </button>
+            <div className="header-refresh-menu" ref={refreshMenuRef}>
+              <button
+                className="btn btn-icon btn-ghost"
+                onClick={() => setRefreshMenuOpen((v) => !v)}
+                disabled={!embedReady}
+                title="刷新选项"
+                aria-label="刷新选项"
+                aria-haspopup="menu"
+                aria-expanded={refreshMenuOpen}
+              >
+                <RotateCw size={16} strokeWidth={1.75} aria-hidden />
+              </button>
+              {refreshMenuOpen && (
+                <div className="header-refresh-pop" role="menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="header-refresh-item"
+                    onClick={() => { setRefreshMenuOpen(false); onRefreshEmbed(); }}
+                  >
+                    刷新界面
+                    <span className="header-refresh-sub">重新加载内嵌网页</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="header-refresh-item"
+                    disabled={!dshLive}
+                    onClick={() => { setRefreshMenuOpen(false); onRestartDsh(); }}
+                  >
+                    重启 DSH
+                    <span className="header-refresh-sub">
+                      {dshLive ? `重启「${dshLive.name}」的 DSH 进程` : '没有运行中的实例'}
+                    </span>
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               className="btn btn-icon btn-ghost"
               onClick={onToggleEmbed}
