@@ -222,6 +222,7 @@ export default function Header({
                     刷新界面
                     <span className="header-refresh-sub">重新加载内嵌网页</span>
                   </button>
+                  <div className="header-refresh-sep" />
                   <button
                     type="button"
                     role="menuitem"

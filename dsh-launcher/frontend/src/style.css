@@ -669,6 +669,11 @@ body.reordering { cursor: grabbing; user-select: none; }
 .header-refresh-item:hover:not(:disabled) { background: var(--panel-2); }
 .header-refresh-item:disabled { opacity: .5; cursor: not-allowed; }
 .header-refresh-sub { font-size: 11.5px; font-weight: 400; color: var(--text-3); }
+/* 两个菜单项之间的分割线（"刷新界面"和"重启 DSH"是两类操作，用细线隔开） */
+.header-refresh-sep {
+  height: 1px; margin: 4px 6px;
+  background: var(--border-soft);
+}
 
 .inst-menu-pop {
   position: absolute; right: 0; top: calc(100% + 4px);
