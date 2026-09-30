@@ -152,6 +152,9 @@ export default function Header({
         </div>
         {/* 操作按钮组：靠右，紧邻窗口按钮（见 CSS 的 .header-actions） */}
         <div className="header-actions">
+        {/* 「重启 DSH 进程」按钮：内嵌模式下隐藏 —— 因为内嵌模式已经有「刷新 iframe」按钮
+            （都是 RotateCw 图标），两个放一起重复了。 */}
+        {!embedMode && (
         <button
           className="btn btn-ghost btn-icon"
           onClick={onRestartDsh}
@@ -161,6 +164,7 @@ export default function Header({
         >
           <RotateCw size={16} strokeWidth={1.75} aria-hidden />
         </button>
+        )}
         {/* 运行日志开关。内嵌态右栏日志整块没渲染（App.tsx 的 LogDrawer 在 !embedMode 分支里），
             切 logsOpen 不会有任何可见变化 —— 所以内嵌态不渲染这个按钮，只留「刷新 / 退出」。 */}
         {!embedMode && (
@@ -175,7 +179,7 @@ export default function Header({
           </button>
         )}
         {embedMode ? (
-          /* 内嵌模式：这一组换成「刷新 / 退出」图标按钮（无文字，与其他图标按钮统一） */
+          /* 内嵌模式：「刷新 / 退出」图标按钮（与其他图标按钮统一，btn-ghost 不再用 btn-accent 粗边框） */
           <>
             <button
               className="btn btn-icon btn-ghost"
@@ -187,7 +191,7 @@ export default function Header({
               <RotateCw size={16} strokeWidth={1.75} aria-hidden />
             </button>
             <button
-              className="btn btn-icon btn-accent"
+              className="btn btn-icon btn-ghost"
               onClick={onToggleEmbed}
               title="退出内嵌视图，回到启动器界面（Esc）"
               aria-label="退出内嵌视图"
