@@ -1,0 +1,50 @@
+name: ci
+
+# PR / push 的编译门禁：前端类型检查 + 构建、Go vet、Go 编译检查。
+# 与 release.yml（推 v* 标签才触发的三端打包）互补 —— 这里只负责"改动没被编坏"。
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    name: Frontend + Go
+    # 用 Windows runner：主平台就是 Windows，wails v2 应用在 Windows 上
+    # 纯 go build / go vet 不需要额外系统依赖（Linux runner 还得装 gtk/webkit 头文件）。
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: dsh-launcher/frontend/package-lock.json
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Install frontend dependencies
+        working-directory: dsh-launcher/frontend
+        run: npm ci
+
+      # = tsc && vite build；main.go 用 //go:embed all:frontend/dist，
+      # 前端产物必须先存在，否则下面的 go build 直接失败。
+      - name: Frontend type-check + build
+        working-directory: dsh-launcher/frontend
+        run: npm run build
+
+      - name: Go vet
+        working-directory: dsh-launcher
+        run: go vet ./...
+
+      - name: Go build (compile check)
+        working-directory: dsh-launcher
+        run: go build ./...
