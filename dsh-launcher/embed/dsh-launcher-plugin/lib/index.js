@@ -48,6 +48,8 @@ const RESTART_ACK_TIMEOUT_MS = 5000;
 const RESTART_EXIT_DELAY_MS = 500;
 /** 优雅退出没生效时的观察窗（DSH 自己的强制退出上限是 5s，这里更早动手）。 */
 const RESTART_EXIT_VERIFY_MS = 3000;
+/** 新装载会话就绪后，隔多久补做还没完成的续跑交付（等服务挂齐再试）。 */
+const RESUME_DELIVERY_DELAY_MS = 300;
 
 /** DSH 主题设置命名空间（dsh-client-ui-theme 写进共享 profile 的 ui-theme）。 */
 const THEME_NS = "ui-theme";
@@ -94,8 +96,17 @@ let themeWriteInFlight = false;
 let themeAnchor = 0;
 /** 待交付的重启完成负载（null = 无）。 */
 let pendingRestart = null;
-/** 本次启动是否已收到 launcher 下发的 pending（挡住重复交付）。 */
-let pendingHandled = false;
+/**
+ * 待交付的续跑负载（进程级，**跨装载会话存活**）。形状：
+ *   { pending, attempts, state: "idle"|"waiting"|"delivering"|"delivered"|"gaveup",
+ *     gen, inflight, inflightSession }
+ *
+ * 为什么不放在 session 里、也不做"一次闩死"：0.2.6 起 `dsh.client` 让每次启动都出现
+ * 「装载会话 #1 → 拆掉 → #2」，负载若落在 #1 的 socket 上，交付必须能在 #2 里补做。
+ * 2026-10-02 01:27 真机事故：负载被 #1 收到、闩死 + 重试绑在 #1 的失效 ctx 上，
+ * 「重启完成」再没进过会话（会话文件里最后一条注入停在 0.2.4 时代）。
+ */
+let pendingDelivery = null;
 /** settings 服务是否就绪（用于 5s 后给 themeReport 一个可见结论）。 */
 let settingsReady = false;
 /** themeReport 是否已给出结论（未给出 = 面板不显示该行，fail-open）。 */
@@ -446,6 +457,26 @@ function pushTheme(preference) {
 //#endregion
 
 //#region 重启完成交付（复用 dsh-self-mcp 的成熟套路：agent.followup 优先、prompt 回退）
+/**
+ * 续跑交付留痕：stderr（→ launcher 捕获的实例日志）+ 一条 `command-result` 帧（→ app.log 面板）。
+ *
+ * 为什么不用 `ctx.logger`：真机实测（2026-10-01 22:16）它的输出既不进实例日志、也不进
+ * app.log。2026-10-02 01:27 那次「重启完成」缺席正是因为这个盲点 —— 整条交付链没有任何
+ * 痕迹，事后无法判断它断在哪一腿。交付一次最多写 6 条退避痕 + 1 条结论，噪声可控。
+ */
+function deliveryTrace(line) {
+	try {
+		console.error(`[dsh-launcher-plugin] 重启续跑：${line}`);
+	} catch {
+		// 日志写不出去不能影响交付
+	}
+	try {
+		sendFrame("command-result", { id: "", ok: true, detail: line });
+	} catch {
+		// 桥接没连上就算了：stderr 那份已经落在实例日志里
+	}
+}
+
 /** 折叠行上的一行摘要（`notice` 形态的 `summary`）。 */
 const NOTICE_SUMMARY = "DSH 已重启完成，继续执行";
 /** 一行摘要上限，对齐 @deepseek-ai/dsh-llm 的 CONTEXT_SUMMARY_MAX_CHARS。 */
@@ -514,7 +545,9 @@ async function deliverAsPluginNotice(controller, pending, text) {
 	agent.followup(createPluginNotice(text, NOTICE_SUMMARY));
 }
 
-/** 投递「重启完成」并唤醒发起会话。首选 plugin/notice；失败回退 prompt() 保证送达。 */
+/** 投递「重启完成」并唤醒发起会话。首选 plugin/notice；失败回退 prompt() 保证送达。
+ *  返回实际成功的通道名（只用于留痕）。能力 `restartDelivery` 只在**真的投递成功**时才报 ok ——
+ *  回退过程中不报 false，否则一次成功的回退会把顶栏胶囊染成红的（fail-open：宁可不说，不可误报）。 */
 async function deliverRestartComplete(ctx, pending) {
 	const controller = ctx.get("sessionController");
 	if (controller === void 0) {
@@ -525,10 +558,9 @@ async function deliverRestartComplete(ctx, pending) {
 	try {
 		await deliverAsPluginNotice(controller, pending, text);
 		setCapability("restartDelivery", true);
-		return;
+		return "plugin/notice";
 	} catch (error) {
-		ctx.logger.warn(`[dsh-launcher-plugin] plugin 通道投递失败（${error.message}），回退到 prompt() 可见通道`);
-		setCapability("restartDelivery", false, `已回退 sessionController.prompt()：${error.message}`);
+		deliveryTrace(`plugin/notice 通道投递失败（${error?.message ?? error}），回退到 sessionController.prompt()`);
 	}
 
 	if (typeof controller.prompt !== "function") {
@@ -543,45 +575,115 @@ async function deliverRestartComplete(ctx, pending) {
 	if (result === null || typeof result !== "object" || result.accepted !== true) {
 		throw new Error(`prompt 未被接受: ${JSON.stringify(result ?? null)}`);
 	}
+	setCapability("restartDelivery", true);
+	return "sessionController.prompt";
 }
 
-/** 收 launcher 下发的续跑负载（替代旧版 GET /pending）。只处理第一条：
- *  交付成功或用尽之前不接受第二条，避免重复注入。 */
+/** 收 launcher 下发的续跑负载（替代旧版 GET /pending）。
+ *
+ *  launcher 在**每次握手**都会重发当前负载（它只在收到 pending-consumed 后才删），所以这里
+ *  必须按负载身份去重；但"重复下发"不等于"不用管"——若上一发还停在 waiting（例如重试计时器
+ *  排在了已失效的 ctx 上），这次握手正好是补做的时机。
+ */
 function receivePending(pending) {
-	if (pendingHandled) return;
-	pendingHandled = true;
 	if (pending === null || pending === undefined) return;
 	if (typeof pending !== "object" || !pending.sessionId) return;
+	const current = pendingDelivery;
+	if (current !== null && samePending(current.pending, pending)) {
+		if (current.state === "waiting") {
+			deliveryTrace(`负载重复下发（会话 ${pending.sessionId}）且上一发还停在等待，借这次握手再试一次`);
+			attemptDelivery();
+		} else {
+			deliveryTrace(`负载重复下发（会话 ${pending.sessionId}，当前状态 ${current.state}），忽略`);
+		}
+		return;
+	}
 	pendingRestart = pending;
-	scheduleDelivery(ctxRef, pending);
+	pendingDelivery = { pending, attempts: 0, state: "idle", gen: 0, inflight: false, inflightSession: null };
+	deliveryTrace(`收到续跑负载（会话 ${pending.sessionId}，原因 ${pending.reason || "(未说明)"}），开始交付`);
+	attemptDelivery();
 }
 
-/** 带退避的交付：成功即回 pending-consumed 帧；进程内不无限重试，
- *  用尽后负载留在 launcher（下次启动重新下发），同时挡住新的 dsh-restart 调用。 */
-function scheduleDelivery(ctx, pending) {
-	let attempts = 0;
-	const attempt = () => {
-		deliverRestartComplete(ctx, pending)
-			.then(() => {
+/** 同一份负载吗（launcher 重发时 requestedAt 与 sessionId 都不变）。 */
+function samePending(a, b) {
+	return a.sessionId === b.sessionId && a.requestedAt === b.requestedAt;
+}
+
+/**
+ * 试一次交付 —— **每次都绑当前存活的装载会话**。
+ *
+ * 这是 0.2.8 的核心修法：0.2.6 起 `dsh.client` 让每次启动都出现「装载会话 #1 → 拆掉 → #2」，
+ * 负载常落在 #1 的 socket 上。旧实现把重试的 ctx 在第一次调用时就固定下来（`armTimeout(..., ctx)`），
+ * 会话一拆，重试要么排不上、要么打在失效 ctx 上，交付就永远做不完（2026-10-02 01:27 真机事故）。
+ *
+ * 三条护栏：
+ *   ①同一个会话里同时只允许一发在飞（`inflight` + `inflightSession`）；
+ *   ②换代号 `gen`：上一发的结果若在换会话/重排之后才回来，直接丢弃，绝不重复注入；
+ *   ③没有存活会话就置 `waiting` 返回 —— 由新会话的 `resumePendingDelivery()` 或下一次握手补做。
+ */
+function attemptDelivery() {
+	const d = pendingDelivery;
+	if (d === null) return;
+	if (d.state === "delivered" || d.state === "gaveup") return;
+	const live = session;
+	if (live === null || !sessionAlive()) {
+		d.state = "waiting";
+		deliveryTrace(`没有存活会话（负载会话 ${d.pending.sessionId}），等下一次装载或握手再交付`);
+		return;
+	}
+	if (d.inflight && d.inflightSession === live) {
+		deliveryTrace(`同一会话里已有一发交付在飞，忽略这次触发`);
+		return;
+	}
+	const ctx = ctxRef;
+	if (ctx === null) {
+		d.state = "waiting";
+		deliveryTrace("ctxRef 尚未就绪，等下一次装载再交付");
+		return;
+	}
+	const gen = (d.gen += 1);
+	const pending = d.pending;
+	d.inflight = true;
+	d.inflightSession = live;
+	d.state = "delivering";
+	deliverRestartComplete(ctx, pending)
+		.then((channel) => {
+			if (d.gen !== gen) return;
+			d.inflight = false;
+			d.state = "delivered";
+			pendingRestart = null;
+			deliveryTrace(`已向会话 ${pending.sessionId} 注入重启完成消息（通道 ${channel}，第 ${d.attempts + 1} 次尝试）`);
+			if (!sendFrame("pending-consumed")) {
+				deliveryTrace("桥接未连接，pending-consumed 未发出（负载会随下次握手重发，可能重复注入一次）");
+			}
+		})
+		.catch((error) => {
+			if (d.gen !== gen) return;
+			d.inflight = false;
+			d.attempts += 1;
+			const message = error?.message ?? String(error);
+			if (d.attempts <= RETRY_DELAYS_MS.length) {
+				const delay = RETRY_DELAYS_MS[d.attempts - 1];
+				d.state = "waiting";
+				deliveryTrace(`交付未就绪（${message}），${delay}ms 后重试（${d.attempts}/${RETRY_DELAYS_MS.length}）`);
+				// 不带 ctx：armTimeout 在**触发时**才取 ctxRef，会话换了就自然落到新会话上
+				armTimeout("重启消息交付", attemptDelivery, delay);
+			} else {
+				d.state = "gaveup";
+				deliveryTrace(`交付失败，负载保留在 launcher 待下次启动重试：${message}`);
+				setCapability("restartDelivery", false, `交付失败：${message}`);
+				// 幂等闸不能永久闩死：否则这一整个进程生命周期里 dsh-restart 都会被拒
 				pendingRestart = null;
-				ctx.logger.info(`[dsh-launcher-plugin] 已向会话 ${pending.sessionId} 注入重启完成消息`);
-				if (!sendFrame("pending-consumed")) {
-					ctx.logger.warn("[dsh-launcher-plugin] 桥接未连接，pending-consumed 未发出，下次启动可能重复注入一次");
-				}
-			})
-			.catch((error) => {
-				attempts += 1;
-				if (attempts <= RETRY_DELAYS_MS.length) {
-					const delay = RETRY_DELAYS_MS[attempts - 1];
-					ctx.logger.warn(`[dsh-launcher-plugin] 交付未就绪（${error.message}），${delay}ms 后重试 (${attempts}/${RETRY_DELAYS_MS.length})`);
-					armTimeout("重启消息交付", attempt, delay, ctx);
-				} else {
-					ctx.logger.error(`[dsh-launcher-plugin] 重启完成消息交付失败，负载保留在 launcher 待下次启动重试: ${error.message}`);
-					setCapability("restartDelivery", false, `交付失败：${error.message}`);
-				}
-			});
-	};
-	attempt();
+			}
+		});
+}
+
+/** 新装载会话就绪后补做未完成的交付（双半包的补偿路径）。 */
+function resumePendingDelivery() {
+	const d = pendingDelivery;
+	if (d === null || d.state === "delivered" || d.state === "gaveup") return;
+	deliveryTrace(`装载会话 #${session?.id ?? "?"} 就绪，续跑负载尚未交付（会话 ${d.pending.sessionId}，已试 ${d.attempts} 次），再试一次`);
+	armTimeout("重启消息交付", attemptDelivery, RESUME_DELIVERY_DELAY_MS);
 }
 //#endregion
 
@@ -1205,6 +1307,10 @@ function apply(ctx) {
 	//    连上桥接。客户端入口由 DSH 启动时按 package.json 的 dsh.client 自动装载 —— 升级插件
 	//    后要重启一次 DSH 才生效；没生效只是退回服务端写入（慢 ~300ms），不影响正确性。
 	injectPageCoordinates(ctx);
+
+	// 5) 续跑交付补偿：负载可能是在**上一个**（已被拆掉的）装载会话里收到的，
+	//    这里以当前会话的身份再试一次（见 attemptDelivery 的注释）。
+	resumePendingDelivery();
 }
 
 export { Config, apply, inject, name };

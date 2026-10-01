@@ -454,6 +454,101 @@ func TestPluginDuplicateToolSurvivesSecondRow(t *testing.T) {
 	}
 }
 
+// 回归（0.2.8）：重启完成的续跑负载必须能在**被拆掉的装载会话之后**补交。
+//
+// 真机事故 2026-10-02 01:27：0.2.6 起 `dsh.client` 让每次启动都出现「装载会话 #1 → 拆掉 → #2」，
+// 负载常落在 #1 的 socket 上；旧实现 `pendingHandled` 一次闩死、重试又绑在 #1 的 ctx 上，
+// 会话一拆交付再没发生 —— 用户看到的就是"重启完没有续跑消息"。
+//
+// testdata/plugin-pending-reload-harness.mjs 复现同一时序：launcher 预置 pending → 会话 #1
+// 交付失败（控制器未就绪）→ 200ms 后换会话 #2（#1 的定时器/连接被收掉）→ 必须在 #2 上补交，
+// 且只注入一次；随后 pending-consumed 回到 launcher，负载被消费掉。
+func TestBridgePendingRedeliveryAfterSessionReload(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("没有 node，跳过续跑补交回归测试")
+	}
+	harness := filepath.Join("testdata", "plugin-pending-reload-harness.mjs")
+	if _, err := os.Stat(harness); err != nil {
+		t.Fatalf("找不到 harness: %v", err)
+	}
+
+	app, _ := newSelfRestartTestApp(t)
+	app.bridge.start()
+	t.Cleanup(app.bridge.stop)
+	if app.bridge.url == "" {
+		t.Fatal("桥接必须监听成功")
+	}
+	app.mu.Lock()
+	app.processes["inst-a"] = &managedProcess{instanceID: "inst-a", launchID: "L1"}
+	app.mu.Unlock()
+
+	// launcher 侧预置续跑负载（等价于上一次 dsh-restart 留下的 pending）：只在收到
+	// pending-consumed 后才清，所以插件每次握手都会再收到一次。
+	pending := json.RawMessage(`{"sessionId":"session-harness","callId":"c-1","reason":"harness 双半包","requestedAt":1,"launchedByLauncher":true}`)
+	app.bridge.mu.Lock()
+	app.bridge.pending["inst-a"] = pending
+	app.bridge.mu.Unlock()
+
+	outFile, err := os.CreateTemp(t.TempDir(), "plugin-pending-out-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer outFile.Close()
+	errFile, err := os.CreateTemp(t.TempDir(), "plugin-pending-err-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer errFile.Close()
+
+	cmd := exec.Command(node, "--import", "./testdata/plugin-test-register.mjs", harness)
+	cmd.Env = append(os.Environ(),
+		"DSH_LAUNCHER=1",
+		"DSH_LAUNCHER_EVENTS="+app.bridge.url,
+		"DSH_LAUNCHER_TOKEN="+app.bridge.token,
+		"DSH_INSTANCE_ID=inst-a",
+		"DSH_LAUNCH_ID=L1",
+	)
+	cmd.Stdout = outFile
+	cmd.Stderr = errFile
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("启动 harness 失败: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	select {
+	case werr := <-done:
+		if werr != nil {
+			t.Fatalf("harness 非 0 退出：续跑负载没有在第二个装载会话上补交\n%v\nstdout=%s\nstderr=%s",
+				werr, readFileString(outFile.Name()), readFileString(errFile.Name()))
+		}
+	case <-time.After(30 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatalf("harness 30s 没结束\nstdout=%s\nstderr=%s",
+			readFileString(outFile.Name()), readFileString(errFile.Name()))
+	}
+
+	out := readFileString(outFile.Name())
+	errOut := readFileString(errFile.Name())
+	for _, marker := range []string{"HARNESS DELIVERED ON 会话#2", "HARNESS SINGLE DELIVERY OK", "HARNESS OK"} {
+		if !strings.Contains(out, marker) {
+			t.Fatalf("缺少 %s\nstdout=%s\nstderr=%s", marker, out, errOut)
+		}
+	}
+	// 第一发必须真的失败过（否则这条用例没在考"补交"），且换会话的痕迹要在。
+	if !strings.Contains(errOut, "交付未就绪") || !strings.Contains(errOut, "装载会话 #1 结束（重新装载）") {
+		t.Fatalf("没有复现出「第一发失败 + 会话被拆」的时序\nstdout=%s\nstderr=%s", out, errOut)
+	}
+	// 交付成功后必须回 pending-consumed：launcher 侧负载被消费掉（否则下次启动会重复注入）。
+	app.bridge.mu.Lock()
+	remaining := len(app.bridge.pending)
+	app.bridge.mu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("pending-consumed 没有回到 launcher（pending 还剩 %d 条）\nstdout=%s\nstderr=%s", remaining, out, errOut)
+	}
+}
+
 func hasCapability(report pluginCapabilityReport, id string) bool {
 	for _, c := range report.Capabilities {
 		if c.ID == id && c.OK {

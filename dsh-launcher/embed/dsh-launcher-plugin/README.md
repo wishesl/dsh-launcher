@@ -179,6 +179,39 @@ launcher /ws  ◄── page-hello ──────  dsh-launcher-plugin 客�
    `pending-consumed`；确认前负载留在 launcher 内存，下次启动重新下发
    （旧 `pending.json` 的跨重启语义原样保留）。
 
+## 续跑交付（0.2.8+）
+
+「重启完成」这条续跑消息由 launcher 推 `pending` 帧、插件注入会话后回 `pending-consumed`
+（见上节第 4 条）。0.2.8 修的是它在**双半包**下失效：
+
+- 真机事故（2026-10-02 01:27）：进程重启与插件重挂载全绿（新 launch、能力快照、网页端即时通道
+  接入），但发起会话里**再没出现过**「重启完成」—— 会话文件里最后一条 `plugin:` 注入停在 0.2.4
+  时代（SEQ 6972）。整条交付链当时只写 `ctx.logger`，真机两个日志都不进 ⇒ 事后无法判断断在哪一腿，
+  这本身就是必须先修的缺口。
+- 机理：0.2.6 起 `dsh.client` 让每次启动都出现「装载会话 #1 → 拆掉 → #2」。负载常落在 #1 的
+  socket 上，而旧实现 `pendingHandled` 一次闩死（#2 握手时的重发被忽略）＋ 重试
+  `armTimeout(..., ctx)` 绑死在 #1 的 ctx 上（#1 一收，那一发 500ms 重试随定时器一起消失）。
+
+0.2.8 的三条修法：
+
+1. **交付绑当前存活会话**：`attemptDelivery()` 每次都用当时的 `ctxRef`/`session`；重试不再传 ctx
+   （`armTimeout` 触发时才取），会话换了就自然落到新会话上。
+2. **跨会话补做**：`pendingDelivery` 是进程级状态（`pending/attempts/state/gen/inflight`），不放在
+   会话里；新会话装载后 `resumePendingDelivery()` 隔 300ms 再试一次；重复下发的负载若还停在
+   `waiting`，借那次握手立刻再试。
+3. **可见痕迹**：交付链改走 `deliveryTrace`（`console.error` → 实例日志 ＋ `command-result` 帧 →
+   app.log），形如 `重启续跑：收到续跑负载（…）/ 交付未就绪（…），500ms 后重试（1/6）/
+   已向会话 … 注入重启完成消息（通道 plugin/notice，第 2 次尝试）`。
+
+另外两处：同一会话里同时只允许一发在飞（`inflight` + `inflightSession`），并用 `gen` 代号丢弃过期
+结果 —— **绝不重复注入**；重试用尽后释放幂等闸（旧实现会让 `dsh-restart` 在这整个进程生命周期里都被
+拒），能力 `restartDelivery` 只在**真的投递成功**时报 ok（回退成功也算成功，避免把顶栏胶囊染红）。
+
+回归锁：`dsh-launcher/testdata/plugin-pending-reload-harness.mjs` + Go 用例
+`TestBridgePendingRedeliveryAfterSessionReload` —— 复现"负载落在会话 #1 → #1 被拆 → 会话 #2 必须
+补交且只交一次，并回 `pending-consumed`"；恢复旧语义（重复下发一律忽略 + 不补做）时该用例必红
+（实测 `HARNESS FAIL: 8s 内会话 #2 没有补交续跑负载`）。
+
 ## 能力握手
 
 `pluginLoaded / restartTool / themeReport / themeSet / embedRelax / restartDelivery`
