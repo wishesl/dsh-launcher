@@ -98,10 +98,10 @@ whether things work is always decided by the live probing above, and installing 
    "DSH ready · name · address" appears at the top, click it to open the DSH web UI in your browser (the card's URL is also clickable to copy).
 5. **Install to directory**: if the instance reports "local copy not installed", click "Install to directory" on the card first to really install that version into
    the directory's `node_modules` — this avoids npx re-fetching from the network repeatedly and lets agents read the source.
-6. **Install the built-in plugin** (optional, for plugin debugging and theme following): on the market's "Installed" tab, install the
+6. **Install the built-in plugin** (optional, for plugin debugging and theme sync): on the market's "Installed" tab, install the
    built-in plugin `dsh-launcher-plugin` globally. Every instance then mounts it automatically, so the model can call the `dsh-restart` tool to restart
    DSH; when the restart finishes, the launcher automatically injects a "restart complete" message back into the originating session so the conversation continues.
-   The same bridge also makes the launcher follow the DSH light/dark theme (no per-instance switch needed).
+   The same bridge also makes the launcher follow the DSH light/dark theme, and "Settings → Theme" can push a choice back into DSH (no per-instance switch needed).
 7. **Open DSH in the built-in view** (optional): monitor icon in the top bar → the lower half becomes the DSH UI; press `Esc` or the top-bar "Exit" to return.
 8. **Stop / restart**: the card's "Stop" ends the process; the ↻ button at the top restarts the current instance in one click.
 9. **Daily habits**: clicking ✕ minimizes to the tray by default (DSH keeps running in the background); use the tray icon to bring it back or quit;
@@ -138,8 +138,9 @@ What the launcher adds:
   and the entry is greyed out with the reason shown when prerequisites are unmet (see the dedicated section above).
 - **Self-managed restart**: the built-in plugin `dsh-launcher-plugin` providing the `dsh-restart` tool;
   after a restart, a "restart complete" message is injected into the originating session and wakes it up to continue (shown collapsed as a plugin notice, not a user bubble).
-- **Theme following**: when the DSH side switches light/dark, the plugin reports the preference back over the same bridge and the launcher UI
-  re-skins accordingly (`light` / `dark` / `system`, with `system` resolved by the OS preference); the cold-start first frame uses a local cache to avoid a white flash.
+- **Two-way theme sync**: when the DSH side switches light/dark, the plugin reports the preference back over the same bridge and the launcher UI
+  re-skins accordingly (`light` / `dark` / `system`, with `system` resolved by the OS preference); conversely, "Settings → Theme" writes the
+  choice into DSH's `ui-theme` (applies immediately to online instances, and open DSH pages re-skin too). The cold-start first frame uses a local cache to avoid a white flash.
 - **Capability probing**: the "Compatibility" tab in the right panel plus the "Compatibility Check" entry on the instance page list the conclusion and evidence for every capability,
   tri-state (usable / confirmed fault / no conclusion), turning silent breakage into something you see at a glance (see the dedicated section above).
 - **Plugin market**: discover / install / uninstall community plugins (reusing the official `dsh plugin --profile web` channel);
@@ -181,7 +182,7 @@ dsh-launcher/
 ├── instances.go       # 实例持久化（%APPDATA%\DSHLauncher\instances.json）
 ├── instance_mask.go   # 实例级插件屏蔽（名单持久化 + 临时 --patch 覆盖层生成/清理）
 ├── self_restart.go    # 桥接插件契约（门控、--patch 覆盖层、launcher-plugin 常量）
-├── launcher_http.go   # launcher ↔ 插件的 loopback HTTP 桥（/connect /theme /restart /pending）
+├── launcher_bridge.go # launcher ↔ 插件的 loopback WebSocket 桥（hello / theme / set-theme / restart / pending）
 ├── self_restart_install.go # 内置插件 dsh-launcher-plugin 的解出与安装（embed.FS → profile）
 ├── embeddata.go       # 内置插件源码的 embed 声明
 ├── capabilities.go    # 兼容性探测（读插件能力报告 + 启动器侧探针 → 面板数据）
@@ -289,7 +290,7 @@ Every release automatically produces four artifacts (with auto-generated release
 | Instance run logs | `%APPDATA%\DSHLauncher\logs\<实例ID>.log` |
 | Temporary plugin mask layer (while running) | `.dsh-mask-<实例ID>.yml` in the instance directory (deleted automatically after stop) |
 | Temporary self-managed restart override layer (while running) | `.dsh-self-restart-<实例ID>.yml` in the instance directory (deleted automatically after stop) |
-| Plugin capability report | lives only in launcher memory (the plugin reports it over the loopback HTTP handshake; nothing is written to disk) |
+| Plugin capability report | lives only in launcher memory (the plugin reports it in the first `hello` frame over the loopback WebSocket bridge; nothing is written to disk) |
 | Built-in plugin extraction location | `.dsh-builtin\dsh-launcher-plugin` in the profile directory |
 
 ## Related documents

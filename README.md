@@ -104,10 +104,10 @@ Cordis 装载配置……）。这些耦合点**按能力探测，不按版本�
    「DSH 已就绪 · 名称 · 地址」后点它即可在浏览器打开 DSH web（地址也可点卡片 URL 复制）。
 5. **安装到目录**：若实例提示「本地副本未安装」，先点卡片「安装到目录」把该版本真实装进
    目录的 `node_modules`，避免 npx 反复联网拉取、也能让 agent 读到源码。
-6. **安装内置插件**（可选，用于插件调试与主题跟随）：插件市场「已安装」页把内置插件
+6. **安装内置插件**（可选，用于插件调试与主题同步）：插件市场「已安装」页把内置插件
    `dsh-launcher-plugin` 装到全局。装好后每个实例自动挂载，模型就能调用 `dsh-restart` 工具重启
    DSH，重启完成后启动器会自动把「重启完成」消息投回发起会话，让对话继续；同时 DSH 切换亮/暗
-   主题时启动器界面会跟着换肤（不需要按实例勾选）。
+   主题时启动器界面会跟着换肤，也可以在「设置 → 主题」里反向下发（不需要按实例勾选）。
 7. **用内置视图打开 DSH**（可选）：顶栏显示器图标 → 下半区变成 DSH 界面；`Esc` 或顶栏「退出」返回。
 8. **停止 / 重启**：卡片「停止」结束进程；顶部 ↻ 按钮一键重启当前实例。
 9. **日常习惯**：点 ✕ 默认最小化到托盘（DSH 继续后台运行），从托盘图标可唤回/退出；
@@ -146,8 +146,9 @@ Cordis 装载配置……）。这些耦合点**按能力探测，不按版本�
   前置条件不满足时入口置灰并说明原因（见上文专节）。
 - **自管理重启**：内置插件 `dsh-launcher-plugin` 提供 `dsh-restart` 工具；
   重启完成后自动向发起会话注入「重启完成」消息并唤醒它继续执行（以插件通知形式折叠显示，不是用户气泡）。
-- **主题跟随**：DSH 侧切换亮/暗主题时，插件把偏好经同一座桥回报给启动器，启动器界面
-  跟着换肤（`light` / `dark` / `system` 三态，`system` 由系统偏好解析）；冷启动首帧用本地缓存避免闪白。
+- **主题双向同步**：DSH 侧切换亮/暗主题时，插件把偏好经同一座桥回报给启动器 → 启动器界面
+  跟着换肤（`light` / `dark` / `system` 三态，`system` 由系统偏好解析）；反过来，「设置 → 主题」
+  也能直接改 DSH 的 `ui-theme`（在线实例立即生效，打开的 DSH 页面同步换）。冷启动首帧用本地缓存避免闪白。
 - **兼容性探测**：右栏「兼容性」标签 + 实例页「兼容性检查」入口，逐条列出各项能力的探测结论与证据，
   三态（可用 / 确定故障 / 没有结论），把静默失效变成一眼可见（见上文专节）。
 - **插件市场**：发现 / 安装 / 卸载社区插件（复用官方 `dsh plugin --profile web` 通道），
@@ -189,7 +190,7 @@ dsh-launcher/
 ├── instances.go       # 实例持久化（%APPDATA%\DSHLauncher\instances.json）
 ├── instance_mask.go   # 实例级插件屏蔽（名单持久化 + 临时 --patch 覆盖层生成/清理）
 ├── self_restart.go    # 桥接插件契约（门控、--patch 覆盖层、launcher-plugin 常量）
-├── launcher_http.go   # launcher ↔ 插件的 loopback HTTP 桥（/connect /theme /restart /pending）
+├── launcher_bridge.go # launcher ↔ 插件的 loopback WebSocket 桥（hello / theme / set-theme / restart / pending）
 ├── self_restart_install.go # 内置插件 dsh-launcher-plugin 的解出与安装（embed.FS → profile）
 ├── embeddata.go       # 内置插件源码的 embed 声明
 ├── capabilities.go    # 兼容性探测（读插件能力报告 + 启动器侧探针 → 面板数据）
@@ -297,7 +298,7 @@ git push origin v0.1.0
 | 实例运行日志 | `%APPDATA%\DSHLauncher\logs\<实例ID>.log` |
 | 临时插件屏蔽层（运行期间） | 实例目录下 `.dsh-mask-<实例ID>.yml`（停止后自动删除） |
 | 临时自管理重启覆盖层（运行期间） | 实例目录下 `.dsh-self-restart-<实例ID>.yml`（停止后自动删除） |
-| 插件能力报告 | 只存在启动器内存里（插件经 loopback HTTP 握手上报，不落盘） |
+| 插件能力报告 | 只存在启动器内存里（插件连上 loopback WebSocket 桥后第一帧 hello 上报，不落盘） |
 | 内置插件解出位置 | profile 目录下 `.dsh-builtin\dsh-launcher-plugin` |
 
 ## 相关文档

@@ -179,7 +179,7 @@ cd dsh-launcher && wails build
 规则：
 
 1. **探测结论必须有出口。** 只写 logger 等于静默失效（内嵌那次排查了好几轮，就是因为插件探测到
-   接口变了只 `return`）。插件随握手把结论经 loopback HTTP 桥上报（`POST /connect`，见插件 README），
+   接口变了只 `return`）。插件连上 loopback WebSocket 桥后第一帧 `hello` 把结论全量上报（见插件 README），
    launcher 在 `capabilities.go` 读回并补上自己的探测项，汇总到右栏「兼容性」标签。
 2. **只在有明确结论时才拦。** `embedRelax=false` → 对应入口置灰 + 显示原因；没有报告 / 取不到报告
    → **不拦**（fail-open）。"没有报告"混淆了多种原因（插件版本旧、未安装、报告还没上报），
@@ -191,8 +191,8 @@ cd dsh-launcher && wails build
    只统计 `!ok && !unknown`。分诊集中在后端 `pluginReportAbsentReason()`，前端不再做二次判断。
 3. **契约放在自己的边界上。** 桥接信封的 schema 由 launcher + 插件双方约定，不依赖 DSH 的任何私有格式。
    面板里每个 `CapabilityItem.id` 是稳定契约键（前端按 id 门控），改名等于破坏兼容。
-4. **陈旧报告要失效。** 启动实例前先删报告文件（"文件在" = "本次运行报告过"），再用启动器注入的
-   一次性 `DSH_LAUNCH_ID` 与报告里的 `launchId` 比对，对不上才标"可能已过期"。
+4. **陈旧报告要失效。** 启动实例前先清掉该实例的内存握手记录（"有握手" = "本次运行报告过"），
+   再用启动器注入的一次性 `DSH_LAUNCH_ID` 与握手里的 `launchId` 比对，对不上才标"可能已过期"。
    ⚠️ **不要用 pid 判断**（见第 8 节第 8 条：跨 `cmd /c` 外壳层的 pid 按构造不相等，会 100% 误报）；
    任一侧缺 `launchId`（旧版插件）时不下结论。
 5. **熔断名单只在真出事时加。** 探测有盲区（形状在、语义变），那时才需要"已知坏组合 → 禁用"的黑名单；

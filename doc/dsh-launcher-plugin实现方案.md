@@ -1,5 +1,13 @@
 # dsh-launcher-plugin 实现方案（初版）
 
+> **⚠️ 实现变更（本文以下内容保留为历史设计记录，勿当作现状读）**：落地时把「一条 loopback HTTP 线 + 5 个 REST 端点」
+> 收敛成了**一条 loopback WebSocket**（用户要求「只保留 ws，旧接口全搬过来，不做降级」）：
+> `dsh-launcher/launcher_http.go` 已删除，改为 `dsh-launcher/launcher_bridge.go`（`GET /ws` 升级，握手仍带同一个
+> `Authorization: Bearer <token>`，`CheckOrigin` 只放行无 `Origin` 的 Node 客户端与自源）。
+> 帧仍用同一个 `{type, instanceId, launchId, payload}` 信封：插件→启动器 `hello`（原 `POST /connect` 全量快照）/`theme`/`restart`/
+> `pending-consumed`/`command-result`；启动器→插件 `pending`（原 `GET /pending`，改为服务端主动下发）/`set-theme`（新增，启动器内切主题）/
+> `restart-result`。心跳走 RFC ping/pong（20s ping、60s pong 判死）。**权威契约以 `dsh-launcher/embed/dsh-launcher-plugin/README.md` 的帧表为准。**
+
 一个新插件 `dsh-launcher-plugin`，把 launcher ↔ 实例的实时通信收敛为**一条 loopback HTTP 线**，同时承载三个能力：**主题同步（新增）、dsh-restart（迁移）、能力上报（迁移）**。`dsh-self-mcp` 随之退役，文件通道（`restart-request.json` / `pending.json` / `capabilities.json`）全部删除。
 
 设计原则：简洁明了，单线单语义；丢了问题不大（幂等、可自愈），不为极端场景加复杂度。
@@ -78,7 +86,7 @@ apply() 启动流程:
 - **重启流程**：工具调用（确认词 `restart-dsh` 不变）→ `POST /restart` → **收到 ack 才 `ctx.appExit(0)`**；POST 失败 → 工具报错"launcher 不可达"，**不退出**——比原"写完就走、碰运气"更稳，实例不会白死一次。
 - **能力**：`restartTool` / `themeReport`（settings 注入失败 → `{ok:false, reason}`，随握手上报）/ `embedRelax`（吸收 `dsh-self-mcp` 的 `relaxEmbedAuth`，内嵌 iframe 放宽会话校验）。
 - **主题监听**：注入 `settings` 服务读 `ui-theme` namespace（`preference` 字段，`light|dark|system`）；注入失败不 fatal，仅 `themeReport={ok:false}`。
-- 重连退避、`agent.followup()` 优先/`session.prompt()` 回退注入续跑消息——复用 `dsh-self-mcp` 现有实现（[index.js:44](dsh-launcher/embed/dsh-self-mcp/lib/index.js:44) 起）的成熟套路。
+- 重连退避、`agent.followup()` 优先/`session.prompt()` 回退注入续跑消息——沿用旧 `dsh-self-mcp`（已退役删除）的成熟套路，落在 [`embed/dsh-launcher-plugin/lib/index.js`](dsh-launcher/embed/dsh-launcher-plugin/lib/index.js) 里。
 
 ## 4. 多实例与主题归属
 
