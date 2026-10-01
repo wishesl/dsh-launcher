@@ -457,9 +457,7 @@ function failInflight(reason) {
 /** 主题增量推送（幂等状态）。未连接就跳过：重连后的快照会带上当前值。 */
 function pushTheme(preference) {
 	if (!supervised) return;
-	if (sendFrame("theme", { preference })) {
-		themeTrace(`推送 theme=${preference}（自收到 ${themeSince()}）`);
-	} else {
+	if (!sendFrame("theme", { preference })) {
 		ctxRef?.logger?.debug?.("[dsh-launcher-plugin] 桥接未连接，主题推送跳过（重连后随快照补齐）");
 	}
 }
@@ -733,8 +731,9 @@ function readThemePreference(settings) {
 }
 
 /**
- * 主题诊断留痕：只写 stderr（console.error → launcher 捕获的实例日志），不发桥接帧 ——
- * 主题每次点击都会走一遍，回报帧会把启动器的日志面板刷满。
+ * 主题诊断留痕：**只在真出错时**写一行（0.2.5 那批逐次打点——收到 set-theme / 读用时 /
+ * 推送 / 写入完成 / 事件命中——每次点击与每次事件都刷一行，实测把实例日志刷满，0.2.10 删掉）。
+ * 只写 stderr，不发桥接帧。
  */
 function themeTrace(line) {
 	try {
@@ -804,14 +803,12 @@ async function applyThemeCommand(payload) {
 			throw new Error("settings 服务没有 update（该组合改不了主题）");
 		}
 		themeAnchor = Date.now();
-		themeTrace(`收到 set-theme=${preference}（id=${id || "-"}）`);
 		themeWriteInFlight = true;
 		try {
 			await writeThemePreference(settingsService, preference);
 		} finally {
 			themeWriteInFlight = false;
 		}
-		themeTrace(`写入 ui-theme=${preference} 完成（自收到 ${themeSince()}）`);
 		themePreference = preference; // 自己写的值：watcher 之后读到同值不会再推一次
 		setCapability("themeSet", true);
 		sendFrame("command-result", { id, ok: true });
@@ -833,12 +830,8 @@ async function applyThemeCommand(payload) {
  * 事件在的话就是毫秒级，事件不在最迟 1s 跟上。
  */
 function watchTheme(settingsCtx, settings) {
-	const check = (source) => {
-		const started = Date.now();
+	const check = () => {
 		const pref = readThemePreference(settings);
-		if (source !== "poll") {
-			themeTrace(`${source}：读 ui-theme 用时 ${Date.now() - started}ms，值=${pref ?? "null"}`);
-		}
 		if (pref === null || pref === themePreference) return;
 		themePreference = pref;
 		pushTheme(pref);
@@ -855,11 +848,9 @@ function watchTheme(settingsCtx, settings) {
 		if (themeWriteInFlight) {
 			// 这是我们自己刚写出来的那次变更：值已知，写完 applyThemeCommand 会推帧。
 			// 在这里再 describe 一次只会白白拖慢启动器收到回音的时间。
-			themeTrace(`事件命中但自身写入进行中，跳过读取（自收到 ${themeSince()}）`);
 			return;
 		}
-		themeTrace(`事件命中（自收到 ${themeSince()}）`);
-		check("事件");
+		check();
 	});
 	// 兜底轮询：真机实测（2026-10-01 23:33）事件路径 77–90ms 就到，
 	// 所以把兜底从 1s 放宽到 5s——只有事件真的不通时才用得上；
@@ -868,7 +859,7 @@ function watchTheme(settingsCtx, settings) {
 	// 0.2.7 起走 armTimeout：这条 5s 轮询正是 0.2.6 崩机的那颗雷 —— fiber 失效后它照跑，
 	// 续排时 `ctxRef.timeout` 抛的异常把整个 DSH 带崩（见 armTimeout 注释）。
 	const poll = () => {
-		check("poll");
+		check();
 		armTimeout("主题轮询", poll, 5000);
 	};
 	armTimeout("主题轮询", poll, 5000);
