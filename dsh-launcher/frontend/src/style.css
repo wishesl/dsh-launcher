@@ -1095,25 +1095,27 @@ body.resizing .log-drawer { transition: none; }
   animation: pulse 1.2s infinite;
 }
 
-/* log view (inside drawer / panels) */
+/* log view (inside drawer / panels)
+   一眼要像终端：等宽、紧凑、整块连续文本，行上不加任何描边/底色/竖条。
+   行与行之间只靠颜色区分来源（stdout 常规 / system 信息 / stderr 错误），
+   文字色用「状态色的文字面」token（--ok-text / --danger-text），
+   直接用 --green / --red 当正文色在深色底上会发闷（见文件顶部 token 注释）。 */
 .log-view {
   flex: 1; min-height: 0;
   overflow-y: auto;
   background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 8px 10px;
+  padding: 10px 12px;
   font-family: var(--mono);
   font-size: 12px;
-  line-height: 1.55;
+  line-height: 1.5;
+  font-variant-ligatures: none;   /* 日志里 != / => 之类不要被连字吃掉 */
 }
-.log-line { display: flex; gap: 8px; padding: 1px 0; }
-.log-time { color: var(--text-3); flex: none; }
-.log-tag { flex: none; min-width: 42px; font-size: 10.5px; text-transform: uppercase; }
-.log-system .log-tag { color: var(--accent); }
-.log-stdout .log-tag { color: var(--text-2); }
-.log-stderr .log-tag { color: var(--red); }
-.log-text { color: var(--text-2); white-space: pre-wrap; word-break: break-all; }
+.log-line { display: block; }
+.log-text { color: var(--text); white-space: pre-wrap; word-break: break-all; }
+.log-system .log-text { color: var(--ok-text); }
+.log-stderr .log-text { color: var(--danger-text); }
 .log-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex: none; }
 .log-filter {
   font-size: 12px; padding: 4px 8px;

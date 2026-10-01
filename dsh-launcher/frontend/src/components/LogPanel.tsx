@@ -75,10 +75,14 @@ export default function LogPanel({ instance, logs, onClear, logRef }: Props) {
     if (filtered.length === 0) {
       return <div className="log-empty">没有符合当前过滤条件的日志。</div>;
     }
+    // 不再渲染时间戳与 stream 标签（用户要求）：仅用文字颜色区分 stdout / stderr / system，
+    // 完整信息留在 title 悬浮提示里，需要时仍可查。
     return filtered.map((e, i) => (
-      <div key={i} className={`log-line ${STREAM_CLS[e.stream] ?? ''}`}>
-        <span className="log-time">{new Date(e.time).toLocaleTimeString()}</span>
-        <span className="log-tag">{e.stream}</span>
+      <div
+        key={i}
+        className={`log-line ${STREAM_CLS[e.stream] ?? ''}`}
+        title={`${new Date(e.time).toLocaleTimeString()} · ${e.stream}`}
+      >
         <span className="log-text">{e.line}</span>
       </div>
     ));
