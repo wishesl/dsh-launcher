@@ -310,10 +310,10 @@ func (a *App) LaunchInstance(id string) error {
 
 	a.emitStatus(snapshot.ID, "starting", 0)
 	if snapshot.Source {
-		a.systemLog(snapshot.ID, 0, fmt.Sprintf("正在启动 DSH（源码模式） (目录: %s)", snapshot.Directory))
+		a.systemLogQuiet(snapshot.ID, 0, fmt.Sprintf("正在启动 DSH（源码模式） (目录: %s)", snapshot.Directory))
 		a.systemLog(snapshot.ID, 0, fmt.Sprintf("源码模式：启动命令「%s」。首次运行请先「安装到目录」执行初始化+构建。", sourceStartCommand(snapshot)))
 	} else {
-		a.systemLog(snapshot.ID, 0, fmt.Sprintf("正在启动 DSH %s (目录: %s)", versionLabel(snapshot.Version), snapshot.Directory))
+		a.systemLogQuiet(snapshot.ID, 0, fmt.Sprintf("正在启动 DSH %s (目录: %s)", versionLabel(snapshot.Version), snapshot.Directory))
 	}
 	if pl := a.proxyLogLine(); pl != "" {
 		a.systemLog(snapshot.ID, 0, pl)
@@ -346,7 +346,7 @@ func (a *App) LaunchInstance(id string) error {
 			a.systemLog(snapshot.ID, 0, "提示: 生成自管理重启覆盖层失败: "+oerr.Error())
 		} else if srRel != "" {
 			cmdStr = insertPatchFlag(cmdStr, srRel)
-			a.systemLog(snapshot.ID, 0, "已生成自管理重启覆盖层（仅本次启动生效）: "+filepath.Join(snapshot.Directory, srRel))
+			a.systemLogQuiet(snapshot.ID, 0, "已生成自管理重启覆盖层（仅本次启动生效）: "+filepath.Join(snapshot.Directory, srRel))
 		}
 	}
 	cmd := shellCommand(context.Background(), cmdStr)
@@ -426,7 +426,7 @@ func (a *App) LaunchInstance(id string) error {
 	a.processes[id] = mp
 	a.mu.Unlock()
 
-	a.systemLog(snapshot.ID, mp.pid, fmt.Sprintf("进程已启动 PID=%d，命令: %s", mp.pid, cmdStr))
+	a.systemLogQuiet(snapshot.ID, mp.pid, fmt.Sprintf("进程已启动 PID=%d，命令: %s", mp.pid, cmdStr))
 	a.emitStatus(snapshot.ID, "running", mp.pid)
 	// A process just started — ask the service probe to re-check its port so
 	// the header/card flip to "已就绪" as soon as DSH answers.
@@ -689,6 +689,25 @@ func (a *App) emitStatus(id, status string, pid int) {
 
 func (a *App) systemLog(id string, pid int, line string) {
 	a.logEvent(LogEvent{
+		InstanceID: id,
+		PID:        pid,
+		Line:       line,
+		Stream:     "system",
+		Time:       time.Now().Format(time.RFC3339),
+	})
+}
+
+// systemLogQuiet —— 只写实例日志文件，不进右栏面板。
+//
+// 启动过程有三条"例行播报"（正在启动 / 自管理重启覆盖层路径 / 已启动的命令），
+// 每次启动都出现，面板上纯属噪声（真机反馈）。但它们正是排障时要查的东西
+// （到底跑了哪条命令、挂的是哪一层 patch），所以不删，只是不再推给界面：
+// 需要时看 `%APPDATA%\DSHLauncher\logs\<实例ID>.log` 里的 system 行。
+//
+// 与之相对，systemLog 仍用于"用户需要看见"的行：提示、警告、失败原因、
+// 生命周期变化（退出/重启）。
+func (a *App) systemLogQuiet(id string, pid int, line string) {
+	a.logs.append(LogEvent{
 		InstanceID: id,
 		PID:        pid,
 		Line:       line,

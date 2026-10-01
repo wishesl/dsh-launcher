@@ -256,9 +256,16 @@ func (a *App) hideToTrayTip(ctx context.Context) {
 	runtime.WindowHide(ctx)
 }
 
+// emitHook indirection: tests observe which events reach the UI (e.g. to prove
+// that routine startup lines are file-only). Always nil in production.
+var emitHook func(event string, payload interface{})
+
 // emit sends an event to the frontend (guarded against nil context during tests).
 // Status events also refresh the tray instance submenu.
 func (a *App) emit(event string, payload interface{}) {
+	if emitHook != nil {
+		emitHook(event, payload)
+	}
 	if a.ctx != nil {
 		runtime.EventsEmit(a.ctx, event, payload)
 	}
