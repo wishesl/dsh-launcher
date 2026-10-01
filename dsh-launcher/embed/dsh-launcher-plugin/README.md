@@ -103,6 +103,33 @@ launcher /ws  ◄── page-hello ──────  dsh-launcher-plugin 客�
 - **耗时诊断**：每次点击都会往实例日志（stderr）写几行 `主题：…`（收到 set-theme / 写入完成用时 /
   事件命中与读取用时 / 推送时刻）。只走 `console.error`，不发桥接帧 —— 免得刷满启动器日志面板。
 
+## 装载会话与定时器护栏（0.2.7+）
+
+0.2.6 在真机上「DSH 启动 5s 后进程 exit 1」（2026-10-02 00:28 / 00:29 各一次），根因在
+**cordis 的计时器不属于调用方**：
+
+- `cordis-plugin-timer` 的 `TimerService.timeout()` 用 `this.ctx.effect(...)` 注册计时器 ——
+  `this.ctx` 是 **timer 服务自己的 ctx**，所以 `ctx.timeout(cb, ms)` 排下的定时器
+  **不随调用方 fiber 销毁而取消**。
+- DSH 会**重复装载**本插件（双半包机制：`dsh.client` 声明让宿主 Loader 里多出一行；真机同一个
+  pid 出现两条「已装载」，0.2.5 没有该声明时只有一条）。先装载的那份 fiber 被销毁后，
+  它排下的 5s 主题轮询照样到期；回调里再调 `ctx.timeout` 就抛
+  `cannot get required service "timer" in inactive context`，而这个异常发生在 timer 回调里
+  没人接 → 整个 DSH 进程 exit 1。
+
+0.2.7 的修法（两道，缺一不可）：
+
+1. **装载会话**：每次 `apply` 建一个会话，旧会话先收（取消定时器、关连接）；`ctx.effect` 在
+   fiber 销毁时收掉自己的会话（timer 服务不会替我们取消，所以必须自己挂）。留痕：
+   `会话：装载会话 #N 开始 / 结束（…）`。
+2. **定时器硬护栏** `armTimeout`：所有 `ctx.timeout` 调用统一走它 —— 整个回调包 try/catch
+   （异常绝不外逃）、disposer 记进会话、会话已销毁就不排、ctx 失效时留一行
+   `定时器 <名字> 排不了（ctx 已失效？已忽略）`。socket 事件与交付重试同样包了护栏。
+
+回归锁：`dsh-launcher/testdata/plugin-dispose-harness.mjs` + Go 用例
+`TestPluginTimerGuardSurvivesStaleContext` —— 用假 ctx 复现同一时序（失效后 `timeout` 抛
+真机原文的错）：0.2.6 的代码在这条用例里必崩（exit 1，栈落在 `poll`），0.2.7 必须活着退出。
+
 ## dsh-restart
 
 确认词 `restart-dsh` 不变；子代理/无会话/重复请求护栏不变。区别：

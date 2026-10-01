@@ -102,6 +102,10 @@ let settingsReady = false;
 let themeReportSettled = false;
 /** 已发出、等 launcher 回应的请求：id → { resolve, reject }。 */
 const inflight = new Map();
+/** 当前装载会话（见 beginSession/endSession）：apply 可能被调用多次，每次一个会话。 */
+let session = null;
+/** 会话序号，只用于留痕对账。 */
+let sessionSeq = 0;
 
 /** 记一条能力结论。reason 只在 ok=false 时有意义，写人话（原样显示在面板上）。
  *  结论随 hello 快照发给 launcher —— 握手即报告，没有文件、没有陈旧判定。 */
@@ -187,12 +191,115 @@ function injectPageCoordinates(ctx) {
 	}, { prepend: true });
 }
 
+/**
+ * 装载会话。apply() 在真机上会被调用多次（0.2.6 实测同一个 pid 出现两条「已装载」），
+ * 每次装载建一个新会话；旧会话的定时器与连接必须先收掉，否则残留回调会打在失效 ctx 上。
+ */
+function beginSession() {
+	endSession("重新装载");
+	const s = { id: ++sessionSeq, disposed: false, timers: new Set() };
+	session = s;
+	guardTrace(`装载会话 #${s.id} 开始（第 ${s.id} 次 apply，pid ${process.pid}）`);
+	return s;
+}
+
+/** 收掉当前会话：取消定时器、关掉连接。只有"当前会话"会被收 —— 旧会话的清理不能误伤新会话。 */
+function endSession(reason) {
+	const s = session;
+	if (s === null) return;
+	session = null;
+	s.disposed = true;
+	for (const dispose of s.timers) {
+		try {
+			dispose();
+		} catch {
+			// 取消失败无所谓：回调里的护栏兜得住
+		}
+	}
+	s.timers.clear();
+	try {
+		socket?.close?.();
+	} catch {
+		// 关闭失败同样无所谓
+	}
+	socket = null;
+	connecting = false;
+	online = false;
+	retryScheduled = false;
+	syncScheduled = false;
+	guardTrace(`装载会话 #${s.id} 结束（${reason}）`);
+}
+
+/** 当前会话是否还活着（定时器 / 连接 / 收帧回调的第一道门）。 */
+function sessionAlive() {
+	return session !== null && !session.disposed;
+}
+
+/**
+ * 定时器硬护栏 —— 0.2.6 真机"启动 5s 后 DSH 进程 exit 1"的修复点。
+ *
+ * cordis 的 `ctx.timeout()` 把计时器登记在 **timer 服务自己的 ctx** 上
+ * （cordis-plugin-timer 的 `TimerService.timeout`：`this.ctx.effect(...)`），
+ * 所以调用方 fiber 销毁**不会**取消它。fiber 失效后回调照跑，回调里任何 `ctx.timeout`
+ * 都会抛 `cannot get required service "timer" in inactive context`；这个异常发生在 timer
+ * 回调里，没有人接 → 整个 DSH 进程 exit 1。
+ *
+ * 因此这里做三件事：①整个回调用 try/catch 包住，异常绝不外逃；②把 disposer 记进会话，
+ * 随会话销毁主动取消；③会话已销毁就干脆不排。
+ */
+function armTimeout(label, callback, delay, ctx = ctxRef) {
+	const s = session;
+	if (s === null || s.disposed) return null;
+	const run = () => {
+		if (s.disposed) return;
+		try {
+			callback();
+		} catch (error) {
+			guardTrace(`定时器 ${label} 回调异常（已吞掉，不影响 DSH）：${error?.message ?? String(error)}`);
+		}
+	};
+	const target = ctx ?? ctxRef;
+	if (target === null || typeof target.timeout !== "function") return null;
+	let dispose = null;
+	try {
+		dispose = target.timeout(run, delay);
+	} catch (error) {
+		guardTrace(`定时器 ${label} 排不了（ctx 已失效？已忽略）：${error?.message ?? String(error)}`);
+		return null;
+	}
+	if (typeof dispose === "function") {
+		if (s.disposed) {
+			try {
+				dispose();
+			} catch {
+				// 无所谓
+			}
+			return null;
+		}
+		s.timers.add(dispose);
+	}
+	return dispose;
+}
+
+/** 包一层"绝不外逃"的回调：socket 事件与宿主回调都可能落在已经失效的 ctx 上。 */
+function guarded(label, fn) {
+	return (...args) => {
+		if (!sessionAlive()) return undefined;
+		try {
+			return fn(...args);
+		} catch (error) {
+			guardTrace(`${label} 回调异常（已吞掉，不影响 DSH）：${error?.message ?? String(error)}`);
+			return undefined;
+		}
+	};
+}
+
 /** 防抖的全连：能力变化 → 150ms 后合并成一次快照。 */
 function scheduleSync(delay = 150) {
-	if (!supervised || ctxRef === null) return;
+	if (!supervised || !sessionAlive()) return;
 	if (syncScheduled) return;
 	syncScheduled = true;
-	ctxRef.timeout(() => {
+	armTimeout("scheduleSync", () => {
 		syncScheduled = false;
 		maintain();
 	}, delay);
@@ -200,11 +307,11 @@ function scheduleSync(delay = 150) {
 
 /** 退避重连（封顶 RETRY_DELAYS_MS 末位，永不停止：主题同步需要长期在线）。 */
 function scheduleRetry() {
-	if (retryScheduled || !supervised || ctxRef === null) return;
+	if (retryScheduled || !supervised || !sessionAlive()) return;
 	retryScheduled = true;
 	const delay = RETRY_DELAYS_MS[Math.min(retryIdx, RETRY_DELAYS_MS.length - 1)];
 	retryIdx += 1;
-	ctxRef.timeout(() => {
+	armTimeout("scheduleRetry", () => {
 		retryScheduled = false;
 		maintain();
 	}, delay);
@@ -212,7 +319,7 @@ function scheduleRetry() {
 
 /** 保证连接 + 重发快照。连接失败/断开统一由 onclose → scheduleRetry 接管。 */
 function maintain() {
-	if (!supervised) return;
+	if (!supervised || !sessionAlive()) return;
 	if (socket !== null) {
 		sendSnapshot();
 		return;
@@ -223,7 +330,7 @@ function maintain() {
 /** 建立 WebSocket：Bearer 放握手头（Node 的全局 WebSocket 支持自定义头，token 不进 URL）。
  *  没有全局 WebSocket（老 Node）→ 静默降级，不重试、不加副作用。 */
 function connect() {
-	if (!supervised || connecting || socket !== null) return;
+	if (!supervised || connecting || socket !== null || !sessionAlive()) return;
 	if (typeof WebSocket !== "function") {
 		ctxRef?.logger?.warn?.("[dsh-launcher-plugin] 当前 Node 没有全局 WebSocket，桥接不可用（静默降级）");
 		return;
@@ -238,7 +345,7 @@ function connect() {
 		scheduleRetry();
 		return;
 	}
-	ws.onopen = () => {
+	ws.onopen = guarded("桥接 onopen", () => {
 		connecting = false;
 		socket = ws;
 		retryIdx = 0;
@@ -248,24 +355,26 @@ function connect() {
 		}
 		// 重连后的第一件事就是重发全量快照（launcher 只认内存里的最近一次握手）。
 		sendSnapshot();
-	};
-	ws.onmessage = (event) => handleFrame(event.data);
-	ws.onclose = () => {
-		connecting = false;
+	});
+	ws.onmessage = guarded("桥接 onmessage", (event) => handleFrame(event.data));
+	ws.onclose = guarded("桥接 onclose", () => {
 		if (socket === ws) socket = null;
+		else if (socket !== null) return; // 当前连接是别人：这条是旧连接的尾巴，别动状态
+		connecting = false;
 		failInflight("桥接断开");
 		if (online) {
 			online = false;
 			ctxRef?.logger?.warn?.("[dsh-launcher-plugin] 与 launcher 的桥接断开，按退避重连");
 		}
 		scheduleRetry();
-	};
+	});
 	// 错误细节交给随之而来的 onclose 统一处理（Node 会把 error 后接一个 close）。
 	ws.onerror = () => undefined;
 }
 
 /** 收帧分发。未知类型忽略（协议只增不改，老新两侧不会互相打死）。 */
 function handleFrame(raw) {
+	if (!sessionAlive()) return;
 	let frame;
 	try {
 		frame = JSON.parse(typeof raw === "string" ? raw : String(raw));
@@ -298,7 +407,7 @@ function request(type, payload, timeoutMs = RESTART_ACK_TIMEOUT_MS) {
 			return;
 		}
 		inflight.set(id, { resolve, reject });
-		ctxRef?.timeout?.(() => {
+		armTimeout("请求超时", () => {
 			const entry = inflight.get(id);
 			if (entry === undefined) return; // 已应答
 			inflight.delete(id);
@@ -465,7 +574,7 @@ function scheduleDelivery(ctx, pending) {
 				if (attempts <= RETRY_DELAYS_MS.length) {
 					const delay = RETRY_DELAYS_MS[attempts - 1];
 					ctx.logger.warn(`[dsh-launcher-plugin] 交付未就绪（${error.message}），${delay}ms 后重试 (${attempts}/${RETRY_DELAYS_MS.length})`);
-					ctx.timeout(attempt, delay);
+					armTimeout("重启消息交付", attempt, delay, ctx);
 				} else {
 					ctx.logger.error(`[dsh-launcher-plugin] 重启完成消息交付失败，负载保留在 launcher 待下次启动重试: ${error.message}`);
 					setCapability("restartDelivery", false, `交付失败：${error.message}`);
@@ -515,6 +624,18 @@ function themeTrace(line) {
 /** 距收到 set-theme 过了多少毫秒（没有锚点就写 ?）。 */
 function themeSince() {
 	return themeAnchor === 0 ? "?" : `${Date.now() - themeAnchor}ms`;
+}
+
+/**
+ * 会话/定时器护栏留痕：只写 stderr，且自身绝不抛 —— 它经常运行在**已经失效的 ctx** 上
+ * （这正是它存在的理由），留痕失败不能反过来把进程带崩。
+ */
+function guardTrace(line) {
+	try {
+		console.error(`[dsh-launcher-plugin] 会话：${line}`);
+	} catch {
+		// 日志写不出去就算了
+	}
 }
 
 /**
@@ -620,11 +741,14 @@ function watchTheme(settingsCtx, settings) {
 	// 兜底轮询：真机实测（2026-10-01 23:33）事件路径 77–90ms 就到，
 	// 所以把兜底从 1s 放宽到 5s——只有事件真的不通时才用得上；
 	// 每次轮询都要跑一遍全量 describe（同步阻塞），频率越低越不容易挤到点击上。
+	//
+	// 0.2.7 起走 armTimeout：这条 5s 轮询正是 0.2.6 崩机的那颗雷 —— fiber 失效后它照跑，
+	// 续排时 `ctxRef.timeout` 抛的异常把整个 DSH 带崩（见 armTimeout 注释）。
 	const poll = () => {
 		check("poll");
-		ctxRef?.timeout?.(poll, 5000);
+		armTimeout("主题轮询", poll, 5000);
 	};
-	ctxRef?.timeout?.(poll, 5000);
+	armTimeout("主题轮询", poll, 5000);
 }
 //#endregion
 
@@ -846,6 +970,14 @@ function memberKind(target, prop) {
  * 而全局 `setTimeout` 那条照样会响。所以这里一次把三条都挂上，宁可重复触发。
  */
 function scheduleExit(ctx, run, delay) {
+	// 退出回调里任何异常都绝不能外逃：它跑在 timer 回调里，没人接就是整个 DSH exit 1。
+	const safeRun = () => {
+		try {
+			run();
+		} catch (error) {
+			guardTrace(`退出回调异常（已吞掉）：${error?.message ?? String(error)}`);
+		}
+	};
 	const armed = [];
 	for (const [label, target] of [
 		["timerCtx.timeout", timerCtxRef],
@@ -853,14 +985,14 @@ function scheduleExit(ctx, run, delay) {
 	]) {
 		if (!target) continue;
 		try {
-			target.timeout(run, delay);
+			target.timeout(safeRun, delay);
 			armed.push(label);
 		} catch (error) {
 			restartTrace(`${label} 不可用：${error?.message ?? String(error)}`);
 		}
 	}
 	try {
-		setTimeout(run, delay);
+		setTimeout(safeRun, delay);
 		armed.push("setTimeout");
 	} catch (error) {
 		restartTrace(`setTimeout 不可用：${error?.message ?? String(error)}`);
@@ -869,7 +1001,17 @@ function scheduleExit(ctx, run, delay) {
 }
 
 function apply(ctx) {
+	// 0.2.7：先开一个装载会话，再挂会话清理。DSH 会重复 apply（真机 0.2.6 同 pid 两次），
+	// 旧会话的定时器/连接必须收掉；fiber 销毁时也要收（timer 服务不会替我们取消定时器）。
+	const s = beginSession();
 	ctxRef = ctx;
+	try {
+		ctx.effect(() => () => {
+			if (session === s) endSession("fiber 销毁");
+		});
+	} catch (error) {
+		guardTrace(`挂会话清理失败（不影响功能）：${error?.message ?? String(error)}`);
+	}
 	// 能执行到这里就说明插件确实装载了 —— 随握手上报，是面板的第一条。
 	setCapability("pluginLoaded", true);
 	ctx.logger.info(`[dsh-launcher-plugin] 已装载：桥接=${supervised ? bridgeURL : "未配置"}（launcher=${process.env.DSH_LAUNCHER === "1" ? "是" : "否"}）`);
@@ -918,11 +1060,11 @@ function apply(ctx) {
 		watchTheme(settingsCtx, settings);
 	});
 	if (supervised) {
-		ctx.timeout(() => {
+		armTimeout("主题就绪兜底", () => {
 			if (!settingsReady && !themeReportSettled) {
 				setCapability("themeReport", false, "settings 服务不可用（该组合没有设置服务），主题不会跟随");
 			}
-		}, 5000);
+		}, 5000, ctx);
 	}
 
 	// 2) 注册唯一工具 dsh-restart（仅 launcher 拉起时 —— 没有桥接的工具只会撞死）

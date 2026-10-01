@@ -294,6 +294,83 @@ func TestBridgePageChannelEndToEndWithRealClient(t *testing.T) {
 	}
 }
 
+// 崩溃回归（0.2.7）：0.2.6 在真机上"启动 5s 后 DSH 进程 exit 1"（2026-10-02 00:28/00:29 两次）。
+// 机理：cordis 的 ctx.timeout() 把计时器登记在 timer 服务自己的 ctx 上，调用方 fiber 销毁
+// 不会取消它 → 5s 主题轮询照跑 → 回调里再调 ctx.timeout 抛
+// `cannot get required service "timer" in inactive context` → 没人接 → 进程 exit 1。
+//
+// testdata/plugin-dispose-harness.mjs 用假 ctx 复现同一时序（失效后 timeout 抛真机原文的错）：
+// 0.2.6 的代码在这条测试里必崩（实测 exit 1，栈落在 poll → lib/index.js:625），
+// 0.2.7 的护栏必须让它活着退出，并且留下"排不了（已忽略）"的痕。
+//
+// 不设 DSH_LAUNCHER*：supervised=false，不碰桥接、不发网络请求，只跑崩溃路径。
+func TestPluginTimerGuardSurvivesStaleContext(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("没有 node，跳过真插件崩溃回归测试")
+	}
+	harness := filepath.Join("testdata", "plugin-dispose-harness.mjs")
+	if _, err := os.Stat(harness); err != nil {
+		t.Fatalf("找不到 harness: %v", err)
+	}
+
+	outFile, err := os.CreateTemp(t.TempDir(), "plugin-dispose-out-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer outFile.Close()
+	errFile, err := os.CreateTemp(t.TempDir(), "plugin-dispose-err-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer errFile.Close()
+
+	// 显式剔掉 launcher 环境变量：这条用例必须在"非 launcher 拉起"的形态下跑。
+	env := make([]string, 0, len(os.Environ()))
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "DSH_LAUNCHER") || strings.HasPrefix(kv, "DSH_INSTANCE_ID") || strings.HasPrefix(kv, "DSH_LAUNCH_ID") {
+			continue
+		}
+		env = append(env, kv)
+	}
+
+	cmd := exec.Command(node, "--import", "./testdata/plugin-test-register.mjs", harness)
+	cmd.Env = env
+	cmd.Stdout = outFile
+	cmd.Stderr = errFile
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("启动 harness 失败: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	select {
+	case werr := <-done:
+		if werr != nil {
+			t.Fatalf("harness 非 0 退出：失效 ctx 上的定时器回调把进程带崩了\n%v\nstdout=%s\nstderr=%s",
+				werr, readFileString(outFile.Name()), readFileString(errFile.Name()))
+		}
+	case <-time.After(30 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatalf("harness 30s 没结束\nstdout=%s\nstderr=%s",
+			readFileString(outFile.Name()), readFileString(errFile.Name()))
+	}
+
+	out := readFileString(outFile.Name())
+	errOut := readFileString(errFile.Name())
+	for _, marker := range []string{"HARNESS STALE POLL OK", "HARNESS SESSION END OK", "HARNESS OK"} {
+		if !strings.Contains(out, marker) {
+			t.Fatalf("缺少 %s\nstdout=%s\nstderr=%s", marker, out, errOut)
+		}
+	}
+	if !strings.Contains(errOut, "定时器 主题轮询 排不了") {
+		t.Fatalf("失效 ctx 上的轮询没有留下护栏痕\nstdout=%s\nstderr=%s", out, errOut)
+	}
+	if !strings.Contains(errOut, "装载会话 #2 结束（fiber 销毁）") {
+		t.Fatalf("fiber 销毁时没有收掉装载会话\nstdout=%s\nstderr=%s", out, errOut)
+	}
+}
+
 func hasCapability(report pluginCapabilityReport, id string) bool {
 	for _, c := range report.Capabilities {
 		if c.ID == id && c.OK {
