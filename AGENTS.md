@@ -179,17 +179,17 @@ cd dsh-launcher && wails build
 规则：
 
 1. **探测结论必须有出口。** 只写 logger 等于静默失效（内嵌那次排查了好几轮，就是因为插件探测到
-   接口变了只 `return`）。插件把结论写 `<实例目录>/.dsh-self-mcp/capabilities.json`（见插件 README），
+   接口变了只 `return`）。插件随握手把结论经 loopback HTTP 桥上报（`POST /connect`，见插件 README），
    launcher 在 `capabilities.go` 读回并补上自己的探测项，汇总到右栏「兼容性」标签。
 2. **只在有明确结论时才拦。** `embedRelax=false` → 对应入口置灰 + 显示原因；没有报告 / 取不到报告
-   → **不拦**（fail-open）。"没有报告"混淆了多种原因（插件版本旧、未启用、报告还没写出来），
+   → **不拦**（fail-open）。"没有报告"混淆了多种原因（插件版本旧、未安装、报告还没上报），
    硬拦会把本来能用的功能锁死。判断逻辑集中在 `util.ts` 的 `embedGateReason()`。
    ⚠️ **面板行是三态**：`ok` / `fail`（标红）/ `unknown`（中性灰，`CapabilityItem.Unknown=true`）。
-   unknown = "没有结论 / 不适用"：插件没装、实例没勾选自管理重启、已装副本是旧版都属于**已知良性原因**。
+   unknown = "没有结论 / 不适用"：插件没装、桥接没起来、已装副本是旧版都属于**已知良性原因**。
    **面板一旦误报就会失去可信度** —— 用户看到功能明明正常却满屏红灯，就会学会无视它。所以凡是
    "功能其实还能用"的情况一律 unknown，不要图省事标红；前端所有计数（按钮徽标、标签红点、面板副标题）
-   只统计 `!ok && !unknown`。
-3. **契约放在自己的边界上。** 报告文件的 schema 由 launcher + 插件双方约定，不依赖 DSH 的任何私有格式。
+   只统计 `!ok && !unknown`。分诊集中在后端 `pluginReportAbsentReason()`，前端不再做二次判断。
+3. **契约放在自己的边界上。** 桥接信封的 schema 由 launcher + 插件双方约定，不依赖 DSH 的任何私有格式。
    面板里每个 `CapabilityItem.id` 是稳定契约键（前端按 id 门控），改名等于破坏兼容。
 4. **陈旧报告要失效。** 启动实例前先删报告文件（"文件在" = "本次运行报告过"），再用启动器注入的
    一次性 `DSH_LAUNCH_ID` 与报告里的 `launchId` 比对，对不上才标"可能已过期"。
@@ -199,7 +199,8 @@ cd dsh-launcher && wails build
    不要预先为每个版本写启用表。
 
 入口：实例页标题右侧的「兼容性检查」按钮（`InstancesView` 的 `.compat-check-btn`）。有问题的实例数直接
-落在按钮上（**只统计已跑起来且启用了自管理重启的实例** —— 启动中不判定，否则"报告还没写出来"会一直误报），
+落在按钮上（**只统计已跑起来（ready/running）的实例** —— 启动中不判定，否则"报告还没上报"会一直误报；
+是否装了桥接插件、桥有没有起来由后端 `pluginReportAbsentReason()` 分诊，判定为 unknown 而非红色），
 点击后打开右栏「兼容性」标签并落到第一台出问题的实例。判定规则集中在 `util.ts` 的 `capsAlert()`。
 注意 `.instances-toolbar` 是 `VersionView` 共用的，实例页的布局微调要用 `.instances-toolbar-main` 修饰类收窄。
 

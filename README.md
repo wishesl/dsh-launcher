@@ -61,14 +61,14 @@ DSH 的启动方式本质是一条 `npx -y @deepseek-ai/dsh@<版本> web` 命令
 **前置条件**（三条都满足才能内嵌）：
 
 1. 实例由**启动器启动**（地址来自它的启动日志）；
-2. 该实例勾选了「自管理重启」；
-3. 全局已安装内置插件 `dsh-self-mcp`。
+2. 全局已安装内置插件 `dsh-launcher-plugin`。
 
-第 2、3 条不是形式要求：DSH 的会话 cookie 是 `SameSite=Strict`，跨源 iframe 里拿不到它，
+第 2 条不是形式要求：DSH 的会话 cookie 是 `SameSite=Strict`，跨源 iframe 里拿不到它，
 不放宽就是永久 401。内置插件只做**最小放宽**——仅对「带有效 launch token 的首页请求」和
 「来自启动器源的 `/api` 请求」放行，其它来源照旧被 Host/Origin 栅栏与 `Sec-Fetch-Site` 挡住。
 
 > 条件不满足时入口会**置灰并说明原因**，而不是让你点进去看着它一直重连。
+> （插件装了就自动挂载，没有按实例的开关。）
 
 ## 兼容性探测：让「上游改了内部实现」不再静默失效
 
@@ -104,9 +104,10 @@ Cordis 装载配置……）。这些耦合点**按能力探测，不按版本�
    「DSH 已就绪 · 名称 · 地址」后点它即可在浏览器打开 DSH web（地址也可点卡片 URL 复制）。
 5. **安装到目录**：若实例提示「本地副本未安装」，先点卡片「安装到目录」把该版本真实装进
    目录的 `node_modules`，避免 npx 反复联网拉取、也能让 agent 读到源码。
-6. **开启自管理重启**（可选，用于插件调试）：实例表单勾选「自管理重启」，
-   并在插件市场把内置插件 `dsh-self-mcp` 安装到全局。之后模型就能调用 `dsh-restart` 工具重启
-   DSH，重启完成后启动器会自动把「重启完成」消息投回发起会话，让对话继续。
+6. **安装内置插件**（可选，用于插件调试与主题跟随）：插件市场「已安装」页把内置插件
+   `dsh-launcher-plugin` 装到全局。装好后每个实例自动挂载，模型就能调用 `dsh-restart` 工具重启
+   DSH，重启完成后启动器会自动把「重启完成」消息投回发起会话，让对话继续；同时 DSH 切换亮/暗
+   主题时启动器界面会跟着换肤（不需要按实例勾选）。
 7. **用内置视图打开 DSH**（可选）：顶栏显示器图标 → 下半区变成 DSH 界面；`Esc` 或顶栏「退出」返回。
 8. **停止 / 重启**：卡片「停止」结束进程；顶部 ↻ 按钮一键重启当前实例。
 9. **日常习惯**：点 ✕ 默认最小化到托盘（DSH 继续后台运行），从托盘图标可唤回/退出；
@@ -143,8 +144,10 @@ Cordis 装载配置……）。这些耦合点**按能力探测，不按版本�
   （默认 `pnpm install` / `pnpm run build` / `pnpm dsh web`），一键执行。
 - **内置 DSH 视图**：把 DSH 界面嵌进启动器窗口当伪桌面版用；地址从启动日志自动解析，token 打码，
   前置条件不满足时入口置灰并说明原因（见上文专节）。
-- **自管理重启**：实例级开关 + 内置插件 `dsh-self-mcp` 提供 `dsh-restart` 工具；
+- **自管理重启**：内置插件 `dsh-launcher-plugin` 提供 `dsh-restart` 工具；
   重启完成后自动向发起会话注入「重启完成」消息并唤醒它继续执行（以插件通知形式折叠显示，不是用户气泡）。
+- **主题跟随**：DSH 侧切换亮/暗主题时，插件把偏好经同一座桥回报给启动器，启动器界面
+  跟着换肤（`light` / `dark` / `system` 三态，`system` 由系统偏好解析）；冷启动首帧用本地缓存避免闪白。
 - **兼容性探测**：右栏「兼容性」标签 + 实例页「兼容性检查」入口，逐条列出各项能力的探测结论与证据，
   三态（可用 / 确定故障 / 没有结论），把静默失效变成一眼可见（见上文专节）。
 - **插件市场**：发现 / 安装 / 卸载社区插件（复用官方 `dsh plugin --profile web` 通道），
@@ -174,7 +177,7 @@ Cordis 装载配置……）。这些耦合点**按能力探测，不按版本�
 | 系统托盘 | `fyne.io/systray`（独立 goroutine 跑消息循环，三端通用） |
 | 单实例 | Wails `options.SingleInstanceLock` |
 | 跨平台进程管理 | 平台抽象层（`procattr_windows.go` / `procattr_unix.go`）：Windows 走 `cmd /c` + Job Object + taskkill；macOS/Linux 走 `sh -c` + Setsid 进程组杀树 |
-| 内置插件 | `dsh-self-mcp`（Cordis 插件，源码内嵌进 launcher 二进制，可一键安装到 profile） |
+| 内置插件 | `dsh-launcher-plugin`（Cordis 插件，源码内嵌进 launcher 二进制，可一键安装到 profile） |
 
 ## 架构与目录结构
 
@@ -185,8 +188,9 @@ dsh-launcher/
 ├── version.go         # 启动器版本 + 最佳适配的 DSH 版本（都是 ldflags 可覆盖的变量）
 ├── instances.go       # 实例持久化（%APPDATA%\DSHLauncher\instances.json）
 ├── instance_mask.go   # 实例级插件屏蔽（名单持久化 + 临时 --patch 覆盖层生成/清理）
-├── self_restart.go    # 自管理重启契约（双门控、覆盖层、restart-request.json 消费）
-├── self_restart_install.go # 内置插件 dsh-self-mcp 的解出与安装（embed.FS → profile）
+├── self_restart.go    # 桥接插件契约（门控、--patch 覆盖层、launcher-plugin 常量）
+├── launcher_http.go   # launcher ↔ 插件的 loopback HTTP 桥（/connect /theme /restart /pending）
+├── self_restart_install.go # 内置插件 dsh-launcher-plugin 的解出与安装（embed.FS → profile）
 ├── embeddata.go       # 内置插件源码的 embed 声明
 ├── capabilities.go    # 兼容性探测（读插件能力报告 + 启动器侧探针 → 面板数据）
 ├── dsh_query.go       # 版本查询（npm registry / 本地版本探测）
@@ -206,10 +210,11 @@ dsh-launcher/
 ├── logging.go         # 实例日志落盘
 ├── tray.go            # 系统托盘
 ├── procattr_*.go      # 平台进程属性 / 杀进程树
-├── embed/dsh-self-mcp/ # 内置插件源码（Cordis 插件，见其 README）
+├── embed/dsh-launcher-plugin/ # 内置插件源码（Cordis 插件，见其 README）
 └── frontend/
     └── src/
         ├── App.tsx / api.ts / types.ts / util.ts
+        ├── theme.ts                        # 换肤：data-theme + 原生窗口主题 + 冷启动缓存
         └── components/
             ├── Header.tsx / Sidebar.tsx / WinControls.tsx  # 顶栏 / 左侧菜单 / 窗口按钮
             ├── InstancesView.tsx / InstanceCard.tsx / InstanceForm.tsx
@@ -292,13 +297,15 @@ git push origin v0.1.0
 | 实例运行日志 | `%APPDATA%\DSHLauncher\logs\<实例ID>.log` |
 | 临时插件屏蔽层（运行期间） | 实例目录下 `.dsh-mask-<实例ID>.yml`（停止后自动删除） |
 | 临时自管理重启覆盖层（运行期间） | 实例目录下 `.dsh-self-restart-<实例ID>.yml`（停止后自动删除） |
-| 插件能力报告 | 实例目录下 `.dsh-self-mcp\capabilities.json`（每次启动前清空，由内置插件写入） |
-| 内置插件解出位置 | profile 目录下 `.dsh-builtin\dsh-self-mcp` |
+| 插件能力报告 | 只存在启动器内存里（插件经 loopback HTTP 握手上报，不落盘） |
+| 内置插件解出位置 | profile 目录下 `.dsh-builtin\dsh-launcher-plugin` |
 
 ## 相关文档
 
 - [`AGENTS.md`](AGENTS.md) —— 开发流程约定与踩坑速查（布局铁律、前端约定、兼容性探测原则）
-- [`dsh-launcher/embed/dsh-self-mcp/README.md`](dsh-launcher/embed/dsh-self-mcp/README.md) —— 内置插件：重启语义、能力报告格式、内嵌放宽的安全边界
+- [`dsh-launcher/embed/dsh-launcher-plugin/README.md`](dsh-launcher/embed/dsh-launcher-plugin/README.md) —— 内置插件：桥接协议、重启语义、能力上报、内嵌放宽的安全边界
+- [`doc/dsh-launcher-plugin实现方案.md`](doc/dsh-launcher-plugin实现方案.md) —— 单线桥接插件方案（主题同步 / 重启 / 能力握手三合一）
+- [`doc/交接文档-dsh-launcher-plugin实施进度.md`](doc/交接文档-dsh-launcher-plugin实施进度.md) —— 该方案的实施进度交接
 - [`需求.md`](doc/需求.md) —— 完整需求与关键决策记录
 - [`DSH版本查询与升级指南.md`](doc/DSH版本查询与升级指南.md) —— DSH 版本查询与升级的背景调查
 - [`插件市场实现方案.md`](doc/插件市场实现方案.md) —— 插件市场设计决策

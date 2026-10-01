@@ -58,15 +58,15 @@ The top bar keeps only the **Refresh / Exit** buttons and gives all remaining sp
 The launcher **parses it automatically** from the instance's launch process — no manual pasting needed. The token in the URL is masked in the UI
 (used only inside the iframe).
 
-**Prerequisites** (all three must hold to embed):
+**Prerequisites** (both must hold to embed):
 
 1. The instance was **started by the launcher** (the address comes from its startup log);
-2. The instance has "self-managed restart" enabled;
-3. The built-in plugin `dsh-self-mcp` is installed globally.
+2. The built-in plugin `dsh-launcher-plugin` is installed globally.
 
-Items 2 and 3 are not formalities: DSH's session cookie is `SameSite=Strict`, so a cross-origin iframe can never obtain it, and without relaxation you get a permanent 401. The built-in plugin performs only a **minimal relaxation** — it allows only "home-page requests carrying a valid launch token" and "`/api` requests from the launcher's origin"; everything else is still blocked by the Host/Origin fence and `Sec-Fetch-Site`.
+Item 2 is not a formality: DSH's session cookie is `SameSite=Strict`, so a cross-origin iframe can never obtain it, and without relaxation you get a permanent 401. The built-in plugin performs only a **minimal relaxation** — it allows only "home-page requests carrying a valid launch token" and "`/api` requests from the launcher's origin"; everything else is still blocked by the Host/Origin fence and `Sec-Fetch-Site`.
 
 > When the prerequisites are not met, the entry is **greyed out with the reason shown**, instead of letting you click through and watch it reconnect forever.
+> (Once the plugin is installed it is mounted automatically — there is no per-instance switch.)
 
 ## Capability probing: no more silent breakage when upstream changes its internals
 
@@ -98,9 +98,10 @@ whether things work is always decided by the live probing above, and installing 
    "DSH ready · name · address" appears at the top, click it to open the DSH web UI in your browser (the card's URL is also clickable to copy).
 5. **Install to directory**: if the instance reports "local copy not installed", click "Install to directory" on the card first to really install that version into
    the directory's `node_modules` — this avoids npx re-fetching from the network repeatedly and lets agents read the source.
-6. **Enable self-managed restart** (optional, for plugin debugging): tick "self-managed restart" in the instance form,
-   and install the built-in plugin `dsh-self-mcp` globally from the plugin market. The model can then call the `dsh-restart` tool to restart
+6. **Install the built-in plugin** (optional, for plugin debugging and theme following): on the market's "Installed" tab, install the
+   built-in plugin `dsh-launcher-plugin` globally. Every instance then mounts it automatically, so the model can call the `dsh-restart` tool to restart
    DSH; when the restart finishes, the launcher automatically injects a "restart complete" message back into the originating session so the conversation continues.
+   The same bridge also makes the launcher follow the DSH light/dark theme (no per-instance switch needed).
 7. **Open DSH in the built-in view** (optional): monitor icon in the top bar → the lower half becomes the DSH UI; press `Esc` or the top-bar "Exit" to return.
 8. **Stop / restart**: the card's "Stop" ends the process; the ↻ button at the top restarts the current instance in one click.
 9. **Daily habits**: clicking ✕ minimizes to the tray by default (DSH keeps running in the background); use the tray icon to bring it back or quit;
@@ -135,8 +136,10 @@ What the launcher adds:
   (defaults `pnpm install` / `pnpm run build` / `pnpm dsh web`), executed in one click.
 - **Built-in DSH view**: embeds the DSH UI inside the launcher window as a pseudo desktop app; the address is parsed automatically from the startup log, the token is masked,
   and the entry is greyed out with the reason shown when prerequisites are unmet (see the dedicated section above).
-- **Self-managed restart**: an instance-level switch plus the built-in plugin `dsh-self-mcp` providing the `dsh-restart` tool;
+- **Self-managed restart**: the built-in plugin `dsh-launcher-plugin` providing the `dsh-restart` tool;
   after a restart, a "restart complete" message is injected into the originating session and wakes it up to continue (shown collapsed as a plugin notice, not a user bubble).
+- **Theme following**: when the DSH side switches light/dark, the plugin reports the preference back over the same bridge and the launcher UI
+  re-skins accordingly (`light` / `dark` / `system`, with `system` resolved by the OS preference); the cold-start first frame uses a local cache to avoid a white flash.
 - **Capability probing**: the "Compatibility" tab in the right panel plus the "Compatibility Check" entry on the instance page list the conclusion and evidence for every capability,
   tri-state (usable / confirmed fault / no conclusion), turning silent breakage into something you see at a glance (see the dedicated section above).
 - **Plugin market**: discover / install / uninstall community plugins (reusing the official `dsh plugin --profile web` channel);
@@ -166,7 +169,7 @@ What the launcher adds:
 | System tray | `fyne.io/systray` (message loop on its own goroutine, works on all three platforms) |
 | Single instance | Wails `options.SingleInstanceLock` |
 | Cross-platform process management | Platform abstraction layer (`procattr_windows.go` / `procattr_unix.go`): Windows uses `cmd /c` + Job Object + taskkill; macOS/Linux use `sh -c` + Setsid process-group tree kill |
-| Built-in plugin | `dsh-self-mcp` (a Cordis plugin whose source is embedded into the launcher binary, installable to the profile in one click) |
+| Built-in plugin | `dsh-launcher-plugin` (a Cordis plugin whose source is embedded into the launcher binary, installable to the profile in one click) |
 
 ## Architecture and directory structure
 
@@ -177,8 +180,9 @@ dsh-launcher/
 ├── version.go         # 启动器版本 + 最佳适配的 DSH 版本（都是 ldflags 可覆盖的变量）
 ├── instances.go       # 实例持久化（%APPDATA%\DSHLauncher\instances.json）
 ├── instance_mask.go   # 实例级插件屏蔽（名单持久化 + 临时 --patch 覆盖层生成/清理）
-├── self_restart.go    # 自管理重启契约（双门控、覆盖层、restart-request.json 消费）
-├── self_restart_install.go # 内置插件 dsh-self-mcp 的解出与安装（embed.FS → profile）
+├── self_restart.go    # 桥接插件契约（门控、--patch 覆盖层、launcher-plugin 常量）
+├── launcher_http.go   # launcher ↔ 插件的 loopback HTTP 桥（/connect /theme /restart /pending）
+├── self_restart_install.go # 内置插件 dsh-launcher-plugin 的解出与安装（embed.FS → profile）
 ├── embeddata.go       # 内置插件源码的 embed 声明
 ├── capabilities.go    # 兼容性探测（读插件能力报告 + 启动器侧探针 → 面板数据）
 ├── dsh_query.go       # 版本查询（npm registry / 本地版本探测）
@@ -198,10 +202,11 @@ dsh-launcher/
 ├── logging.go         # 实例日志落盘
 ├── tray.go            # 系统托盘
 ├── procattr_*.go      # 平台进程属性 / 杀进程树
-├── embed/dsh-self-mcp/ # 内置插件源码（Cordis 插件，见其 README）
+├── embed/dsh-launcher-plugin/ # 内置插件源码（Cordis 插件，见其 README）
 └── frontend/
     └── src/
         ├── App.tsx / api.ts / types.ts / util.ts
+        ├── theme.ts                        # 换肤：data-theme + 原生窗口主题 + 冷启动缓存
         └── components/
             ├── Header.tsx / Sidebar.tsx / WinControls.tsx  # 顶栏 / 左侧菜单 / 窗口按钮
             ├── InstancesView.tsx / InstanceCard.tsx / InstanceForm.tsx
@@ -284,13 +289,13 @@ Every release automatically produces four artifacts (with auto-generated release
 | Instance run logs | `%APPDATA%\DSHLauncher\logs\<实例ID>.log` |
 | Temporary plugin mask layer (while running) | `.dsh-mask-<实例ID>.yml` in the instance directory (deleted automatically after stop) |
 | Temporary self-managed restart override layer (while running) | `.dsh-self-restart-<实例ID>.yml` in the instance directory (deleted automatically after stop) |
-| Plugin capability report | `.dsh-self-mcp\capabilities.json` in the instance directory (cleared before every launch, written by the built-in plugin) |
-| Built-in plugin extraction location | `.dsh-builtin\dsh-self-mcp` in the profile directory |
+| Plugin capability report | lives only in launcher memory (the plugin reports it over the loopback HTTP handshake; nothing is written to disk) |
+| Built-in plugin extraction location | `.dsh-builtin\dsh-launcher-plugin` in the profile directory |
 
 ## Related documents
 
 - [`AGENTS.md`](AGENTS.md) — development workflow conventions and pitfall quick reference (layout rules, frontend conventions, capability-probing principles)
-- [`dsh-launcher/embed/dsh-self-mcp/README.md`](dsh-launcher/embed/dsh-self-mcp/README.md) — the built-in plugin: restart semantics, capability report format, security boundary of the embed relaxation
+- [`dsh-launcher/embed/dsh-launcher-plugin/README.md`](dsh-launcher/embed/dsh-launcher-plugin/README.md) — the built-in plugin: bridge protocol, restart semantics, capability reporting, security boundary of the embed relaxation
 - [`需求.md`](doc/需求.md) — full requirements and key decision records
 - [`DSH版本查询与升级指南.md`](doc/DSH版本查询与升级指南.md) — background research on DSH version querying and upgrading
 - [`插件市场实现方案.md`](doc/插件市场实现方案.md) — plugin market design decisions
