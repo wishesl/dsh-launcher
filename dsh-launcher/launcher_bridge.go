@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -461,6 +462,10 @@ func (b *launcherBridge) handleHello(c *bridgeClient, env bridgeEnvelope) {
 		b.emitTheme(c.instanceID, payload.Theme.Preference)
 	}
 	// 连接建立也写日志（只断开写会让人查不清"到底连上过没有"，真机排障时吃过这个亏）。
+	//
+	// 但要分清"新连接"和"同一条连接重发快照"：能力是逐项上报的，每报一项就重发一次
+	// hello，真机日志里一次启动能看到 5 条"已连接"，排障时很容易误判成反复重连
+	// （2026-10-02 01:06:57 那次就差点看错）。同一连接只写"快照已刷新"。
 	name := payload.Plugin
 	if name == "" {
 		name = "未知插件"
@@ -469,7 +474,12 @@ func (b *launcherBridge) handleHello(c *bridgeClient, env bridgeEnvelope) {
 	if version == "" {
 		version = "版本未知"
 	}
-	b.note("bridge: 实例 " + c.instanceID + " 的插件已连接（" + name + " " + version + "，launch=" + env.LaunchID + "）")
+	if prev == c {
+		b.note("bridge: 实例 " + c.instanceID + " 的快照已刷新（" + name + " " + version +
+			"，能力 " + strconv.Itoa(len(payload.Capabilities)) + " 项）")
+	} else {
+		b.note("bridge: 实例 " + c.instanceID + " 的插件已连接（" + name + " " + version + "，launch=" + env.LaunchID + "）")
+	}
 	b.pushPending(c, pending)
 }
 

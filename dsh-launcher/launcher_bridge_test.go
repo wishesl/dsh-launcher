@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -563,4 +565,74 @@ func TestBridgeRestartExitDisarmsWatchdog(t *testing.T) {
 	if mp.forcedRestart.Load() {
 		t.Fatal("进程已正常退出，看门狗不该再强制收树")
 	}
+}
+
+// app.log 里某句话的出现次数（note 是同步写文件的，读不到就返回 0）。
+func appLogCount(dir, needle string) int {
+	data, err := os.ReadFile(filepath.Join(dir, "logs", "app.log"))
+	if err != nil {
+		return 0
+	}
+	return strings.Count(string(data), needle)
+}
+
+func waitAppLogCount(t *testing.T, dir, needle string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if appLogCount(dir, needle) == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "logs", "app.log"))
+	t.Fatalf("3s 内 app.log 里 %q 的次数不是 %d：\n%s", needle, want, data)
+}
+
+// hello 重发 ≠ 重连（0.2.7 真机日志暴露的排障陷阱）。
+//
+// 能力是**逐项**上报的，每报一项就重发一次 hello（`setCapability` → `scheduleSync`），
+// 真机 2026-10-02 01:06:57 一次启动写出 5 条"插件已连接"，看起来像反复重连，实际是同一条
+// 连接在刷新快照。所以：同一条连接重发只写"快照已刷新"，换了连接才写"插件已连接"。
+func TestBridgeHelloResnapshotLogDistinguishesReconnect(t *testing.T) {
+	app, _ := newSelfRestartTestApp(t)
+	dir := t.TempDir()
+	app.logs = &logStore{dir: filepath.Join(dir, "logs"), files: map[string]*os.File{}, sizes: map[string]int64{}}
+	app.bridge.start()
+	t.Cleanup(app.bridge.stop)
+
+	conn, resp, err := dialBridge(t, app, app.bridge.token, nil)
+	if err != nil {
+		t.Fatalf("带 token 应能升级: %v (resp=%+v)", err, resp)
+	}
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	defer conn.Close()
+
+	// 第一次 hello：新连接 → "插件已连接"。
+	sendBridgeFrame(t, conn, helloFrame("L1", "dark"))
+	waitHandshake(t, app.bridge, "inst-a", "L1")
+	waitAppLogCount(t, dir, "的插件已连接", 1)
+
+	// 同一条连接再发两次快照（能力逐项上报的真实形态）→ 只写"快照已刷新"。
+	sendBridgeFrame(t, conn, helloFrame("L1", "dark"))
+	sendBridgeFrame(t, conn, helloFrame("L1", "dark"))
+	waitAppLogCount(t, dir, "快照已刷新", 2)
+	if got := appLogCount(dir, "的插件已连接"); got != 1 {
+		t.Fatalf("同一条连接重发快照不该再写\"已连接\"，实际 %d 条", got)
+	}
+
+	// 换一条连接（真重连）→ 才再写一条"插件已连接"。
+	conn2, resp2, err2 := dialBridge(t, app, app.bridge.token, nil)
+	if err2 != nil {
+		t.Fatalf("第二条连接失败: %v (resp=%+v)", err2, resp2)
+	}
+	if resp2 != nil {
+		defer resp2.Body.Close()
+	}
+	defer conn2.Close()
+	sendBridgeFrame(t, conn2, helloFrame("L2", "dark"))
+	waitHandshake(t, app.bridge, "inst-a", "L2")
+	waitAppLogCount(t, dir, "的插件已连接", 2)
 }
