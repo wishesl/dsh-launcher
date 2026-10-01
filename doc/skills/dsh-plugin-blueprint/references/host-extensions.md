@@ -30,3 +30,6 @@
 - **会话事件词表**：`dsh-session/lib/types/known-event-types.js:21-81` 的 `KNOWN_SESSION_EVENT_TYPES`（56 个：`turn/start`、`tool/call`、`tool/result`、`user/message`、`assistant/message`、`todo/write`、`goal/change`、`approval/asked`…）。**仓库外插件自造的会话事件类型不在集合内**，读路径会拒绝解释，除非事件带 envelope 的 `ignorable` 标记——而 live `Session.append()` 无法设置该标记，session 会拒绝重开。所以**不要用新 `type` 追加 session 事件**；要派生状态放 `ctx.sessionProjections`，插件自有数据放 storage 服务。
 - **per-session 派生状态**放 `ctx.sessionProjections` 单元（`apply(state,event)` 纯且同步，忽略的事件返回同一引用；`view()` 值不变返回同一引用以抑制发布；字段/折叠语义变化时 bump `stateVersion`）。等 `turn/end`、`assistant/message`、`tool/result` 这类**持久**事件；实时 token 用 `agent/assistant-stream` 渲染；**不要 poll `agent/status`**；`whenIdle()` 不代表一次 follow-up 结束。
 - **per-agent 行为**：在 `agent/created` 拿到的 `agent.ctx` 上注册，包一层 `agent.ctx.effect()`，**同时**把 disposer 存进自己插件的 effect（两个所有者，任一侧拆除都能移除）。加 prompt 文本用 `ctx.systemPrompt.section()`。
+- **依赖"还没就绪" ≠ "不存在"**：重启/重载后头 1~2 秒里 `ctx.get("<service>")` 可能取不到（服务还在装配）。这时**不要**把它当失败塞进重试阶梯 —— 用 `ctx.inject([...], cb)` 的**就绪回调**驱动（cordis 在服务可解析那一刻回调），重试只作兜底。真机教训（0.2.8→0.2.9）：6 次重试预算被必然失败的尝试烧光，成功看起来像运气。
+- **错误文案不要断言你没验证过的原因**：`"该 profile 未挂载 Web 会话控制器"` 是错的（profile 有，只是没装配好）。只写确证的事实（"尚未就绪（服务仍在装配）"），否则排障时先被自己误导。
+- **状态/交付日志要带计数与标签**：`已试 0 次`、`第 1 次尝试`、`通道 plugin/notice` 比"成功了"有用得多 —— 它让"没有烧重试"这类结论可以被直接读出来。

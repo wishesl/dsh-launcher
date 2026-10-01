@@ -38,13 +38,14 @@ description: DSH(DeepSeek Harness) 插件架构蓝图与源码取证法。设计
 | `references/verification.md` | 规划六步、取证顺序与机械技巧、证伪清单、结论表述规范、未确认清单 |
 | `references/error-strings.md` | 权威错误串 → 含义 → 修法 |
 | `references/templates.md` | 可复制的双半边 `package.json` 与两侧入口骨架 |
-| `references/lessons.md` | 本仓库 dsh-launcher-plugin 0.2.6–0.2.8 的四条实战教训 + 参考坐标 |
+| `references/lessons.md` | 本仓库 dsh-launcher-plugin 0.2.6–0.2.9 的五条实战教训 + 参考坐标 |
 
-## 3 最容易翻车的三件事（全文最贵的三条）
+## 3 最容易翻车的四件事（全文最贵的四条）
 
 1. **`ctx.plugin` 无条件 `new Fiber`，同一插件可多实例**；声明 `dsh.client` 会让宿主半边被重复装载。⇒ 模块级变量会被互相踩，幂等闩（`handled = true`）会永久闩死。
 2. **没有 `ready`/`dispose` 事件，`ctx.effect` 是唯一清理原语**；`ctx.timeout` 注册在 timer 服务自己的 ctx 上，**不随调用方 fiber 取消** ⇒ 脏 ctx 续排定时器 = 进程级崩溃。
 3. **patch 的 `config` 是整体替换，永不深合并** ⇒ 想改一个子键必须重述该行全部字段。
+4. **依赖"还没就绪"不是"不存在"**：重启/重载后头 1~2 秒 `ctx.get("<svc>")` 可能取不到。就绪要用 `ctx.inject([...], cb)` 的事件等，**不要用重试次数等**；错误文案只写确证的事实。证据核对先按时间戳切出**本次运行段**（累积日志会让你误判"没修好"）。见 `references/verification.md` §6。
 
 ## 4 版本与坐标约定
 
