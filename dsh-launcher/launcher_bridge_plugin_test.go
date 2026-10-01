@@ -549,6 +549,113 @@ func TestBridgePendingRedeliveryAfterSessionReload(t *testing.T) {
 	}
 }
 
+// 回归（0.2.9）：重启后 sessionController 比插件晚装配 —— 交付必须**等就绪事件**，
+// 而不是把它当失败烧掉重试预算，更不能打出"该 profile 未挂载 Web 会话控制器"这种错话。
+//
+// 真机 0.2.8 复验（2026-10-02 02:43）：
+//
+//	交付未就绪（sessionController 服务不可用（该 profile 未挂载 Web 会话控制器）），500ms 后重试（1/6）
+//	… 40000ms 后重试（6/6）
+//	已向会话 … 注入重启完成消息（通道 plugin/notice，第 7 次尝试）   ← 靠"重新装载的握手"救回来的
+//
+// testdata/plugin-session-ready-harness.mjs 复现同一时序：apply 时取不到 sessionController →
+// launcher 推来 pending → 第一发只记"等待就绪、不消耗重试次数" → 500ms 后服务装配完成
+// （cordis 的 ctx.inject 回调触发）→ 立刻交付成功，且是"第 1 次尝试"。
+func TestBridgePendingDeliveredWhenSessionControllerLate(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("没有 node，跳过晚就绪交付回归测试")
+	}
+	harness := filepath.Join("testdata", "plugin-session-ready-harness.mjs")
+	if _, err := os.Stat(harness); err != nil {
+		t.Fatalf("找不到 harness: %v", err)
+	}
+
+	app, _ := newSelfRestartTestApp(t)
+	app.bridge.start()
+	t.Cleanup(app.bridge.stop)
+	if app.bridge.url == "" {
+		t.Fatal("桥接必须监听成功")
+	}
+	app.mu.Lock()
+	app.processes["inst-a"] = &managedProcess{instanceID: "inst-a", launchID: "L1"}
+	app.mu.Unlock()
+
+	pending := json.RawMessage(`{"sessionId":"session-harness","callId":"c-1","reason":"晚就绪交付","requestedAt":1,"launchedByLauncher":true}`)
+	app.bridge.mu.Lock()
+	app.bridge.pending["inst-a"] = pending
+	app.bridge.mu.Unlock()
+
+	outFile, err := os.CreateTemp(t.TempDir(), "plugin-session-ready-out-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer outFile.Close()
+	errFile, err := os.CreateTemp(t.TempDir(), "plugin-session-ready-err-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer errFile.Close()
+
+	cmd := exec.Command(node, "--import", "./testdata/plugin-test-register.mjs", harness)
+	cmd.Env = append(os.Environ(),
+		"DSH_LAUNCHER=1",
+		"DSH_LAUNCHER_EVENTS="+app.bridge.url,
+		"DSH_LAUNCHER_TOKEN="+app.bridge.token,
+		"DSH_INSTANCE_ID=inst-a",
+		"DSH_LAUNCH_ID=L1",
+	)
+	cmd.Stdout = outFile
+	cmd.Stderr = errFile
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("启动 harness 失败: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	select {
+	case werr := <-done:
+		if werr != nil {
+			t.Fatalf("harness 非 0 退出：服务晚就绪时没能交付\n%v\nstdout=%s\nstderr=%s",
+				werr, readFileString(outFile.Name()), readFileString(errFile.Name()))
+		}
+	case <-time.After(30 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatalf("harness 30s 没结束\nstdout=%s\nstderr=%s",
+			readFileString(outFile.Name()), readFileString(errFile.Name()))
+	}
+
+	out := readFileString(outFile.Name())
+	errOut := readFileString(errFile.Name())
+	for _, marker := range []string{"HARNESS SERVICE READY", "HARNESS DELIVERED AFTER SERVICE READY", "HARNESS SINGLE DELIVERY OK", "HARNESS OK"} {
+		if !strings.Contains(out, marker) {
+			t.Fatalf("缺少 %s\nstdout=%s\nstderr=%s", marker, out, errOut)
+		}
+	}
+	// 第一发必须走"等待就绪"这条道，而不是被当成失败。
+	if !strings.Contains(errOut, "交付等待 sessionController 就绪") || !strings.Contains(errOut, "不消耗重试次数") {
+		t.Fatalf("没有走「等就绪」的路径\nstdout=%s\nstderr=%s", out, errOut)
+	}
+	// 重试预算不能被必然失败的尝试烧掉；成功文案必须是"第 1 次尝试"。
+	if strings.Contains(errOut, "交付未就绪") {
+		t.Fatalf("服务未就绪被当成了交付失败（旧实现的毛病）\nstdout=%s\nstderr=%s", out, errOut)
+	}
+	if !strings.Contains(errOut, "第 1 次尝试") {
+		t.Fatalf("交付不该消耗重试次数（应记第 1 次尝试）\nstdout=%s\nstderr=%s", out, errOut)
+	}
+	// 那句误导文案必须消失。
+	if strings.Contains(errOut, "未挂载 Web 会话控制器") {
+		t.Fatalf("仍在打误导性的「未挂载 Web 会话控制器」\nstdout=%s\nstderr=%s", out, errOut)
+	}
+	// 交付成功后 pending-consumed 回到 launcher（否则下次启动重复注入）。
+	app.bridge.mu.Lock()
+	remaining := len(app.bridge.pending)
+	app.bridge.mu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("pending-consumed 没有回到 launcher（还剩 %d 条）\nstdout=%s\nstderr=%s", remaining, out, errOut)
+	}
+}
+
 func hasCapability(report pluginCapabilityReport, id string) bool {
 	for _, c := range report.Capabilities {
 		if c.ID == id && c.OK {

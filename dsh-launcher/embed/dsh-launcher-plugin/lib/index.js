@@ -50,6 +50,11 @@ const RESTART_EXIT_DELAY_MS = 500;
 const RESTART_EXIT_VERIFY_MS = 3000;
 /** 新装载会话就绪后，隔多久补做还没完成的续跑交付（等服务挂齐再试）。 */
 const RESUME_DELIVERY_DELAY_MS = 300;
+/** sessionController 还没装配好时的等待重排间隔。这**不是失败**，不消耗重试预算：
+ *  0.2.8 真机复验（02:43）显示重启后头 1~2 秒里 `ctx.get("sessionController")` 取不到
+ *  （服务仍在装配），旧实现把它当失败烧掉 6 次重试，并打出一句误导性的
+ *  "该 profile 未挂载 Web 会话控制器"——profile 明明有，只是还没就绪。 */
+const SESSION_WAIT_RETRY_MS = 1000;
 
 /** DSH 主题设置命名空间（dsh-client-ui-theme 写进共享 profile 的 ui-theme）。 */
 const THEME_NS = "ui-theme";
@@ -107,6 +112,10 @@ let pendingRestart = null;
  * 「重启完成」再没进过会话（会话文件里最后一条注入停在 0.2.4 时代）。
  */
 let pendingDelivery = null;
+/** sessionController 注入就绪后的 ctx（进程级）：重启后该服务比插件晚装配，
+ *  交付必须等它 —— 只有 `ctx.inject(["sessionController"], ...)` 拿到的 ctx
+ *  才保证此刻服务可解析。 */
+let sessionControllerCtx = null;
 /** settings 服务是否就绪（用于 5s 后给 themeReport 一个可见结论）。 */
 let settingsReady = false;
 /** themeReport 是否已给出结论（未给出 = 面板不显示该行，fail-open）。 */
@@ -549,9 +558,13 @@ async function deliverAsPluginNotice(controller, pending, text) {
  *  返回实际成功的通道名（只用于留痕）。能力 `restartDelivery` 只在**真的投递成功**时才报 ok ——
  *  回退过程中不报 false，否则一次成功的回退会把顶栏胶囊染成红的（fail-open：宁可不说，不可误报）。 */
 async function deliverRestartComplete(ctx, pending) {
-	const controller = ctx.get("sessionController");
+	// 优先用注入就绪的 ctx：重启后 sessionController 比插件晚装配，apply 的 ctx 此刻可能取不到。
+	const controller = (sessionControllerCtx ?? ctx).get("sessionController");
 	if (controller === void 0) {
-		throw new Error("sessionController 服务不可用（该 profile 未挂载 Web 会话控制器）");
+		// 不是"没挂载"，是"还没装配好"——标成可等待状态，别烧重试预算。
+		const error = new Error("sessionController 尚未就绪（重启后服务仍在装配，等它就绪再交付）");
+		error.code = "SESSION_CONTROLLER_PENDING";
+		throw error;
 	}
 	const text = restartCompleteText(pending);
 
@@ -660,8 +673,16 @@ function attemptDelivery() {
 		.catch((error) => {
 			if (d.gen !== gen) return;
 			d.inflight = false;
-			d.attempts += 1;
 			const message = error?.message ?? String(error);
+			if (error?.code === "SESSION_CONTROLLER_PENDING") {
+				// 服务还没装配好 —— 不是交付失败，不烧重试预算。
+				// 正常情况下 sessionController 的 inject 回调会立刻再触发一次；这条定时器只是兜底。
+				d.state = "waiting";
+				deliveryTrace(`交付等待 sessionController 就绪（${message}），不消耗重试次数`);
+				armTimeout("重启消息交付", attemptDelivery, SESSION_WAIT_RETRY_MS);
+				return;
+			}
+			d.attempts += 1;
 			if (d.attempts <= RETRY_DELAYS_MS.length) {
 				const delay = RETRY_DELAYS_MS[d.attempts - 1];
 				d.state = "waiting";
@@ -1153,6 +1174,18 @@ function apply(ctx) {
 		} else {
 			restartTrace("拿不到 appExit（重启时走硬退兜底）");
 		}
+	});
+
+	// 0.55) 会话控制器：重启后它比插件晚装配（真机 02:43 复验：头 1~2 秒取不到）。
+	//       等服务就绪再交付续跑负载 —— 别用 apply 的 ctx 硬试，那会误报"profile 未挂载"
+	//       并把重试预算白烧在必然失败的尝试上。
+	ctx.inject(["sessionController"], (scCtx) => {
+		sessionControllerCtx = scCtx;
+		deliveryTrace("sessionController 已就绪，尝试交付续跑负载");
+		attemptDelivery();
+		scCtx.effect(() => () => {
+			if (sessionControllerCtx === scCtx) sessionControllerCtx = null;
+		}, "dsh-launcher-plugin: sessionController");
 	});
 
 	// 0.6) 计时器：退出与交付都靠它延时。timer 注入后的 ctx 才保证 `timeout` 可调用
