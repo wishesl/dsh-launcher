@@ -1643,25 +1643,29 @@ button.brand-ver:hover { border-color: var(--accent); color: var(--accent); back
 [data-theme="dark"] {
   color-scheme: dark;
 
-  /* surfaces：从最暗的底到最亮的卡，层级与浅色一一对应、只是方向相反 */
-  --bg: #0d1017;
-  --panel: #171b24;
-  --panel-2: #1f2430;
-  --panel-3: #29303d;
-  --border: #2f3644;
-  --border-soft: #262c39;
+  /* surfaces：不复用浅色的蓝调灰，直接取 DSH 深色主题自己的 neutral-bluish 阶
+     （--dsw-static-neutral-bluish-*，定义在 dsh-client-ui-theme 的 client.js）。
+     关键一条：--panel 就是 DSH 的 --dsw-alias-bg-base（#151517），
+     所以启动器主面板与 DSH 窗口底色是同一个色值，并排看不会有色差。
+     层级仍与浅色一一对应（底最暗、卡最亮），只是全部换成 DSH 的中性色。 */
+  --bg: #0f1115;             /* DSH neutral-bluish-1000：窗口最外圈 */
+  --panel: #151517;          /* DSH alias-bg-base：主面板（与 DSH 同色） */
+  --panel-2: #1b1b1c;        /* DSH neutral-bluish-900（侧栏 / 代码块面） */
+  --panel-3: #232324;        /* DSH neutral-bluish-875（alias-bg-layer-1） */
+  --border: #ffffff1f;       /* DSH alias-border-l2 */
+  --border-soft: #ffffff0f;  /* DSH alias-border-l1 */
 
-  /* text */
-  --text: #e8ebf2;
-  --text-2: #a7b0c0;
-  --text-3: #737d90;
-  --muted: #8892a5;
+  /* text：对应 DSH 的 label-primary / -secondary / -tertiary / -caption */
+  --text: #f9fafb;
+  --text-2: #cfd3d6;
+  --text-3: #adb2b8;
+  --muted: #81858c;
 
   /* 默认强调色翻成浅墨：深色面板上细描边/文字用它才有对比。
      实心填充的两个例外（主按钮的墨黑渐变、切换开关的 on 态）单独覆盖，见下。 */
-  --accent: #e8ebf2;
+  --accent: #f9fafb;                 /* DSH alias-brand-primary */
   --accent-strong: #ffffff;
-  --accent-soft: rgba(232, 235, 242, 0.13);
+  --accent-soft: #ffffff14;          /* DSH alias-interactive-bg-hover */
 
   /* 状态色：亮一档，才在深底上有足够对比 */
   --green: #34d399;
@@ -1676,24 +1680,24 @@ button.brand-ver:hover { border-color: var(--accent); color: var(--accent); back
   --shadow-pop: 0 14px 44px rgba(0, 0, 0, 0.55);
 
   /* 派生 token */
-  --on-accent: #0d1017;                 /* 浅墨底上的文字改深色 */
-  --brand-grad: linear-gradient(135deg, #eef1f7, #b9c0ce);
-  --brand-grad-btn: linear-gradient(180deg, #f4f6fa, #c8cfdb);
-  --dot: #4a5265;
-  --rail-off: #39414f;
+  --on-accent: #0f1115;                 /* 浅墨底上的文字改深色（DSH label-primary-foreground） */
+  --brand-grad: linear-gradient(135deg, #f9fafb, #cfd3d6);
+  --brand-grad-btn: linear-gradient(180deg, #f9fafb, #ebeef2); /* DSH button-primary fill → hover */
+  --dot: #545557;                       /* DSH alias-state-idle-primary */
+  --rail-off: #43454a;                  /* DSH neutral-bluish-750 */
   --danger-text: #fca5a5;               /* 状态色的"文字面"：深底上要更亮 */
   --ok-text: #6ee7a8;
   --ok-soft: rgba(52, 211, 153, 0.14);
   --ok-border: rgba(52, 211, 153, 0.45);
   --danger-soft: rgba(248, 113, 113, 0.14);
-  --scroll-thumb: #39414f;
-  --scroll-thumb-hover: #4c5566;
-  --overlay: rgba(0, 0, 0, 0.6);
-  --skeleton-a: #1f2430;
-  --skeleton-b: #262d3a;
-  --switch-track: #39414f;
-  --switch-knob: #c8cfdb;
-  --field-bg: #1f2430;
+  --scroll-thumb: #545557;              /* DSH alias-scrollbar-bg-l2 */
+  --scroll-thumb-hover: #65676b;        /* DSH alias-scrollbar-hover-l2 */
+  --overlay: rgba(0, 0, 0, 0.5);        /* DSH alias-bg-mask-1 */
+  --skeleton-a: #ffffff0a;              /* DSH alias-bg-skeleton 的弱半档 */
+  --skeleton-b: #ffffff14;              /* DSH alias-bg-skeleton */
+  --switch-track: #43454a;              /* DSH neutral-bluish-750 */
+  --switch-knob: #cfd3d6;               /* DSH neutral-bluish-300 */
+  --field-bg: #1b1b1c;                  /* DSH specific-login-input */
 }
 
 /* 主按钮：token 已经翻成浅色，墨黑阴影要在浅底按钮上才成立 */
@@ -1701,7 +1705,7 @@ button.brand-ver:hover { border-color: var(--accent); color: var(--accent); back
 [data-theme="dark"] .btn-primary:hover:not(:disabled) { box-shadow: 0 3px 12px rgba(0, 0, 0, 0.5); }
 /* 品牌方块：浅底 + 深字（渐变已经把底色翻过来了，字也要跟着翻） */
 [data-theme="dark"] .brand-logo {
-  color: #0d1017;
+  color: #0f1115;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 /* 切换开关 on 态：用深墨实心 + 浅色滑块，跟主按钮同一套语言（不要跟着 --accent 翻白） */
@@ -1709,30 +1713,36 @@ button.brand-ver:hover { border-color: var(--accent); color: var(--accent); back
   background: var(--text-2);
   border-color: var(--text-2);
 }
-[data-theme="dark"] .switch input:checked + .switch-track::after { background: #171b24; }
-/* 交通灯圆点、自更新终端窗口是"固定的实体"，两个主题下都不该换皮 */
-[data-theme="dark"] .update-log { border-color: var(--border-soft); }
+[data-theme="dark"] .switch input:checked + .switch-track::after { background: #151517; }
+/* 交通灯圆点两个主题下都不换皮；自更新终端在浅色下是"故意压黑"的实体，但深色下
+   必须跟着 DSH 走 —— 否则它是整个应用里唯一还带蓝调的底。 */
+[data-theme="dark"] .update-log {
+  background: #1b1b1c;              /* DSH alias-markdown-code-block */
+  color: #ebeef2;
+  border-color: var(--border-soft);
+}
+[data-theme="dark"] .update-log .muted { color: #adb2b8; }
 
 /* ---------- 系统暗色：与上面完全一致，只改外层选择器 ---------- */
 @media (prefers-color-scheme: dark) {
   [data-theme="system"] {
     color-scheme: dark;
 
-    --bg: #0d1017;
-    --panel: #171b24;
-    --panel-2: #1f2430;
-    --panel-3: #29303d;
-    --border: #2f3644;
-    --border-soft: #262c39;
+    --bg: #0f1115;
+    --panel: #151517;
+    --panel-2: #1b1b1c;
+    --panel-3: #232324;
+    --border: #ffffff1f;
+    --border-soft: #ffffff0f;
 
-    --text: #e8ebf2;
-    --text-2: #a7b0c0;
-    --text-3: #737d90;
-    --muted: #8892a5;
+    --text: #f9fafb;
+    --text-2: #cfd3d6;
+    --text-3: #adb2b8;
+    --muted: #81858c;
 
-    --accent: #e8ebf2;
+    --accent: #f9fafb;
     --accent-strong: #ffffff;
-    --accent-soft: rgba(232, 235, 242, 0.13);
+    --accent-soft: #ffffff14;
 
     --green: #34d399;
     --green-soft: rgba(52, 211, 153, 0.16);
@@ -1744,36 +1754,41 @@ button.brand-ver:hover { border-color: var(--accent); color: var(--accent); back
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-pop: 0 14px 44px rgba(0, 0, 0, 0.55);
 
-    --on-accent: #0d1017;
-    --brand-grad: linear-gradient(135deg, #eef1f7, #b9c0ce);
-    --brand-grad-btn: linear-gradient(180deg, #f4f6fa, #c8cfdb);
-    --dot: #4a5265;
-    --rail-off: #39414f;
+    --on-accent: #0f1115;
+    --brand-grad: linear-gradient(135deg, #f9fafb, #cfd3d6);
+    --brand-grad-btn: linear-gradient(180deg, #f9fafb, #ebeef2);
+    --dot: #545557;
+    --rail-off: #43454a;
     --danger-text: #fca5a5;
     --ok-text: #6ee7a8;
     --ok-soft: rgba(52, 211, 153, 0.14);
     --ok-border: rgba(52, 211, 153, 0.45);
     --danger-soft: rgba(248, 113, 113, 0.14);
-    --scroll-thumb: #39414f;
-    --scroll-thumb-hover: #4c5566;
-    --overlay: rgba(0, 0, 0, 0.6);
-    --skeleton-a: #1f2430;
-    --skeleton-b: #262d3a;
-    --switch-track: #39414f;
-    --switch-knob: #c8cfdb;
-    --field-bg: #1f2430;
+    --scroll-thumb: #545557;
+    --scroll-thumb-hover: #65676b;
+    --overlay: rgba(0, 0, 0, 0.5);
+    --skeleton-a: #ffffff0a;
+    --skeleton-b: #ffffff14;
+    --switch-track: #43454a;
+    --switch-knob: #cfd3d6;
+    --field-bg: #1b1b1c;
   }
   [data-theme="system"] .btn-primary { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); }
   [data-theme="system"] .btn-primary:hover:not(:disabled) { box-shadow: 0 3px 12px rgba(0, 0, 0, 0.5); }
   [data-theme="system"] .brand-logo {
-    color: #0d1017;
+    color: #0f1115;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   }
   [data-theme="system"] .switch input:checked + .switch-track {
     background: var(--text-2);
     border-color: var(--text-2);
   }
-  [data-theme="system"] .switch input:checked + .switch-track::after { background: #171b24; }
-  [data-theme="system"] .update-log { border-color: var(--border-soft); }
+  [data-theme="system"] .switch input:checked + .switch-track::after { background: #151517; }
+  [data-theme="system"] .update-log {
+    background: #1b1b1c;
+    color: #ebeef2;
+    border-color: var(--border-soft);
+  }
+  [data-theme="system"] .update-log .muted { color: #adb2b8; }
 }
 
