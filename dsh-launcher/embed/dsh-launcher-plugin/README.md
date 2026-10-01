@@ -8,7 +8,7 @@
 0.2.6 起同一条线多接一个角色：**网页端即时通道**（见下），让"点启动器换主题"从
 "等 DSH 写完配置再采纳（约 300ms）"变成**页面当场变色（毫秒级）**。
 
-## 版本速览（当前 0.2.8）
+## 版本速览（当前 0.2.9）
 
 | 版本 | 变更 | 提交 |
 |---|---|---|
@@ -19,6 +19,7 @@
 | 0.2.6 | **网页端即时通道**：客户端半边 `lib/client.js` + 页面坐标注入（乐观换肤，写盘后台跑） | `6324cf7` |
 | 0.2.7 | **双装载与定时器护栏**：修掉「DSH 启动 5s 后 exit 1」 | `56b873b` |
 | 0.2.8 | **续跑交付跨装载会话补交** + 交付链改走可见痕迹 | `1c860c8` |
+| 0.2.9 | **交付等 `sessionController` 就绪**：不再把"服务还没装配好"当失败烧重试，删掉误导文案 | `b63ddf1` |
 
 > 能力或行为变更**必须** bump `package.json` 版本（启动器用「内置 vs 已装」版本比对分诊，见文末开发须知）。
 
@@ -225,6 +226,31 @@ launcher /ws  ◄── page-hello ──────  dsh-launcher-plugin 客�
 `TestBridgePendingRedeliveryAfterSessionReload` —— 复现"负载落在会话 #1 → #1 被拆 → 会话 #2 必须
 补交且只交一次，并回 `pending-consumed`"；恢复旧语义（重复下发一律忽略 + 不补做）时该用例必红
 （实测 `HARNESS FAIL: 8s 内会话 #2 没有补交续跑负载`）。
+
+### 0.2.9：交付要等"服务就绪"，不是等"重试次数"
+
+0.2.8 修好了"跨装载补交"，但真机复验（2026-10-02 02:43）暴露了下一层问题：
+
+```
+重启续跑：交付未就绪（sessionController 服务不可用（该 profile 未挂载 Web 会话控制器）），500ms 后重试（1/6）
+… 40000ms 后重试（6/6）
+重启续跑：已向会话 … 注入重启完成消息（通道 plugin/notice，第 7 次尝试）   ← 靠"重新装载的握手"救回来的
+```
+
+两个毛病：①**那句话是错的** —— profile 明明有会话控制器，只是重启后头 1~2 秒它还没装配好；
+②6 次重试预算被**必然失败**的尝试烧光，而真正该等的事件（cordis 的 `ctx.inject` 回调）没被利用。
+
+0.2.9 的做法：
+
+- `apply` 里挂 `ctx.inject(["sessionController"], (scCtx) => { sessionControllerCtx = scCtx; attemptDelivery(); … })`
+  —— 服务装配好的那一刻就会回调，交付立刻走；
+- `deliverRestartComplete` 优先用这个就绪 ctx；取不到时抛带 `SESSION_CONTROLLER_PENDING` 标记的错误；
+- `attemptDelivery` 的 catch 对标记分支只置 `waiting` + 1s 兜底重排，**不消耗 `RETRY_DELAYS_MS` 预算**；
+- 文案改成"sessionController 尚未就绪（重启后服务仍在装配，等它就绪再交付）"。
+
+回归锁：`testdata/plugin-session-ready-harness.mjs` + `TestBridgePendingDeliveredWhenSessionControllerLate`
+—— 复现"服务 500ms 后才就绪"，断言交付只成功一次、是"第 1 次尝试"、没有 `交付未就绪`、也没有那句误导文案；
+反向验证：把标记改回旧语义，用例必红（实测 `FAIL: 没有走「等就绪」的路径`）。
 
 ## 能力握手
 
