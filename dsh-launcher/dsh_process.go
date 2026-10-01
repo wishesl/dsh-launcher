@@ -105,6 +105,34 @@ func extractAuthWebURL(line string) string {
 	return u
 }
 
+// webBannerRe matches DSH's own "web is up" startup advertisement, e.g.
+//
+//	dsh web: http://127.0.0.1:3080/?token=…
+//
+// 只有这种行才产出 web 地址候选：插件 / MCP 的日志里到处都是**别的进程**的 loopback
+// 地址，探针只做 TCP 连通性测试，一连就通。实测踩坑（2026-10-01）：billion-context
+// 的 helper 监听 18787，native-attach 的清理日志把这行打到了 stderr，实例因此被提前
+// ~40s 标成 ready 并公布了错误地址（DSH 真正监听的是 3080）。
+//
+// 判据是"任一成立即认"：`dsh web` 前缀是本版本实测的横幅措辞；URL 里带 token= 则是
+// DSH 每次启动自己生成的会话令牌（只出现在它自己的启动行里），用它兜住横幅措辞变化。
+var webBannerRe = regexp.MustCompile(`(?i)\bdsh\s+web\b|token=`)
+
+// isWebBannerLine reports whether an output line is DSH's own startup banner
+// (see webBannerRe) rather than a plugin/MCP log line that merely mentions
+// some loopback URL.
+func isWebBannerLine(line string) bool { return webBannerRe.MatchString(line) }
+
+// webAddresses extracts the web candidate address and the token-bearing address
+// from one output line. Non-banner lines yield nothing, so another process's
+// port can never be mistaken for this instance's web address.
+func webAddresses(line string) (candidate, authURL string) {
+	if !isWebBannerLine(line) {
+		return "", ""
+	}
+	return extractWebURL(line), extractAuthWebURL(line)
+}
+
 // managedProcess wraps a running DSH process for one instance.
 type managedProcess struct {
 	instanceID string
@@ -137,7 +165,7 @@ func newLaunchID() string {
 	return hex.EncodeToString(b[:])
 }
 
-func (p *managedProcess) requestStop() { p.stopReq.Store(true) }
+func (p *managedProcess) requestStop()        { p.stopReq.Store(true) }
 func (p *managedProcess) stopRequested() bool { return p.stopReq.Load() }
 
 func (p *managedProcess) addWebCandidate(u string) {
@@ -372,18 +400,24 @@ func (a *App) LaunchInstance(id string) error {
 	// the header/card flip to "已就绪" as soon as DSH answers.
 	a.triggerServiceProbe()
 
-	// Stream output lines to the frontend; capture advertised web URLs.
+	// Stream output lines to the frontend; capture the web address only from
+	// DSH's own startup banner (see webAddresses).
 	stream := func(r *bufio.Scanner, tag string) {
 		for r.Scan() {
 			line := r.Text()
 			if line == "" {
 				continue
 			}
-			if u := extractWebURL(line); u != "" {
-				mp.addWebCandidate(u)
-			}
-			if au := extractAuthWebURL(line); au != "" {
-				mp.setAuthWebURL(au)
+			// 地址只认 DSH 自己的启动横幅（webAddresses / webBannerRe）：
+			// 插件日志里的 loopback URL 属于别的进程，收进来会让探针把实例
+			// 提前标成 ready 并公布错误地址。
+			if u, au := webAddresses(line); u != "" || au != "" {
+				if u != "" {
+					mp.addWebCandidate(u)
+				}
+				if au != "" {
+					mp.setAuthWebURL(au)
+				}
 			}
 			a.logEvent(LogEvent{
 				InstanceID: snapshot.ID,

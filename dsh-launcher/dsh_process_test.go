@@ -46,6 +46,59 @@ func TestExtractAuthWebURL(t *testing.T) {
 	}
 }
 
+// 只有 DSH 自己的启动横幅能产出 web 地址候选；插件 / MCP 日志里的 loopback 地址
+// 属于别的进程，必须被忽略（实测踩坑：billion-context 的 helper 监听 18787，
+// native-attach 的清理日志把它打到 stderr，探针一连就通，实例被提前 ~40s 标成
+// ready 并公布了错误地址，而 DSH 真正监听的是 3080）。
+func TestWebAddressesOnlyFromBanner(t *testing.T) {
+	cases := []struct {
+		name      string
+		line      string
+		candidate string
+		authURL   string
+	}{
+		{
+			"DSH 启动横幅（带 token）",
+			"dsh web: http://127.0.0.1:3080/?token=ONalrT9n17CHnxBJL7wpuVD1jxbkUIvzA0a9qarJ88",
+			"http://127.0.0.1:3080",
+			"http://127.0.0.1:3080/?token=ONalrT9n17CHnxBJL7wpuVD1jxbkUIvzA0a9qarJ88",
+		},
+		{
+			"DSH 启动横幅（不带 token：地址仍认，内嵌地址为空）",
+			"dsh web: http://127.0.0.1:3081/",
+			"http://127.0.0.1:3081",
+			"",
+		},
+		{
+			"插件清理日志里的别的进程端口（本次踩坑原文）",
+			"2026-10-01T09:25:28.764Z [info] [v=dev] native-attach: drop http://127.0.0.1:18787 (pid 26140): owner process gone",
+			"",
+			"",
+		},
+		{
+			"bili 代理的 MCP 端点日志",
+			"bili-native-dsh: request sent DIRECT (uncompressed) — http://127.0.0.1:21724/mcp is not a recognized model endpoint",
+			"",
+			"",
+		},
+		{
+			"chrome-devtools 的说明文字（无地址）",
+			"chrome-devtools-mcp exposes content of the browser instance to the MCP clients",
+			"",
+			"",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			gotCand, gotAuth := webAddresses(c.line)
+			if gotCand != c.candidate || gotAuth != c.authURL {
+				t.Errorf("webAddresses(%q) = (%q, %q), want (%q, %q)",
+					c.line, gotCand, gotAuth, c.candidate, c.authURL)
+			}
+		})
+	}
+}
+
 func TestValidateVersion(t *testing.T) {
 	// local 模式不拼接版本号，任何值都放行
 	if err := validateVersion("local", "not-a-version"); err != nil {
