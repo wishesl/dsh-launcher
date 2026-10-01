@@ -29,9 +29,11 @@ type App struct {
 	quitting  bool                       // set when the user quits from the tray
 	tray      *trayState                 // system tray state (instance submenu)
 
-	// bridge is the loopback HTTP server the embedded dsh-launcher-plugin talks
-	// to (launcher_http.go): handshake = capability report, /theme = theme push,
-	// /restart = self-restart ack, /pending = restart payload hand-back.
+	// bridge is the loopback WebSocket server the embedded dsh-launcher-plugin
+	// talks to (launcher_bridge.go): hello = capability + theme snapshot,
+	// theme = theme push, restart = self-restart ack, pending = restart payload
+	// hand-back, set-theme = launcher → plugin command (writes the shared
+	// profile's ui-theme). No HTTP REST endpoints are left.
 	// Created in NewApp so a.bridge is never nil; listening starts in startup().
 	bridge *launcherBridge
 
@@ -105,9 +107,9 @@ func (a *App) startup(ctx context.Context) {
 	// Install the system tray icon + menu.
 	a.startTray()
 
-	// Loopback bridge for dsh-launcher-plugin (handshake / theme / restart ack).
-	// Must be up before any instance launches: the plugin reads its URL+token
-	// from the instance env at spawn time.
+	// Loopback WebSocket bridge for dsh-launcher-plugin (hello / theme /
+	// restart / set-theme). Must be up before any instance launches: the plugin
+	// reads its URL+token from the instance env at spawn time.
 	a.bridge.start()
 
 	// Legacy migration: profiles that still have dsh-self-mcp installed get the
@@ -195,7 +197,7 @@ func (a *App) shutdown(ctx context.Context) {
 		p.stop()
 	}
 	// Close the plugin bridge only after processes are reaped: while they stop,
-	// a final POST (e.g. /pending) must still find the server alive.
+	// a final frame (e.g. pending-consumed) must still find the server alive.
 	a.bridge.stop()
 	a.cleanupAllMasks() // 临时插件屏蔽层只属于进程运行期间
 	a.logs.closeAll()

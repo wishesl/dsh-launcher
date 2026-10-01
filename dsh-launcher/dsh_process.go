@@ -411,7 +411,7 @@ func (a *App) LaunchInstance(id string) error {
 		} else {
 			a.systemLog(snapshot.ID, mp.pid, "进程已退出 "+codeText)
 		}
-		// 自重启请求（dsh-restart）：插件 POST /restart 拿到 ack 后才退出，标志
+		// 自重启请求（dsh-restart）：插件经桥接发 restart 帧拿到 ack 后才退出，标志
 		// 存在 launcher 内存。无论走不走重启都先消费（取即清），杜绝标志残留
 		// 引发下次误重启或重启循环；干净退出 + 非用户停止 + 标志属于本次 launch
 		// 才重新拉起。

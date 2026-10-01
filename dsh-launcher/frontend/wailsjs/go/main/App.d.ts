@@ -114,6 +114,8 @@ export function SetMarketRegistryURL(arg1:string):Promise<void>;
 
 export function SetProxy(arg1:string):Promise<void>;
 
+export function SetThemePreference(arg1:string):Promise<void>;
+
 export function SetUIWidths(arg1:main.UIWidths):Promise<void>;
 
 export function SetUpdateSettings(arg1:main.UpdateSettings):Promise<void>;

@@ -1,19 +1,21 @@
 /**
  * dsh-launcher-plugin — launcher ↔ 实例的单线桥接插件。
  *
- * 一条 loopback HTTP 线（dsh-launcher 启动的 127.0.0.1 临时端口 + 随机 Bearer token，
- * 经 env DSH_LAUNCHER_EVENTS / DSH_LAUNCHER_TOKEN 注入）承载三件事：
+ * 一条 loopback WebSocket 线（dsh-launcher 启动的 127.0.0.1 临时端口 + 随机 Bearer token，
+ * 经 env DSH_LAUNCHER_EVENTS / DSH_LAUNCHER_TOKEN 注入；插件把基地址换成 ws://…/ws，
+ * token 放在握手头里）承载三件事：
  *
- *   1. 主题同步：监听共享 profile 的 ui-theme 设置（settings 服务），变化即 POST /theme，
- *      launcher 转成 dsh:theme 事件驱动自身界面换肤；
- *   2. dsh-restart：确认词 restart-dsh；POST /restart 拿到 ack 才 ctx.appExit(0)，
- *      POST 失败就报错不退出（实例不会白死一次，比旧版"写完文件碰运气"更稳）；
- *   3. 能力握手：apply 后 POST /connect 全量快照（能力 + 主题），之后能力/主题变化
- *      增量同步；断线按 RETRY_DELAYS_MS 退避重连，重连成功即重发快照（自愈）。
+ *   1. 主题同步（双向）：初读共享 profile 的 ui-theme 设置，变化即推 theme 帧，launcher 转成
+ *      dsh:theme 事件驱动自身换肤；launcher 里的主题控件下发 set-theme 帧，插件把新值写回
+ *      ui-theme（DSH 网页端订阅同一个 ns，打开的页面会当场换肤）；
+ *   2. dsh-restart：确认词 restart-dsh；发 restart 帧**拿到 ack 才 ctx.appExit(0)**，
+ *      拿不到 ack 就报错不退出（实例不会白死一次，比旧版"写完文件碰运气"更稳）；
+ *   3. 能力握手：连上后第一帧 hello 是全量快照（能力 + 主题），之后能力变化增量重发；
+ *      断线按 RETRY_DELAYS_MS 退避重连，重连成功即重发快照（自愈）。
  *
- * 重启完成的续跑负载也不落盘：重启前随 /restart 提交，新进程 GET /pending 回取，
- * 注入「重启完成」成功后 POST /pending-consumed 确认（确认前负载留在 launcher，
- * 下次启动会重新回取 —— 旧版 pending.json 的语义原样保留）。
+ * 重启完成的续跑负载也不落盘：重启前随 restart 帧提交，新进程连上后 launcher 主动下发
+ * pending 帧，注入「重启完成」成功后回 pending-consumed 确认（确认前负载留在 launcher，
+ * 下次启动会重新下发 —— 旧版 pending.json 的语义原样保留）。
  *
  * 零文件：本插件不在实例目录写任何状态文件。缺 env（非 launcher 拉起）时静默降级：
  * 不拦启动、不注册副作用，右栏能力面板按"没有握手"中性展示（fail-open）。
@@ -32,6 +34,10 @@ const Config = z.object({});
 const CONFIRM_WORD = "restart-dsh";
 /** 连接重连 / 交付重试退避（对齐 dsh-self-mcp 的成熟节奏）。 */
 const RETRY_DELAYS_MS = [500, 1500, 4000, 10000, 20000, 40000];
+/** WebSocket.readyState 的 OPEN。 */
+const WS_OPEN = 1;
+/** 等 launcher 应答（restart ack）的上限。 */
+const RESTART_ACK_TIMEOUT_MS = 5000;
 
 /** DSH 主题设置命名空间（dsh-client-ui-theme 写进共享 profile 的 ui-theme）。 */
 const THEME_NS = "ui-theme";
@@ -44,28 +50,36 @@ const instanceId = process.env.DSH_INSTANCE_ID ?? "";
 const launchId = process.env.DSH_LAUNCH_ID ?? "";
 const supervised = bridgeURL !== "" && bridgeToken !== "";
 
-//#region 桥接连接管理
+//#region 桥接连接管理（一条 WebSocket，见 launcher_bridge.go）
 const capabilityState = new Map();
 /** apply() 的 ctx：日志 / timer / appExit。 */
 let ctxRef = null;
-/** 最近一次 /connect 成功与否（决定重连退避与主题推送的补握手）。 */
+/** 当前连接（null = 未连接）。 */
+let socket = null;
+/** 已发起升级、握手还没完成。 */
+let connecting = false;
+/** 是否曾成功连上（只影响日志与退避节奏）。 */
 let online = false;
 let retryIdx = 0;
 let retryScheduled = false;
 let syncScheduled = false;
 /** 已读到的 ui-theme preference（'' = 尚未读到）。 */
 let themePreference = "";
+/** settings 服务（主题读写的唯一入口；未就绪为 null）。 */
+let settingsService = null;
 /** 待交付的重启完成负载（null = 无）。 */
 let pendingRestart = null;
-/** 本次启动是否已回取过 /pending（失败会复位，留到下次 maintain 重试）。 */
+/** 本次启动是否已收到 launcher 下发的 pending（挡住重复交付）。 */
 let pendingHandled = false;
 /** settings 服务是否就绪（用于 5s 后给 themeReport 一个可见结论）。 */
 let settingsReady = false;
 /** themeReport 是否已给出结论（未给出 = 面板不显示该行，fail-open）。 */
 let themeReportSettled = false;
+/** 已发出、等 launcher 回应的请求：id → { resolve, reject }。 */
+const inflight = new Map();
 
 /** 记一条能力结论。reason 只在 ok=false 时有意义，写人话（原样显示在面板上）。
- *  结论随 /connect 快照发给 launcher —— 握手即报告，没有文件、没有陈旧判定。 */
+ *  结论随 hello 快照发给 launcher —— 握手即报告，没有文件、没有陈旧判定。 */
 function setCapability(id, ok, reason = "") {
 	capabilityState.set(id, { id, ok, reason });
 	scheduleSync();
@@ -86,42 +100,35 @@ function envelope(type, payload) {
 	return { type, instanceId, launchId, payload };
 }
 
-/** 一次桥接调用。非 2xx 一律抛错 —— 由调用方决定重试还是报给用户。 */
-async function bridgeCall(method, path, payload, query) {
-	if (!supervised) {
-		throw new Error("非 dsh-launcher 拉起（缺少 DSH_LAUNCHER_EVENTS）");
-	}
-	const url = new URL(path, bridgeURL);
-	if (query) {
-		for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v));
-	}
-	const res = await fetch(url, {
-		method,
-		headers: {
-			authorization: `Bearer ${bridgeToken}`,
-			...(payload !== undefined ? { "content-type": "application/json" } : {}),
-		},
-		body: payload !== undefined ? JSON.stringify(payload) : undefined,
-	});
-	if (!res.ok) {
-		throw new Error(`${method} ${path} → HTTP ${res.status}`);
-	}
+/** 桥接的 WebSocket 地址：env 给的是 http://127.0.0.1:<port>，换成 ws://…/ws。 */
+function bridgeSocketURL() {
+	const url = new URL("/ws", bridgeURL);
+	url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+	return url.toString();
+}
+
+/** 发一帧给 launcher。未连接返回 false（调用方决定退避/重连后补齐）。 */
+function sendFrame(type, payload) {
+	if (socket === null || socket.readyState !== WS_OPEN) return false;
 	try {
-		return await res.json();
-	} catch {
-		return null;
+		socket.send(JSON.stringify(envelope(type, payload)));
+		return true;
+	} catch (error) {
+		ctxRef?.logger?.warn?.(`[dsh-launcher-plugin] 帧发送失败（${type}）：${error.message}`);
+		return false;
 	}
 }
 
-/** 全量快照：能力 + 主题。/connect 幂等（launcher 直接替换内存里的最近握手）。 */
-async function syncSnapshot() {
-	await bridgeCall("POST", "/connect", envelope("connect", {
+/** 全量快照：能力 + 主题。hello 幂等（launcher 直接替换内存里的最近握手），
+ *  每次（重）连都发 —— launcher 的内存态随它自己的启动清零。 */
+function sendSnapshot() {
+	return sendFrame("hello", {
 		plugin: name,
 		pluginVersion: pluginVersion(),
 		reportedAt: new Date().toISOString(),
 		capabilities: [...capabilityState.values()],
 		theme: themePreference ? { preference: themePreference } : undefined,
-	}));
+	});
 }
 
 /** 防抖的全连：能力变化 → 150ms 后合并成一次快照。 */
@@ -131,7 +138,7 @@ function scheduleSync(delay = 150) {
 	syncScheduled = true;
 	ctxRef.timeout(() => {
 		syncScheduled = false;
-		void maintain();
+		maintain();
 	}, delay);
 }
 
@@ -143,40 +150,130 @@ function scheduleRetry() {
 	retryIdx += 1;
 	ctxRef.timeout(() => {
 		retryScheduled = false;
-		void maintain();
+		maintain();
 	}, delay);
 }
 
-/** 连接 + 快照 + 回取续跑负载。任何一步失败都进入退避重试。 */
-async function maintain() {
+/** 保证连接 + 重发快照。连接失败/断开统一由 onclose → scheduleRetry 接管。 */
+function maintain() {
 	if (!supervised) return;
+	if (socket !== null) {
+		sendSnapshot();
+		return;
+	}
+	connect();
+}
+
+/** 建立 WebSocket：Bearer 放握手头（Node 的全局 WebSocket 支持自定义头，token 不进 URL）。
+ *  没有全局 WebSocket（老 Node）→ 静默降级，不重试、不加副作用。 */
+function connect() {
+	if (!supervised || connecting || socket !== null) return;
+	if (typeof WebSocket !== "function") {
+		ctxRef?.logger?.warn?.("[dsh-launcher-plugin] 当前 Node 没有全局 WebSocket，桥接不可用（静默降级）");
+		return;
+	}
+	connecting = true;
+	let ws;
 	try {
-		await syncSnapshot();
+		ws = new WebSocket(bridgeSocketURL(), { headers: { authorization: `Bearer ${bridgeToken}` } });
+	} catch (error) {
+		connecting = false;
+		ctxRef?.logger?.warn?.(`[dsh-launcher-plugin] WebSocket 构造失败：${error.message}`);
+		scheduleRetry();
+		return;
+	}
+	ws.onopen = () => {
+		connecting = false;
+		socket = ws;
+		retryIdx = 0;
 		if (!online) {
 			online = true;
-			retryIdx = 0;
 			ctxRef?.logger?.info?.("[dsh-launcher-plugin] 已连接 launcher 桥接");
 		}
-		await deliverPendingOnce();
-	} catch (error) {
+		// 重连后的第一件事就是重发全量快照（launcher 只认内存里的最近一次握手）。
+		sendSnapshot();
+	};
+	ws.onmessage = (event) => handleFrame(event.data);
+	ws.onclose = () => {
+		connecting = false;
+		if (socket === ws) socket = null;
+		failInflight("桥接断开");
 		if (online) {
-			ctxRef?.logger?.warn?.(`[dsh-launcher-plugin] 桥接断开（${error.message}），按退避重连`);
+			online = false;
+			ctxRef?.logger?.warn?.("[dsh-launcher-plugin] 与 launcher 的桥接断开，按退避重连");
 		}
-		online = false;
 		scheduleRetry();
+	};
+	// 错误细节交给随之而来的 onclose 统一处理（Node 会把 error 后接一个 close）。
+	ws.onerror = () => undefined;
+}
+
+/** 收帧分发。未知类型忽略（协议只增不改，老新两侧不会互相打死）。 */
+function handleFrame(raw) {
+	let frame;
+	try {
+		frame = JSON.parse(typeof raw === "string" ? raw : String(raw));
+	} catch (error) {
+		ctxRef?.logger?.warn?.(`[dsh-launcher-plugin] 收到无法解析的帧：${error.message}`);
+		return;
+	}
+	switch (frame?.type) {
+		case "pending":
+			receivePending(frame.payload?.pending ?? null);
+			return;
+		case "set-theme":
+			void applyThemeCommand(frame.payload);
+			return;
+		case "restart-result":
+			settleRequest(frame.payload);
+			return;
+		default:
+			return;
 	}
 }
 
-/** 主题增量推送。成功但此前掉线 → 顺路补一次握手（重连自愈）。 */
-async function pushTheme(preference) {
+/** 请求 / 应答：发帧 + 等 launcher 回带同一 id 的结果帧。
+ *  断线或超时都 reject —— 调用方据此报错、不退出进程。 */
+function request(type, payload, timeoutMs = RESTART_ACK_TIMEOUT_MS) {
+	return new Promise((resolve, reject) => {
+		const id = randomUUID();
+		if (!sendFrame(type, { ...payload, id })) {
+			reject(new Error("launcher 桥接未连接"));
+			return;
+		}
+		inflight.set(id, { resolve, reject });
+		ctxRef?.timeout?.(() => {
+			const entry = inflight.get(id);
+			if (entry === undefined) return; // 已应答
+			inflight.delete(id);
+			entry.reject(new Error("等待 launcher 应答超时"));
+		}, timeoutMs);
+	});
+}
+
+/** 结算一条请求应答（restart-result）。 */
+function settleRequest(payload) {
+	const id = typeof payload?.id === "string" ? payload.id : "";
+	const entry = inflight.get(id);
+	if (entry === undefined) return;
+	inflight.delete(id);
+	if (payload?.ok === true) entry.resolve(payload);
+	else entry.reject(new Error(payload?.error ?? "launcher 拒绝"));
+}
+
+/** 断线时把所有等待中的请求一次性拒掉（否则工具调用会一直挂着）。 */
+function failInflight(reason) {
+	for (const [id, entry] of inflight) {
+		inflight.delete(id);
+		entry.reject(new Error(reason));
+	}
+}
+
+/** 主题增量推送（幂等状态）。未连接就跳过：重连后的快照会带上当前值。 */
+function pushTheme(preference) {
 	if (!supervised) return;
-	try {
-		await bridgeCall("POST", "/theme", envelope("theme", { preference }));
-		online = true;
-	} catch (error) {
-		online = false;
-		scheduleRetry();
-		ctxRef?.logger?.debug?.(`[dsh-launcher-plugin] 主题推送失败: ${error.message}`);
+	if (!sendFrame("theme", { preference })) {
+		ctxRef?.logger?.debug?.("[dsh-launcher-plugin] 桥接未连接，主题推送跳过（重连后随快照补齐）");
 	}
 }
 //#endregion
@@ -281,37 +378,28 @@ async function deliverRestartComplete(ctx, pending) {
 	}
 }
 
-/** 回取一次 /pending（仅一次；桥接不可达时复位，留到下次 maintain 重试）。 */
-async function deliverPendingOnce() {
+/** 收 launcher 下发的续跑负载（替代旧版 GET /pending）。只处理第一条：
+ *  交付成功或用尽之前不接受第二条，避免重复注入。 */
+function receivePending(pending) {
 	if (pendingHandled) return;
 	pendingHandled = true;
-	try {
-		const data = await bridgeCall("GET", "/pending", undefined, { instanceId, launchId });
-		const pending = data?.pending;
-		if (pending === null || pending === undefined) return;
-		if (typeof pending !== "object" || !pending.sessionId) return;
-		pendingRestart = pending;
-		pendingHandled = true;
-		scheduleDelivery(ctxRef, pending);
-	} catch (error) {
-		pendingHandled = false;
-		throw error;
-	}
+	if (pending === null || pending === undefined) return;
+	if (typeof pending !== "object" || !pending.sessionId) return;
+	pendingRestart = pending;
+	scheduleDelivery(ctxRef, pending);
 }
 
-/** 带退避的交付：成功即 POST /pending-consumed；进程内不无限重试，
- *  用尽后负载留在 launcher（下次启动重新回取），同时挡住新的 dsh-restart 调用。 */
+/** 带退避的交付：成功即回 pending-consumed 帧；进程内不无限重试，
+ *  用尽后负载留在 launcher（下次启动重新下发），同时挡住新的 dsh-restart 调用。 */
 function scheduleDelivery(ctx, pending) {
 	let attempts = 0;
 	const attempt = () => {
 		deliverRestartComplete(ctx, pending)
-			.then(async () => {
+			.then(() => {
 				pendingRestart = null;
 				ctx.logger.info(`[dsh-launcher-plugin] 已向会话 ${pending.sessionId} 注入重启完成消息`);
-				try {
-					await bridgeCall("POST", "/pending-consumed", envelope("pending-consumed"));
-				} catch (error) {
-					ctx.logger.warn(`[dsh-launcher-plugin] /pending-consumed 确认失败（${error.message}），下次启动可能重复注入一次`);
+				if (!sendFrame("pending-consumed")) {
+					ctx.logger.warn("[dsh-launcher-plugin] 桥接未连接，pending-consumed 未发出，下次启动可能重复注入一次");
 				}
 			})
 			.catch((error) => {
@@ -330,17 +418,81 @@ function scheduleDelivery(ctx, pending) {
 }
 //#endregion
 
-//#region 主题（ui-theme settings）
-/** 读取一次 ui-theme preference。没有条目/读失败 → null（不下发，保持现状）。 */
-function readThemePreference(settings) {
+//#region 主题（ui-theme settings，双向）
+/** 取 ui-theme 那一行的描述符（describe() 是进程内同步读）；没有/读失败 → null。 */
+function themeRow(settings) {
 	try {
 		const rows = settings.describe();
 		if (!Array.isArray(rows)) return null;
-		const row = rows.find((r) => r?.ns === THEME_NS);
+		return rows.find((r) => r?.ns === THEME_NS) ?? null;
+	} catch {
+		return null;
+	}
+}
+
+/** 读取一次 ui-theme preference。没有条目/读失败 → null（不下发，保持现状）。 */
+function readThemePreference(settings) {
+	try {
+		const row = themeRow(settings);
+		if (row === null) return null;
 		const pref = row?.value?.preference;
 		return THEME_PREFERENCES.has(pref) ? pref : "system";
 	} catch {
 		return null;
+	}
+}
+
+/** 当前 ui-theme 的 revision（乐观并发的期望值）；读不到 → undefined（不校验）。 */
+function currentThemeRevision(settings) {
+	try {
+		return themeRow(settings)?.revision;
+	} catch {
+		return undefined;
+	}
+}
+
+/** 写 ui-theme。revision 冲突（有人并发改过）时重读一次再试一遍；其余错误直接抛。 */
+async function writeThemePreference(settings, preference) {
+	let lastError;
+	for (let attempt = 0; attempt < 2; attempt += 1) {
+		try {
+			await settings.update(THEME_NS, { preference }, currentThemeRevision(settings));
+			return;
+		} catch (error) {
+			lastError = error;
+		}
+	}
+	throw lastError;
+}
+
+/**
+ * 应用 launcher 下发的主题命令（set-theme）：写共享 profile 的 ui-theme。
+ *
+ * 为什么写设置而不是只改本机：DSH 网页端订阅了同一个 ns
+ * （dsh-client-ui-theme 的 settings scope adoption），写进去打开的页面会当场换肤。
+ * 写成功后显式回一帧 theme —— 即使值没变（update 不产生 document-updated）也让
+ * launcher 拿到确认，启动器前端据此清掉「待同步」状态。
+ */
+async function applyThemeCommand(payload) {
+	const id = typeof payload?.id === "string" ? payload.id : "";
+	const preference = payload?.preference;
+	try {
+		if (!THEME_PREFERENCES.has(preference)) {
+			throw new Error(`非法主题 ${JSON.stringify(preference ?? null)}`);
+		}
+		if (settingsService === null || typeof settingsService.update !== "function") {
+			throw new Error("settings 服务没有 update（该组合改不了主题）");
+		}
+		await writeThemePreference(settingsService, preference);
+		themePreference = preference; // 自己写的值：watcher 之后读到同值不会再推一次
+		setCapability("themeSet", true);
+		sendFrame("command-result", { id, ok: true });
+		sendFrame("theme", { preference });
+		ctxRef?.logger?.info?.(`[dsh-launcher-plugin] 已按启动器请求写入 ui-theme = ${preference}`);
+	} catch (error) {
+		setCapability("themeSet", false, `写入 ui-theme 失败：${error.message}`);
+		sendFrame("command-result", { id, ok: false, error: error.message });
+		ctxRef?.logger?.warn?.(`[dsh-launcher-plugin] 写入 ui-theme 失败：${error.message}`);
 	}
 }
 
@@ -356,13 +508,13 @@ function watchTheme(settingsCtx, settings) {
 		const pref = readThemePreference(settings);
 		if (pref === null || pref === themePreference) return;
 		themePreference = pref;
-		void pushTheme(pref);
+		pushTheme(pref);
 	};
 	const initial = readThemePreference(settings);
 	if (initial !== null && initial !== themePreference) {
 		themePreference = initial;
-		// 初读也推一次：/connect 快照可能已经发出（或随后发出），幂等无害。
-		void pushTheme(initial);
+		// 初读也推一次：hello 快照可能已经发出（或随后发出），幂等无害。
+		pushTheme(initial);
 	}
 	// 事件挂在上下文上（settings/forms 是 service 实例，本身不发这个事件）。
 	settingsCtx.on?.("settings/document-updated", (ns) => {
@@ -520,9 +672,13 @@ function apply(ctx) {
 			setCapability("themeReport", false, "settings 服务没有 describe（DSH 内部接口变了？），主题不会跟随");
 			return;
 		}
+		settingsService = settings;
 		settingsReady = true;
 		themeReportSettled = true;
 		setCapability("themeReport", true);
+		// 能接收 set-theme 的前提是 update 在（真正的写路径见 applyThemeCommand）。
+		const canWrite = typeof settings.update === "function";
+		setCapability("themeSet", canWrite, canWrite ? "" : "settings 服务没有 update，启动器里切主题改不到 DSH");
 		watchTheme(settingsCtx, settings);
 	});
 	if (supervised) {
@@ -593,11 +749,11 @@ function apply(ctx) {
 					launchedByLauncher: true,
 				};
 
-				// launcher 契约：先拿 ack，收到才退出。POST 失败 = launcher 不可达 → 实例存活。
+				// launcher 契约：先拿 ack，收到才退出。请求失败/超时 = launcher 不可达 → 实例存活。
 				try {
-					await bridgeCall("POST", "/restart", envelope("restart", { reason, pending }));
+					await request("restart", { reason, pending });
 				} catch (error) {
-					return { status: `rejected: launcher 不可达（${error.message}），实例不退出` };
+					return { status: `rejected: launcher 未确认重启（${error.message}），实例不退出` };
 				}
 
 				// 延迟一拍再请求退出：先让 execute 的返回结果落盘
@@ -613,9 +769,9 @@ function apply(ctx) {
 		ctx.logger.info("[dsh-launcher-plugin] 未由 dsh-launcher 拉起，跳过 dsh-restart 注册（静默降级）");
 	}
 
-	// 3) 连接桥接（首连 + 回取续跑负载）；断线由 maintain 的退避重连接管
+	// 3) 连接桥接（首连 + 快照；续跑负载由 launcher 主动下发）；断线由退避重连接管
 	if (supervised) {
-		void maintain();
+		maintain();
 	}
 }
 

@@ -226,6 +226,10 @@ export function SetProxy(arg1) {
   return window['go']['main']['App']['SetProxy'](arg1);
 }
 
+export function SetThemePreference(arg1) {
+  return window['go']['main']['App']['SetThemePreference'](arg1);
+}
+
 export function SetUIWidths(arg1) {
   return window['go']['main']['App']['SetUIWidths'](arg1);
 }

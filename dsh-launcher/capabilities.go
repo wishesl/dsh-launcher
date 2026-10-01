@@ -18,11 +18,11 @@ import (
 //
 // 探测分两侧：
 //   - launcher 侧（本文件）：地址 / token 能否从启动日志解析、本次是否挂载了插件覆盖层；
-//   - plugin 侧：插件在 apply 后 POST /connect 发一份全量握手（能力 + 主题快照），
+//   - plugin 侧：插件连上桥接后发第一帧 hello 做全量握手（能力 + 主题快照），
 //     存在 launcher 内存里，本文件读回合并。握手即"本次启动"：启动即清（见
 //     clearHandshake），陈旧判定整个消失，也没有任何报告文件可残留。
 
-// pluginCapabilityReport mirrors what the plugin POSTs at /connect time.
+// pluginCapabilityReport mirrors the plugin's hello snapshot (first frame on the bridge).
 type pluginCapabilityReport struct {
 	Schema        int                `json:"schema"`
 	Plugin        string             `json:"plugin"`
@@ -45,9 +45,9 @@ type pluginCapability struct {
 // keys — the frontend gates features by looking up an ID (e.g. "embedRelax"),
 // so renaming one is a breaking change.
 type CapabilityItem struct {
-	ID     string `json:"id"`
-	Label  string `json:"label"`
-	OK     bool   `json:"ok"`
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	OK    bool   `json:"ok"`
 	// Unknown 表示"没有结论 / 不适用"，必须与"失败"分开：面板一旦误报就会失去可信度
 	// （用户看到明明能用的东西在报红，就会学会无视整个面板）。前端只对 !ok && !unknown
 	// 的行标红，unknown 只作中性展示。
@@ -64,9 +64,9 @@ type CapabilityReport struct {
 	InstanceName string           `json:"instanceName"`
 	Version      string           `json:"version"`
 	Status       string           `json:"status"`
-	Plugin       string           `json:"plugin"`      // 插件名@版本；未报告时为空
-	PluginAt     string           `json:"pluginAt"`    // 插件报告时间（RFC3339）
-	Stale        bool             `json:"stale"`       // 握手的 launchId 与当前进程不符
+	Plugin       string           `json:"plugin"`   // 插件名@版本；未报告时为空
+	PluginAt     string           `json:"pluginAt"` // 插件报告时间（RFC3339）
+	Stale        bool             `json:"stale"`    // 握手的 launchId 与当前进程不符
 	Items        []CapabilityItem `json:"items"`
 }
 
@@ -75,6 +75,7 @@ var pluginCapabilityMeta = map[string]struct{ label, hint string }{
 	"pluginLoaded": {"插件已装载（dsh-launcher-plugin）", "没装载的话，下面所有插件能力都不存在"},
 	"restartTool":  {"dsh-restart 工具已注册", "注册失败时自管理重启用不了"},
 	"themeReport":  {"主题同步已上报（ui-theme）", "失败时启动器主题不跟随 DSH 切换"},
+	"themeSet":     {"启动器可写 DSH 主题（ui-theme）", "失败时在启动器里切主题改不到 DSH，只在本机生效"},
 	"embedRelax":   {"DSH 会话校验已放宽（内置浏览器前置）", "失败时内嵌会 401 / 一直「自动重连中」"},
 	"restartDelivery": {
 		"重启完成走 plugin/notice 通道",
@@ -83,7 +84,7 @@ var pluginCapabilityMeta = map[string]struct{ label, hint string }{
 }
 
 // pluginCapOrder 固定插件能力在面板里的顺序：不看 DSH 版本，只看探测结论。
-var pluginCapOrder = []string{"pluginLoaded", "restartTool", "themeReport", "embedRelax", "restartDelivery"}
+var pluginCapOrder = []string{"pluginLoaded", "restartTool", "themeReport", "themeSet", "embedRelax", "restartDelivery"}
 
 // stripURLQuery 去掉 URL 的 query。启动日志里的地址可能带 launch token
 // （`?token=...`），面板只展示"哪台机器哪个端口"，不把凭据带到界面上。
@@ -123,7 +124,7 @@ func (a *App) GetCapabilities(instanceID string) CapabilityReport {
 	// ---- launcher 侧探测 ----
 	report.Items = append(report.Items, a.launcherCapabilities(inst, mp)...)
 
-	// ---- 插件侧探测（bridge 握手：POST /connect 的全量快照）----
+	// ---- 插件侧探测（bridge 握手：hello 帧的全量快照）----
 	pluginReport, hasPluginReport := a.bridge.handshake(instanceID)
 	switch {
 	case !hasPluginReport:

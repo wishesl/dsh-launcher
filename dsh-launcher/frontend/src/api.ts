@@ -53,6 +53,7 @@ import {
   SetLayout,
   SetMarketRegistryURL,
   SetProxy,
+  SetThemePreference,
   SetUpdateSettings,
   SetUIWidths,
   StopInstance,
@@ -64,6 +65,7 @@ import {
   UpdatePlugin,
 } from '../wailsjs/go/main/App';
 import { EventsOff, EventsOn } from '../wailsjs/runtime/runtime';
+import type { ThemePreference } from './theme';
 import type {
   CapabilityReport,
   EnvLogEvent,
@@ -187,6 +189,11 @@ export const api = {
 
   // 兼容性探测：这台实例上各项能力"到底能不能用"（本地读取，不发网络请求）
   getCapabilities: (instanceId: string): Promise<CapabilityReport> => GetCapabilities(instanceId),
+
+  // 双向主题同步的**写方向**：把启动器里的选择写进 DSH 的 ui-theme。
+  // resolve 只代表命令已下发/已被插件受理；真正生效以实例推回的 dsh:theme 事件为准。
+  setThemePreference: (preference: ThemePreference): Promise<void> =>
+    SetThemePreference(preference),
 
   // plugin favorites (local, offline)
   listFavorites: (): Promise<FavoritePlugin[]> => ListFavorites(),

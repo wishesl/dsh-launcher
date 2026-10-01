@@ -18,7 +18,7 @@ import (
 // instance-level checkbox anymore: mounting follows the installation.
 //
 // One bridge line carries all three features (theme sync, dsh-restart,
-// capability handshake) over loopback HTTP — no state files are written by
+// capability handshake) over a loopback WebSocket — no state files are written by
 // the plugin, so there is no restart-request.json / pending.json /
 // capabilities.json channel left to reconcile. The restart flag lives in
 // launcher memory (launcher_bridge), consumed once by the exit reconcile.
@@ -48,7 +48,7 @@ func (a *App) launcherPluginGate() (mounted bool, installed bool, detail string)
 		return false, false, "全局未安装插件 " + selfRestartPluginName
 	}
 	if a.bridge == nil || a.bridge.url == "" {
-		return false, true, "启动器桥接未就绪（loopback HTTP 服务没起来）"
+		return false, true, "启动器桥接未就绪（loopback WebSocket 服务没起来）"
 	}
 	return true, true, "已安装 " + selfRestartPluginName + " 且桥接就绪，本次启动已挂载"
 }

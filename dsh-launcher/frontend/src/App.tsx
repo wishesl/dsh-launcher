@@ -5,6 +5,7 @@ import { BrowserOpenURL, Environment } from '../wailsjs/runtime/runtime';
 import type { CapabilityReport, ExitChoice, Instance, LauncherRelease, LayoutMode, LogEvent, LogTab, MarketOpState, RegistryInfo, ServiceState, UpdateOpState, UpdateSettings } from './types';
 import { clamp, capsAlert, embedGateReason, maskUrlSecrets } from './util';
 import { applyThemePreference, bootstrapTheme } from './theme';
+import type { ThemePreference } from './theme';
 import Header from './components/Header';
 import Sidebar, { type ViewKey } from './components/Sidebar';
 import VersionView from './components/VersionView';
@@ -214,6 +215,10 @@ export default function App() {
   const [exitAsk, setExitAsk] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast>(null);
+  // 主题：themePref 是 DSH 的 ui-theme 权威值（实例推回来的），themePending 是刚下发
+  // 但还没收到 DSH 回音的选择。启动器先乐观换肤，DSH 一回话就以它为准。
+  const [themePref, setThemePref] = useState<ThemePreference>('system');
+  const [themePending, setThemePending] = useState<ThemePreference | null>(null);
 
   const logsRef = useRef<Record<string, LogEvent[]>>({});
   const marketLogsRef = useRef<string[]>([]);
@@ -242,6 +247,23 @@ export default function App() {
     setLogsTab(tab);
     setLogsOpen(true);
   }, []);
+
+  // 双向主题同步的写方向：命令经后端广播给在线实例；实例写好 ui-theme 后会推
+  // dsh:theme 回来，那时才以它为准（onTheme 里清 pending）。没有实例在线时命令只记在
+  // 启动器，本机先乐观换肤 —— 实例连上后握手里带的主题会对齐。
+  const onSetTheme = useCallback(
+    async (next: ThemePreference) => {
+      try {
+        await api.setThemePreference(next);
+      } catch (e) {
+        showToast('切换主题失败: ' + errMsg(e), 'error');
+        return;
+      }
+      applyThemePreference(next);
+      setThemePending(next);
+    },
+    [showToast]
+  );
 
   // 重新探测一台实例的能力（本地读取，不阻塞）。取不到就保持上一次的结果，
   // 不让面板因为一次读取失败而清空。
@@ -388,7 +410,7 @@ export default function App() {
   useEffect(() => {
     if (themeBooted.current) return;
     themeBooted.current = true;
-    bootstrapTheme();
+    setThemePref(bootstrapTheme());
   }, []);
 
   // Re-read the backend's service-reachability snapshot (best-effort).
@@ -468,7 +490,10 @@ export default function App() {
     // preference 由后端归一为 light|dark|system，system 交给 CSS 的
     // prefers-color-scheme 解析（见 theme.ts 与方案 §2.4）。
     api.onTheme((e) => {
-      applyThemePreference(e.preference);
+      // 实例推回来的是权威值：换肤 + 更新「当前」+ 清掉等待确认的标记。
+      const pref = applyThemePreference(e.preference);
+      setThemePref(pref);
+      setThemePending(null);
     });
     // 启动器自更新：完整日志 + 进度状态 + 托盘「检查更新」的开启通知。
     // 日志只进弹窗（AGENTS.md §0.1 的显式例外，见《版本升级实现方案.md》§6.3）。
@@ -1021,6 +1046,9 @@ export default function App() {
               onSetLayout={onSetLayout}
               launcherVersion={launcherVersion}
               onOpenUpdate={openUpdate}
+              themePreference={themePref}
+              themePending={themePending}
+              onSetTheme={onSetTheme}
             />
           )}
         </div>

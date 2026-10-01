@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, errMsg } from '../api';
+import type { ThemePreference } from '../theme';
 import type { EnvReport, LayoutMode, MarketSettings, ToolStatus } from '../types';
 
 interface Props {
@@ -11,6 +12,12 @@ interface Props {
   launcherVersion: string;
   /** 打开「DSH Launcher 更新」弹窗（mac 布局 / 内嵌视图下 pill 不可见，这里是稳定入口）。 */
   onOpenUpdate: () => void;
+  /** DSH 的 ui-theme 权威值（实例推回来的）。 */
+  themePreference: ThemePreference;
+  /** 刚下发、还没收到 DSH 回音的选择；null = 已一致。 */
+  themePending: ThemePreference | null;
+  /** 把选择写进 DSH 的 ui-theme（双向同步的写方向）。 */
+  onSetTheme: (preference: ThemePreference) => Promise<void>;
 }
 
 function ToolRow({ tool, checking }: { tool: ToolStatus | undefined; checking: boolean }) {
@@ -42,6 +49,9 @@ export default function SettingsView({
   onSetLayout,
   launcherVersion,
   onOpenUpdate,
+  themePreference,
+  themePending,
+  onSetTheme,
 }: Props) {
   const [env, setEnv] = useState<EnvReport | null>(null);
   const [checking, setChecking] = useState(true);
@@ -55,6 +65,7 @@ export default function SettingsView({
   const [savingProxy, setSavingProxy] = useState(false);
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(layout);
   const [savingLayout, setSavingLayout] = useState(false);
+  const [savingTheme, setSavingTheme] = useState(false);
 
   // Sync local selection when the app-wide preference changes (e.g. after save).
   useEffect(() => {
@@ -151,6 +162,21 @@ export default function SettingsView({
   const layoutLabel = (m: LayoutMode) =>
     m === 'mac' ? 'Mac 布局' : m === 'win' ? 'Windows / Linux 布局' : '自动（按系统）';
 
+  const themeLabel = (p: ThemePreference) =>
+    p === 'light' ? '浅色' : p === 'dark' ? '深色' : '跟随系统';
+
+  // 立即生效，没有「保存」按钮：一次选择 = 一次下发（后端广播，实例写 ui-theme）。
+  const applyTheme = async (next: ThemePreference) => {
+    setSavingTheme(true);
+    try {
+      await onSetTheme(next);
+    } catch (e) {
+      showToast('切换主题失败: ' + errMsg(e), 'error');
+    } finally {
+      setSavingTheme(false);
+    }
+  };
+
   return (
     <div className="settings-view">
       <div className="settings-section">
@@ -244,6 +270,32 @@ export default function SettingsView({
           </button>
         </div>
         <p className="desc">当前：<b className="mono">{layoutLabel(layoutMode)}</b>（保存后立即生效）</p>
+      </div>
+
+      <div className="settings-section">
+        <h3>主题</h3>
+        <p className="desc">
+          改的是 DSH 的 <b className="mono">ui-theme</b>（存在共享 profile，所有实例一致）。
+          实例在线时立即生效，打开着的 DSH 页面也会跟着换；没有实例连上时只记在启动器里，
+          等实例连上后自动同步。启动器界面本身也跟随这个值。
+        </p>
+        <div className="row">
+          <select
+            className="layout-select"
+            value={themePreference}
+            onChange={(e) => applyTheme(e.target.value as ThemePreference)}
+            disabled={savingTheme}
+            title="DSH 与启动器的深浅色"
+          >
+            <option value="system">跟随系统</option>
+            <option value="light">浅色</option>
+            <option value="dark">深色</option>
+          </select>
+        </div>
+        <p className="desc">
+          当前：<b className="mono">{themeLabel(themePreference)}</b>
+          {themePending ? `（已下发「${themeLabel(themePending)}」，等待实例确认…）` : null}
+        </p>
       </div>
 
       <div className="settings-section">
