@@ -20,7 +20,7 @@ type Instance struct {
 	ExtraArgs    string    `json:"extraArgs"`    // optional extra CLI args after "web"
 	PkgMgr       string    `json:"pkgMgr"`       // "local" (recommended), "pnpm" or "npx"
 	AutoStart    bool      `json:"autoStart"`
-	SelfRestart  bool      `json:"selfRestart"`  // 自管理重启（dsh-restart）：启动时挂载 dsh-self-mcp 插件（需已安装）
+	SelfRestart  bool      `json:"selfRestart"`  // [已废弃/仅迁移读写] 自管理重启（dsh-restart）现由内置插件 dsh-launcher-plugin 随安装自动挂载，与本字段无关
 	CreatedAt    time.Time `json:"createdAt"`
 
 	// 源码启动 (Source=true): 不用 npm 版本，直接运行目录内的 DSH 源码。

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,79 +18,6 @@ func TestStripURLQuery(t *testing.T) {
 			t.Errorf("stripURLQuery(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
-}
-
-func TestReadPluginCapabilities(t *testing.T) {
-	dir := t.TempDir()
-
-	// 没有文件 → 没有报告（面板据此显示"未收到插件报告"）。
-	if _, ok := readPluginCapabilities(dir); ok {
-		t.Fatal("空目录不应读到能力报告")
-	}
-	if _, ok := readPluginCapabilities(""); ok {
-		t.Fatal("空目录路径不应读到能力报告")
-	}
-
-	// 写一份模拟插件的报告（字段名必须与插件 writeCapabilityReport 一致）。
-	report := pluginCapabilityReport{
-		Schema:        1,
-		Plugin:        "dsh-self-mcp",
-		PluginVersion: "0.1.0",
-		PID:           4242,
-		ReportedAt:    "2026-09-12T02:00:00.000Z",
-		Launcher:      true,
-		InstanceID:    "inst-1",
-		Capabilities: []pluginCapability{
-			{ID: "pluginLoaded", OK: true},
-			{ID: "embedRelax", OK: false, Reason: "connection 上没有 authorizeIndex / requestRejection"},
-		},
-	}
-	raw, err := json.Marshal(report)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(dir, capsStateDir), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(capabilitiesPath(dir), raw, 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-
-	got, ok := readPluginCapabilities(dir)
-	if !ok {
-		t.Fatal("应当读到能力报告")
-	}
-	if got.Plugin != "dsh-self-mcp" || got.PluginVersion != "0.1.0" || got.PID != 4242 {
-		t.Errorf("报告头部解析错误: %+v", got)
-	}
-	if len(got.Capabilities) != 2 || got.Capabilities[1].OK || got.Capabilities[1].Reason == "" {
-		t.Errorf("能力项解析错误: %+v", got.Capabilities)
-	}
-
-	// 坏 JSON 不能 panic，也不能当成有效报告。
-	if err := os.WriteFile(capabilitiesPath(dir), []byte("{ not json"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if _, ok := readPluginCapabilities(dir); ok {
-		t.Fatal("坏 JSON 不应被当作有效报告")
-	}
-}
-
-func TestCleanupCapabilities(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, capsStateDir), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(capabilitiesPath(dir), []byte("{}"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	cleanupCapabilities(dir)
-	if _, err := os.Stat(capabilitiesPath(dir)); !os.IsNotExist(err) {
-		t.Fatal("陈旧能力报告必须在上次启动后被清掉（否则面板会拿着旧进程的结论谎报正常）")
-	}
-	// 目录不存在也不应 panic。
-	cleanupCapabilities(filepath.Join(dir, "nope"))
-	cleanupCapabilities("")
 }
 
 func TestPluginCapabilityItems(t *testing.T) {
@@ -202,20 +128,50 @@ func TestPluginCopyMismatchReason(t *testing.T) {
 	}
 }
 
-func TestSelfRestartGateDetail(t *testing.T) {
-	// 未勾选不是故障（按设计就不挂载），措辞必须让用户看出"这是正常的"。
-	off := selfRestartGateDetail(Instance{SelfRestart: false}, false)
-	if !strings.Contains(off, "按设计") {
-		t.Errorf("未勾选的说明要表明这是设计行为，实际: %q", off)
+func TestPluginReportAbsentReason(t *testing.T) {
+	app, _ := newSelfRestartTestApp(t) // 已安装新插件
+	inst := app.store.find("inst-a")
+
+	// 桥接未就绪 → 未挂载，属中性结论（unknown，不标红）。
+	reason, unknown := app.pluginReportAbsentReason(inst)
+	if !unknown {
+		t.Fatalf("bridge down 是良性原因，应为 unknown，实际 reason=%q", reason)
 	}
-	// 勾了但全局没装 → 要说清后果。
-	notInstalled := selfRestartGateDetail(Instance{SelfRestart: true}, false)
-	if !strings.Contains(notInstalled, selfRestartPluginName) || !strings.Contains(notInstalled, "不会生效") {
-		t.Errorf("全局未装的说明要给出后果，实际: %q", notInstalled)
+	if !strings.Contains(reason, "未挂载") {
+		t.Errorf("原因要说清未挂载，实际: %q", reason)
 	}
-	// 挂载成功 → 说清两个门控都通过了。
-	on := selfRestartGateDetail(Instance{SelfRestart: true}, true)
-	if !strings.Contains(on, selfRestartPluginName) {
-		t.Errorf("挂载成功的说明应包含插件名，实际: %q", on)
+
+	// 桥接就绪但实例没运行 → unknown（插件根本没机会握手）。
+	app.bridge.url = "http://127.0.0.1:1"
+	reason, unknown = app.pluginReportAbsentReason(inst)
+	if !unknown {
+		t.Fatalf("实例未运行应为 unknown，实际 reason=%q", reason)
+	}
+	if !strings.Contains(reason, "未运行") {
+		t.Errorf("原因要说清实例未运行，实际: %q", reason)
+	}
+
+	// 桥接就绪且实例在跑，却没握手 → 红灯（真正值得看的失败）。
+	app.mu.Lock()
+	app.processes["inst-a"] = &managedProcess{launchID: "launch-1"}
+	app.mu.Unlock()
+	reason, unknown = app.pluginReportAbsentReason(inst)
+	if unknown {
+		t.Fatalf("运行中无握手应为红色失败，实际被标成 unknown: %q", reason)
+	}
+	if !strings.Contains(reason, "握手") {
+		t.Errorf("原因要指向缺失的握手，实际: %q", reason)
+	}
+
+	// 全局未安装 → unknown（最常见的分诊结果，绝不标红）。
+	if err := os.Remove(filepath.Join(marketProfileDir(), "package.json")); err != nil {
+		t.Fatal(err)
+	}
+	reason, unknown = app.pluginReportAbsentReason(inst)
+	if !unknown {
+		t.Fatalf("未安装插件应为 unknown，实际 reason=%q", reason)
+	}
+	if !strings.Contains(reason, selfRestartPluginName) {
+		t.Errorf("原因要点名插件，实际: %q", reason)
 	}
 }

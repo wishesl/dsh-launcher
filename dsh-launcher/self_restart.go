@@ -3,48 +3,54 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"strings"
 )
 
-// Self-managed restart ("dsh-restart") contract between an opted-in instance
-// and the launcher.
+// Launcher ↔ instance bridge ("dsh-launcher-plugin") contract.
 //
-// Opt-in (double gate, both must hold):
-//   - the shared web profile has the plugin `dsh-self-mcp` installed (see
-//     self_restart_install.go for the built-in install flow), AND
-//   - the instance has SelfRestart enabled (the instance form checkbox).
+// Gate (mount + env injection, one condition):
+//   - the shared web profile has the plugin `dsh-launcher-plugin` installed
+//     (see self_restart_install.go for the built-in install/migration flow), AND
+//   - the launcher's loopback bridge is up (launcherPluginGate).
 //
-// Only then does the launcher (a) generate a temporary `--patch` overlay that
-// mounts the plugin, and (b) inject DSH_LAUNCHER=1 / DSH_INSTANCE_ID=<id> so
-// the plugin knows it is supervised. Other instances never mount it → no
-// global residue: a machine-launched DSH outside an opted-in instance has no
-// row and the tool does not exist.
+// Then the launcher (a) generates a temporary `--patch` overlay that mounts
+// the plugin, and (b) injects DSH_LAUNCHER=1 / DSH_INSTANCE_ID=<id> /
+// DSH_LAUNCH_ID / DSH_LAUNCHER_EVENTS / DSH_LAUNCHER_TOKEN. There is no
+// instance-level checkbox anymore: mounting follows the installation.
 //
-// Restart request: the plugin writes <dir>/.dsh-self-mcp/restart-request.json
-// and exits cleanly (exit 0). The launcher's exit reconcile sees the request
-// and relaunches the same instance.
+// One bridge line carries all three features (theme sync, dsh-restart,
+// capability handshake) over loopback HTTP — no state files are written by
+// the plugin, so there is no restart-request.json / pending.json /
+// capabilities.json channel left to reconcile. The restart flag lives in
+// launcher memory (launcher_bridge), consumed once by the exit reconcile.
 const (
-	selfRestartPluginName    = "dsh-self-mcp"
-	selfRestartStateDir      = ".dsh-self-mcp"
-	selfRestartRequestFile   = "restart-request.json"
+	selfRestartPluginName = "dsh-launcher-plugin"
+	// legacySelfRestartPluginName — the predecessor (file-channel plugin).
+	// Still referenced by the startup migration that swaps it for the new one.
+	legacySelfRestartPluginName = "dsh-self-mcp"
+	// Temporary overlay file name for one launch, in the INSTANCE directory
+	// (quote/space-free relative-name contract, same as the plugin mask).
 	selfRestartOverlayPrefix = ".dsh-self-restart-"
 )
 
-// selfRestartEnabled reports whether the launcher should mount the restart
-// plugin for an instance. Both gates must pass; a missing profile or a
-// disabled instance simply disables (never an error, never a launch failure).
-func selfRestartEnabled(inst Instance) bool {
-	if !inst.SelfRestart {
-		return false
-	}
-	installed, err := readInstalledPlugins()
+// launcherPluginGate reports whether the bridge plugin must be mounted for a
+// launch: installed in the shared profile AND the loopback bridge is up.
+// Either missing → mounted=false (never an error, never a launch failure;
+// capabilities fall back to "unknown" and the frontend stays fail-open).
+// installed tells the caller whether a non-mount is worth logging (a plain
+// profile without the plugin is the common case — stay silent there).
+func (a *App) launcherPluginGate() (mounted bool, installed bool, detail string) {
+	installedMap, err := readInstalledPlugins()
 	if err != nil {
-		return false
+		return false, false, "读取已安装插件失败：" + err.Error()
 	}
-	if _, ok := installed[selfRestartPluginName]; !ok {
-		return false
+	_, installed = installedMap[selfRestartPluginName]
+	if !installed {
+		return false, false, "全局未安装插件 " + selfRestartPluginName
 	}
-	return true
+	if a.bridge == nil || a.bridge.url == "" {
+		return false, true, "启动器桥接未就绪（loopback HTTP 服务没起来）"
+	}
+	return true, true, "已安装 " + selfRestartPluginName + " 且桥接就绪，本次启动已挂载"
 }
 
 // selfRestartRelName is the temporary overlay file name for an instance,
@@ -57,9 +63,9 @@ func selfRestartRelName(instanceID string) string {
 }
 
 // writeSelfRestartOverlay writes the temporary `--patch` overlay that mounts
-// the self-restart plugin for one launch, mirroring writeMaskOverlay
-// semantics: a YAML entry list read once at dsh boot, safe to delete once the
-// process has booted. Returns the RELATIVE file name.
+// the bridge plugin for one launch, mirroring writeMaskOverlay semantics:
+// a YAML entry list read once at dsh boot, safe to delete once the process
+// has booted. Returns the RELATIVE file name.
 //
 // The row MUST be an `insert:` block, not a bare `- id/name` row: the loader's
 // patch semantics treat a bare row as an override of an EXISTING entry (looked
@@ -68,9 +74,9 @@ func selfRestartRelName(instanceID string) string {
 // mcp-* rows.
 func writeSelfRestartOverlay(instanceID, dir string) (string, error) {
 	rel := selfRestartRelName(instanceID)
-	content := "# DSH 自管理重启覆盖层（--patch overlay，仅本次启动生效）\n" +
+	content := "# DSH launcher 桥接插件覆盖层（--patch overlay，仅本次启动生效）\n" +
 		"- insert:\n" +
-		"    - id: self-restart\n" +
+		"    - id: launcher-plugin\n" +
 		"      name: '" + selfRestartPluginName + "'\n"
 	if err := os.WriteFile(filepath.Join(dir, rel), []byte(content), 0o644); err != nil {
 		return "", err
@@ -78,33 +84,11 @@ func writeSelfRestartOverlay(instanceID, dir string) (string, error) {
 	return rel, nil
 }
 
-// cleanupSelfRestartOverlay removes an instance's temporary self-restart
-// overlay from its directory (best-effort).
+// cleanupSelfRestartOverlay removes an instance's temporary overlay from its
+// directory (best-effort).
 func cleanupSelfRestartOverlay(instanceID, dir string) {
 	if dir == "" {
 		return
 	}
 	_ = os.Remove(filepath.Join(dir, selfRestartRelName(instanceID)))
-}
-
-// restartRequestPath is where the plugin signals a relaunch request.
-func restartRequestPath(dir string) string {
-	return filepath.Join(dir, selfRestartStateDir, selfRestartRequestFile)
-}
-
-// consumeRestartRequest reads and removes one restart-request file. It
-// returns true only when a non-empty request was actually present, so the
-// exit reconcile relaunches at most once per request (removing the file
-// breaks any crash loop).
-func consumeRestartRequest(dir string) bool {
-	if dir == "" {
-		return false
-	}
-	path := restartRequestPath(dir)
-	data, err := os.ReadFile(path)
-	if err != nil || strings.TrimSpace(string(data)) == "" {
-		return false
-	}
-	_ = os.Remove(path)
-	return true
 }

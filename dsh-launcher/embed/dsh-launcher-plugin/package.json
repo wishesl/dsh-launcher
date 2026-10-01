@@ -1,7 +1,7 @@
 {
-  "name": "dsh-self-mcp",
-  "description": "DSH 自管理重启插件：提供 dsh-restart 工具（由 dsh-launcher 监督重启），重启完成后自动向发起会话注入“重启完成”消息并继续该会话",
-  "version": "0.2.2",
+  "name": "dsh-launcher-plugin",
+  "description": "dsh-launcher 桥接插件：主题同步（ui-theme → 启动器换肤）+ dsh-restart 自重启 + 能力握手，全部走一条 loopback HTTP 线",
+  "version": "0.1.0",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

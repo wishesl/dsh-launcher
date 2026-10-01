@@ -105,7 +105,7 @@ func TestResolveNpmName(t *testing.T) {
 		{"@scope/pkg@^1.2.3", "@scope/pkg"},
 		{"@scope/pkg@1.2.3", "@scope/pkg"},
 		{"npm:aliased@^1.0.0", "aliased"},
-		{"file:C:/Users/x/.dsh/profiles/web/.dsh-builtin/dsh-self-mcp", ""},
+		{"file:C:/Users/x/.dsh/profiles/web/.dsh-builtin/dsh-launcher-plugin", ""},
 		{"link:../local-plugin", ""},
 		{"workspace:*", ""},
 		{"github:owner/repo", ""},
@@ -249,11 +249,11 @@ func TestCheckPluginUpdates(t *testing.T) {
 
 	writeProfileJSON(t, profile, "package.json", map[string]any{
 		"dependencies": map[string]string{
-			"dsh-a":        "^1.2.3",
-			"dsh-b":        "^1.2.3",
-			"dsh-broken":   "^1.0.0",
-			"dsh-local":    "file:../dsh-local",
-			"dsh-self-mcp": "file:C:/tmp/dsh-self-mcp",
+			"dsh-a":              "^1.2.3",
+			"dsh-b":              "^1.2.3",
+			"dsh-broken":         "^1.0.0",
+			"dsh-local":          "file:../dsh-local",
+			selfRestartPluginName: "file:C:/tmp/dsh-launcher-plugin",
 		},
 	})
 	writeProfileJSON(t, profile, filepath.Join("node_modules", "dsh-a", "package.json"), map[string]any{"version": "1.2.3"})
@@ -290,8 +290,8 @@ func TestCheckPluginUpdates(t *testing.T) {
 	if l := byName["dsh-local"]; l.Kind != "linked" || l.Runnable || l.Err != "" {
 		t.Errorf("dsh-local should be a non-updatable linked plugin: %+v", l)
 	}
-	if sb := byName["dsh-self-mcp"]; sb.Kind != "builtin" || sb.Runnable || sb.Latest != embeddedBuiltinVersion() {
-		t.Errorf("dsh-self-mcp should be a builtin row comparing against the embedded version: %+v", sb)
+	if sb := byName[selfRestartPluginName]; sb.Kind != "builtin" || sb.Runnable || sb.Latest != embeddedBuiltinVersion() {
+		t.Errorf("%s should be a builtin row comparing against the embedded version: %+v", selfRestartPluginName, sb)
 	}
 	if res.Updatable != 2 {
 		t.Errorf("Updatable = %d, want 2", res.Updatable)
@@ -301,7 +301,7 @@ func TestCheckPluginUpdates(t *testing.T) {
 // TestUpdatePluginRejects covers the guard rails that do not need a live
 // instance: unknown plugins, linked/github kinds and risky gating.
 //
-// builtin (dsh-self-mcp) is deliberately NOT here any more: it is updatable
+// builtin (dsh-launcher-plugin) is deliberately NOT here any more: it is updatable
 // now, and exercising it would run a real pnpm install. Its verdict is covered
 // side-effect-free by TestBuiltinUpdateVerdict.
 func TestUpdatePluginRejects(t *testing.T) {
@@ -314,7 +314,7 @@ func TestUpdatePluginRejects(t *testing.T) {
 		"dependencies": map[string]string{
 			"dsh-local":    "file:../dsh-local",
 			"dsh-git":      "github:owner/repo",
-			"dsh-self-mcp": "file:C:/tmp/dsh-self-mcp",
+			selfRestartPluginName: "file:C:/tmp/dsh-launcher-plugin",
 			"dsh-npmish":   "^1.0.0",
 		},
 	})
@@ -357,10 +357,10 @@ func TestBuiltinUpdateVerdict(t *testing.T) {
 	defer func() { marketProfileDir = restoreDir }()
 
 	writeProfileJSON(t, profile, "package.json", map[string]any{
-		"dependencies": map[string]string{selfRestartPluginName: "file:C:/tmp/dsh-self-mcp"},
+		"dependencies": map[string]string{selfRestartPluginName: "file:C:/tmp/dsh-launcher-plugin"},
 	})
 	app := &App{}
-	builtinPath := filepath.Join(".dsh-builtin", "dsh-self-mcp", "package.json")
+	builtinPath := filepath.Join(selfRestartBuiltinRel, "package.json")
 
 	// 旧副本 → 可更新且可执行。
 	writeProfileJSON(t, profile, builtinPath, map[string]any{"version": "0.0.1"})

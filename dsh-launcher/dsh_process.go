@@ -238,14 +238,17 @@ func (a *App) LaunchInstance(id string) error {
 	snapshot := *inst
 	a.mu.Unlock()
 
-	// 自管理重启（dsh-restart）：实例勾选启用 + 插件已装 → 本次启动挂载插件
-	// 并注入监督者环境（DSH_LAUNCHER=1 / DSH_INSTANCE_ID）。未勾选的实例 →
-	// 不挂载、不注入，零残留。
-	selfRestart := selfRestartEnabled(snapshot)
+	// 桥接插件（dsh-launcher-plugin）：全局已装 + loopback 桥接就绪 → 本次启动
+	// 挂载插件并注入监督者环境（DSH_LAUNCHER=1 / DSH_INSTANCE_ID / DSH_LAUNCHER_EVENTS
+	// / DSH_LAUNCHER_TOKEN）。任一不满足 → 不挂载、不注入，零残留。
+	mountPlugin, pluginInstalled, mountDetail := a.launcherPluginGate()
+	if !mountPlugin && pluginInstalled {
+		a.systemLog(snapshot.ID, 0, "提示: 本次启动未挂载 "+selfRestartPluginName+"（"+mountDetail+"）")
+	}
 
-	// 能力报告以"本次启动"为准：先清掉上一次运行留下的文件，否则面板会拿着旧进程
+	// 能力报告以"本次启动"为准：先丢掉上一次运行的握手，否则面板会拿着旧进程
 	// 的结论谎报"一切正常"（上次装了插件、这次没装时最危险）。
-	cleanupCapabilities(snapshot.Directory)
+	a.bridge.clearHandshake(snapshot.ID)
 
 	a.emitStatus(snapshot.ID, "starting", 0)
 	if snapshot.Source {
@@ -278,9 +281,9 @@ func (a *App) LaunchInstance(id string) error {
 		cmdStr = insertPatchFlag(cmdStr, maskRel)
 		a.systemLog(snapshot.ID, 0, "已生成临时插件屏蔽层（仅本次启动生效）: "+filepath.Join(snapshot.Directory, maskRel))
 	}
-	// 自管理重启（dsh-restart）：双门控通过时生成同样的临时 --patch 覆盖层，
-	// 在本次启动装载 dsh-self-mcp 插件。
-	if selfRestart {
+	// 桥接插件：门控通过时生成同样的临时 --patch 覆盖层，在本次启动装载
+	// dsh-launcher-plugin（主题同步 / dsh-restart / 能力握手一条线）。
+	if mountPlugin {
 		if srRel, oerr := writeSelfRestartOverlay(snapshot.ID, snapshot.Directory); oerr != nil {
 			a.systemLog(snapshot.ID, 0, "提示: 生成自管理重启覆盖层失败: "+oerr.Error())
 		} else if srRel != "" {
@@ -300,17 +303,20 @@ func (a *App) LaunchInstance(id string) error {
 	// through the configured proxy (if any) so they don't hang like plugin
 	// installs do on a restricted network.
 	a.applyProxyToCmd(cmd)
-	// 自管理重启（dsh-restart）：让 DSH 知道它由 launcher 监督。只在双门控通过时
-	// 注入，其他实例不带这两个变量（无副作用）。
-	// DSH_LAUNCH_ID 是"本次启动"的一次性凭据：插件把它回写进能力报告，启动器据此判断
-	// 报告是不是这一次跑出来的。**不能改用 pid 判断** —— 启动器手里是 `cmd /c` 外壳的
-	// pid，插件报的是 node 进程的 pid，中间隔着 cmd → npx → node，按构造就不会相等。
+	// 桥接插件：让 DSH 知道它由 launcher 监督，并拿到桥接地址与凭证。只在门控
+	// 通过时注入，其他实例不带这些变量（无副作用）。
+	// DSH_LAUNCH_ID 是"本次启动"的一次性凭据：插件把它放进每个桥接信封，
+	// 启动器据此校验 /restart 的发起者是不是当前这一次跑（**不能改用 pid 判断** ——
+	// 启动器手里是 `cmd /c` 外壳的 pid，插件报的是 node 进程的 pid，中间隔着
+	// cmd → npx → node，按构造就不会相等）。
 	launchID := newLaunchID()
-	if selfRestart {
+	if mountPlugin {
 		cmd.Env = append(cmd.Environ(),
 			"DSH_LAUNCHER=1",
 			"DSH_INSTANCE_ID="+snapshot.ID,
 			"DSH_LAUNCH_ID="+launchID,
+			"DSH_LAUNCHER_EVENTS="+a.bridge.url,
+			"DSH_LAUNCHER_TOKEN="+a.bridge.token,
 		)
 	}
 
@@ -405,10 +411,12 @@ func (a *App) LaunchInstance(id string) error {
 		} else {
 			a.systemLog(snapshot.ID, mp.pid, "进程已退出 "+codeText)
 		}
-		// 自重启请求（dsh-restart）：插件写 <dir>/.dsh-self-mcp/restart-request.json
-		// 后干净退出。仅在「干净退出 + 非用户停止 + 请求文件存在」时自动重新拉起；
-		// 请求文件被消费即删除，杜绝重启循环。
-		wantRestart := !crashed && !mp.stopRequested() && consumeRestartRequest(snapshot.Directory)
+		// 自重启请求（dsh-restart）：插件 POST /restart 拿到 ack 后才退出，标志
+		// 存在 launcher 内存。无论走不走重启都先消费（取即清），杜绝标志残留
+		// 引发下次误重启或重启循环；干净退出 + 非用户停止 + 标志属于本次 launch
+		// 才重新拉起。
+		gotRestart := a.bridge.consumeRestart(snapshot.ID, mp.launchID)
+		wantRestart := !crashed && !mp.stopRequested() && gotRestart
 		status := "stopped"
 		if crashed {
 			status = "crashed"

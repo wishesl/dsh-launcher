@@ -29,6 +29,12 @@ type App struct {
 	quitting  bool                       // set when the user quits from the tray
 	tray      *trayState                 // system tray state (instance submenu)
 
+	// bridge is the loopback HTTP server the embedded dsh-launcher-plugin talks
+	// to (launcher_http.go): handshake = capability report, /theme = theme push,
+	// /restart = self-restart ack, /pending = restart payload hand-back.
+	// Created in NewApp so a.bridge is never nil; listening starts in startup().
+	bridge *launcherBridge
+
 	// inFlight tracks launch/install attempts that have not yet registered
 	// their process in a.processes (including the auto-start stagger sleep).
 	// shutdown waits for them so a process can never outlive the app by
@@ -47,7 +53,7 @@ type App struct {
 
 // NewApp creates a new App application struct
 func NewApp() *App {
-	return &App{
+	a := &App{
 		store:      newInstanceStore(),
 		settings:   newSettingsStore(),
 		logs:       newLogStore(),
@@ -56,6 +62,8 @@ func NewApp() *App {
 		svcKnown:   make(map[string]ServiceState),
 		svcTrigger: make(chan struct{}, 1),
 	}
+	a.bridge = newLauncherBridge(a)
+	return a
 }
 
 // startup is called when the app starts. The context is saved
@@ -96,6 +104,15 @@ func (a *App) startup(ctx context.Context) {
 
 	// Install the system tray icon + menu.
 	a.startTray()
+
+	// Loopback bridge for dsh-launcher-plugin (handshake / theme / restart ack).
+	// Must be up before any instance launches: the plugin reads its URL+token
+	// from the instance env at spawn time.
+	a.bridge.start()
+
+	// Legacy migration: profiles that still have dsh-self-mcp installed get the
+	// new plugin installed and the old one removed (best-effort, background).
+	go a.migrateLegacySelfRestart()
 
 	// Service probe loop: independent HTTP reachability checks on a fallback
 	// ticker, waking immediately on process start/stop/save/remove.
@@ -177,6 +194,9 @@ func (a *App) shutdown(ctx context.Context) {
 	for _, p := range procs {
 		p.stop()
 	}
+	// Close the plugin bridge only after processes are reaped: while they stop,
+	// a final POST (e.g. /pending) must still find the server alive.
+	a.bridge.stop()
 	a.cleanupAllMasks() // 临时插件屏蔽层只属于进程运行期间
 	a.logs.closeAll()
 	if a.tray != nil {
