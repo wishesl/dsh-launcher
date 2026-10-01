@@ -546,6 +546,8 @@ func (a *App) SetThemePreference(preference string) error {
 	if a.bridge == nil {
 		return fmt.Errorf("桥接未初始化")
 	}
+	// 一个实例都没连上也要落盘：用户的意图先记住，下次启动的窗口底色才不会开倒车。
+	a.rememberTheme(preference)
 	sent := a.bridge.sendCommand(frameSetTheme, bridgeSetThemePayload{
 		ID:         newBridgeID(8),
 		Preference: preference,
@@ -556,6 +558,19 @@ func (a *App) SetThemePreference(preference string) error {
 		a.bridge.note(fmt.Sprintf("主题：已向 %d 个实例下发 %s", sent, preference))
 	}
 	return nil
+}
+
+// rememberTheme 把最后一次已知主题存进 settings.json，只供下一次启动先涂窗口底色用
+// （startup_theme.go）。只认三态：settings.json 被手改成脏值时，宁可当"没表态"跟随系统，
+// 也不要拿一个读不懂的字符串去决定颜色。
+func (a *App) rememberTheme(preference string) {
+	if a.settings == nil {
+		return
+	}
+	switch preference {
+	case "light", "dark", "system":
+		a.settings.setTheme(preference)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -597,6 +612,9 @@ func (b *launcherBridge) emitTheme(instanceID, preference string) {
 	default:
 		preference = "system"
 	}
+	// 落盘位置放在归一之后、且是"主题进入启动器"的唯一收口（hello 快照与 theme 帧都走这里）：
+	// 下次启动据此先涂窗口底色（startup_theme.go）。
+	b.app.rememberTheme(preference)
 	b.app.emit("dsh:theme", themeEvent{InstanceID: instanceID, Preference: preference})
 }
 

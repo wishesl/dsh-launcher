@@ -29,6 +29,12 @@ type settings struct {
 	SidebarWidth int `json:"sidebarWidth"`
 	LogWidth     int `json:"logWidth"`
 
+	// 启动器主题偏好（light | dark | system，空 = 用户没表态 → 跟随系统）。
+	// 权威值仍然是 DSH 的 ui-theme：用户在启动器里切主题、或插件把 ui-theme 推回来时，
+	// 都会在这里存一份，只为下次启动时能在 WebView 起来之前先涂对窗口底色
+	// （见 startup_theme.go；否则深色主题下启动瞬间会白闪一下）。
+	Theme string `json:"theme"`
+
 	// ---- 启动器自更新偏好（见 update.go）----
 	// AutoCheckUpdate 为 nil 表示"用户没表态" → 默认开启启动后自检。
 	AutoCheckUpdate         *bool  `json:"autoCheckUpdate,omitempty"`
@@ -131,6 +137,15 @@ func (s *settingsStore) setLayout(layout string) {
 func (s *settingsStore) setUIWidths(sidebar, log int) {
 	s.mu.Lock()
 	s.data.SidebarWidth, s.data.LogWidth = sidebar, log
+	s.saveLocked()
+	s.mu.Unlock()
+}
+
+// setTheme persists the last known theme preference, so the next launch can paint
+// the native window background before the frontend boots (see startup_theme.go).
+func (s *settingsStore) setTheme(preference string) {
+	s.mu.Lock()
+	s.data.Theme = preference
 	s.saveLocked()
 	s.mu.Unlock()
 }
