@@ -1,7 +1,21 @@
 # 交接文档：dsh-launcher-plugin 主题同步 + 重启单线方案实施
 
-> 写于实施中途，供后续模型/开发者继续。**动手前请先重读权威方案：`doc/dsh-launcher-plugin实现方案.md`**，
-> 本文只记录"已做了什么、卡在哪、还剩什么"，不重复方案细节。
+> **⚠️ 历史快照（写于 2026-10-01 15:20，实施中途）** —— 本文 §2/§3 记录的是**已被取代的 HTTP/REST 版**，
+> §4「当前卡点」与 §5「尚未完成」里的事项**现已全部收尾**（前端换肤、`wails build`、旧目录清理、旧名残留、
+> 测试顺序断言都已处理；`TestShutdownKillsRunningInstance` 确认为环境既有 flake，与本方案无关）。
+> **要看现状请读**：
+> - [`dsh-launcher/embed/dsh-launcher-plugin/README.md`](../dsh-launcher/embed/dsh-launcher-plugin/README.md) —— **权威契约**：
+>   帧表、重启语义与看门狗、主题双向同步、网页端即时通道（0.2.6+）、装载会话与定时器护栏（0.2.7+）、续跑交付（0.2.8+）
+> - [`doc/dsh-launcher-plugin实现方案.md`](dsh-launcher-plugin实现方案.md) —— 初版设计记录 + 顶部「落地后的演进」清单（0.2.0 → 0.2.8）
+> - [`README.md`](../README.md) 的「功能特性」与「架构与目录结构」
+>
+> 与本文对照的现状要点：HTTP 桥 → **一条 WebSocket**（`launcher_http.go` 已删除，改为 `launcher_bridge.go`）；
+> 插件 0.1.0 → **0.2.8**；除服务端半边 `lib/index.js` 外多出网页端半边 `lib/client.js`（0.2.6，靠 `dsh.client` /
+> `exports["./client"]` 声明让 DSH 网页加载）；`pluginCapOrder` 现为
+> `[pluginLoaded, restartTool, themeReport, themeSet, embedRelax, restartDelivery]`，另加启动器侧探针 `pageChannel`；
+> 前端顶栏已有常驻主题切换按钮与插件状态胶囊。
+>
+> 本文以下内容只作为「当时做了什么、卡在哪」的历史记录保留。
 
 ---
 

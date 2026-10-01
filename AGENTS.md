@@ -197,6 +197,13 @@ cd dsh-launcher && wails build
    任一侧缺 `launchId`（旧版插件）时不下结论。
 5. **熔断名单只在真出事时加。** 探测有盲区（形状在、语义变），那时才需要"已知坏组合 → 禁用"的黑名单；
    不要预先为每个版本写启用表。
+6. **内置插件是两条半边，而且会被重复装载。** `lib/index.js`（服务端半边：桥接握手、`dsh-restart`、主题写盘）与
+   `lib/client.js`（网页端半边：只连桥接做主题即时通道）分别靠 `package.json` 里的 `dsh.client` + `exports["./client"]`
+   声明被宿主 Loader 和 DSH 网页加载。⚠️ 一旦声明 `dsh.client`，宿主会**重复装载服务端半边**（同一 pid 两条「已装载」），
+   于是模块级状态与定时器都必须按"随时可能被拆掉重来"写：定时器回调一律包 try/catch，自己持有 disposer 并随 fiber
+   销毁取消（`cordis-plugin-timer` 的 `ctx.timeout` **不替调用方取消**，拿失效 ctx 续排会抛
+   `cannot get required service "timer" in inactive context` 直接把 DSH 打挂）；跨装载会话的续跑负载要落在**进程级**
+   变量里，新会话装载时补做。**改了能力或行为必须 bump 插件 `package.json` 版本**（启动器用「内置 vs 已装」版本比对分诊）。
 
 入口：实例页标题右侧的「兼容性检查」按钮（`InstancesView` 的 `.compat-check-btn`）。有问题的实例数直接
 落在按钮上（**只统计已跑起来（ready/running）的实例** —— 启动中不判定，否则"报告还没上报"会一直误报；

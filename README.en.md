@@ -136,11 +136,14 @@ What the launcher adds:
   (defaults `pnpm install` / `pnpm run build` / `pnpm dsh web`), executed in one click.
 - **Built-in DSH view**: embeds the DSH UI inside the launcher window as a pseudo desktop app; the address is parsed automatically from the startup log, the token is masked,
   and the entry is greyed out with the reason shown when prerequisites are unmet (see the dedicated section above).
-- **Self-managed restart**: the built-in plugin `dsh-launcher-plugin` providing the `dsh-restart` tool;
-  after a restart, a "restart complete" message is injected into the originating session and wakes it up to continue (shown collapsed as a plugin notice, not a user bubble).
+- **Self-managed restart**: the built-in plugin `dsh-launcher-plugin` providing the `dsh-restart` tool; after confirmation the plugin acks → exits cleanly →
+  the launcher relaunches it (a 20s watchdog force-kills the process tree if the plugin does not exit). After the restart a "restart complete" message is injected into the originating
+  session and wakes it up to continue (shown collapsed as a plugin notice, not a user bubble); it is redelivered even when the plugin gets mounted more than once, so it is never silently lost.
 - **Two-way theme sync**: when the DSH side switches light/dark, the plugin reports the preference back over the same bridge and the launcher UI
-  re-skins accordingly (`light` / `dark` / `system`, with `system` resolved by the OS preference); conversely, "Settings → Theme" writes the
-  choice into DSH's `ui-theme` (applies immediately to online instances, and open DSH pages re-skin too). The cold-start first frame uses a local cache to avoid a white flash.
+  re-skins accordingly (`light` / `dark` / `system`, with `system` resolved by the OS preference); conversely, "Settings → Theme" or the header theme button writes the
+  choice into DSH's `ui-theme`. Online instances use the **page-side instant channel**: the client half inside the DSH web page talks to the launcher directly and re-skins the page
+  itself first (millisecond repaint) while the config write happens in the background; when the page is absent (not open / an older page) it falls back to the server-side write path
+  (~300ms) instead of faking success. The cold-start first frame uses a local cache to avoid a white flash.
 - **Capability probing**: the "Compatibility" tab in the right panel plus the "Compatibility Check" entry on the instance page list the conclusion and evidence for every capability,
   tri-state (usable / confirmed fault / no conclusion), turning silent breakage into something you see at a glance (see the dedicated section above).
 - **Plugin market**: discover / install / uninstall community plugins (reusing the official `dsh plugin --profile web` channel);
@@ -182,7 +185,7 @@ dsh-launcher/
 ├── instances.go       # 实例持久化（%APPDATA%\DSHLauncher\instances.json）
 ├── instance_mask.go   # 实例级插件屏蔽（名单持久化 + 临时 --patch 覆盖层生成/清理）
 ├── self_restart.go    # 桥接插件契约（门控、--patch 覆盖层、launcher-plugin 常量）
-├── launcher_bridge.go # launcher ↔ 插件的 loopback WebSocket 桥（hello / theme / set-theme / restart / pending）
+├── launcher_bridge.go # launcher ↔ 插件的 loopback WebSocket 桥（插件角色 hello/theme/set-theme/restart/pending；网页端角色 page-hello/page-set-theme/page-theme）
 ├── self_restart_install.go # 内置插件 dsh-launcher-plugin 的解出与安装（embed.FS → profile）
 ├── embeddata.go       # 内置插件源码的 embed 声明
 ├── capabilities.go    # 兼容性探测（读插件能力报告 + 启动器侧探针 → 面板数据）
@@ -203,7 +206,7 @@ dsh-launcher/
 ├── logging.go         # 实例日志落盘
 ├── tray.go            # 系统托盘
 ├── procattr_*.go      # 平台进程属性 / 杀进程树
-├── embed/dsh-launcher-plugin/ # 内置插件源码（Cordis 插件，见其 README）
+├── embed/dsh-launcher-plugin/ # 内置插件源码（服务端半边 lib/index.js + 网页端半边 lib/client.js，见其 README）
 └── frontend/
     └── src/
         ├── App.tsx / api.ts / types.ts / util.ts
@@ -296,7 +299,7 @@ Every release automatically produces four artifacts (with auto-generated release
 ## Related documents
 
 - [`AGENTS.md`](AGENTS.md) — development workflow conventions and pitfall quick reference (layout rules, frontend conventions, capability-probing principles)
-- [`dsh-launcher/embed/dsh-launcher-plugin/README.md`](dsh-launcher/embed/dsh-launcher-plugin/README.md) — the built-in plugin: bridge protocol, restart semantics, capability reporting, security boundary of the embed relaxation
+- [`dsh-launcher/embed/dsh-launcher-plugin/README.md`](dsh-launcher/embed/dsh-launcher-plugin/README.md) — **the authoritative contract of the built-in plugin**: bridge frame table, restart semantics and watchdog, two-way theme sync and the page-side instant channel, load sessions and timer guards, continuation delivery, security boundary of the embed relaxation
 - [`需求.md`](doc/需求.md) — full requirements and key decision records
 - [`DSH版本查询与升级指南.md`](doc/DSH版本查询与升级指南.md) — background research on DSH version querying and upgrading
 - [`插件市场实现方案.md`](doc/插件市场实现方案.md) — plugin market design decisions

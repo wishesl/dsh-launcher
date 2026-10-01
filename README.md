@@ -144,11 +144,15 @@ Cordis 装载配置……）。这些耦合点**按能力探测，不按版本�
   （默认 `pnpm install` / `pnpm run build` / `pnpm dsh web`），一键执行。
 - **内置 DSH 视图**：把 DSH 界面嵌进启动器窗口当伪桌面版用；地址从启动日志自动解析，token 打码，
   前置条件不满足时入口置灰并说明原因（见上文专节）。
-- **自管理重启**：内置插件 `dsh-launcher-plugin` 提供 `dsh-restart` 工具；
-  重启完成后自动向发起会话注入「重启完成」消息并唤醒它继续执行（以插件通知形式折叠显示，不是用户气泡）。
+- **自管理重启**：内置插件 `dsh-launcher-plugin` 提供 `dsh-restart` 工具；确认后插件 ack → 干净退出 →
+  启动器重新拉起（插件没退出时有 20s 看门狗强制收进程树兜底）。重启完成后自动向发起会话注入
+  「重启完成」消息并唤醒它继续执行（以插件通知形式折叠显示，不是用户气泡）；插件被重复装载时这条消息
+  仍会补交，不会静默丢失。
 - **主题双向同步**：DSH 侧切换亮/暗主题时，插件把偏好经同一座桥回报给启动器 → 启动器界面
-  跟着换肤（`light` / `dark` / `system` 三态，`system` 由系统偏好解析）；反过来，「设置 → 主题」
-  也能直接改 DSH 的 `ui-theme`（在线实例立即生效，打开的 DSH 页面同步换）。冷启动首帧用本地缓存避免闪白。
+  跟着换肤（`light` / `dark` / `system` 三态，`system` 由系统偏好解析）；反过来，「设置 → 主题」或
+  顶栏主题按钮也能直接改 DSH 的 `ui-theme`。在线实例走**网页端即时通道**：DSH 网页里的客户端半边
+  直接连启动器，由页面自己先换肤（毫秒级重绘），配置写盘在后台进行；页面不在场（没开网页 / 页面是旧版本）
+  时自动回退到服务端写盘路径（约 300ms），不会假报成功。冷启动首帧用本地缓存避免闪白。
 - **兼容性探测**：右栏「兼容性」标签 + 实例页「兼容性检查」入口，逐条列出各项能力的探测结论与证据，
   三态（可用 / 确定故障 / 没有结论），把静默失效变成一眼可见（见上文专节）。
 - **插件市场**：发现 / 安装 / 卸载社区插件（复用官方 `dsh plugin --profile web` 通道），
@@ -190,7 +194,7 @@ dsh-launcher/
 ├── instances.go       # 实例持久化（%APPDATA%\DSHLauncher\instances.json）
 ├── instance_mask.go   # 实例级插件屏蔽（名单持久化 + 临时 --patch 覆盖层生成/清理）
 ├── self_restart.go    # 桥接插件契约（门控、--patch 覆盖层、launcher-plugin 常量）
-├── launcher_bridge.go # launcher ↔ 插件的 loopback WebSocket 桥（hello / theme / set-theme / restart / pending）
+├── launcher_bridge.go # launcher ↔ 插件的 loopback WebSocket 桥（插件角色 hello/theme/set-theme/restart/pending；网页端角色 page-hello/page-set-theme/page-theme）
 ├── self_restart_install.go # 内置插件 dsh-launcher-plugin 的解出与安装（embed.FS → profile）
 ├── embeddata.go       # 内置插件源码的 embed 声明
 ├── capabilities.go    # 兼容性探测（读插件能力报告 + 启动器侧探针 → 面板数据）
@@ -211,7 +215,7 @@ dsh-launcher/
 ├── logging.go         # 实例日志落盘
 ├── tray.go            # 系统托盘
 ├── procattr_*.go      # 平台进程属性 / 杀进程树
-├── embed/dsh-launcher-plugin/ # 内置插件源码（Cordis 插件，见其 README）
+├── embed/dsh-launcher-plugin/ # 内置插件源码（服务端半边 lib/index.js + 网页端半边 lib/client.js，见其 README）
 └── frontend/
     └── src/
         ├── App.tsx / api.ts / types.ts / util.ts
@@ -304,9 +308,9 @@ git push origin v0.1.0
 ## 相关文档
 
 - [`AGENTS.md`](AGENTS.md) —— 开发流程约定与踩坑速查（布局铁律、前端约定、兼容性探测原则）
-- [`dsh-launcher/embed/dsh-launcher-plugin/README.md`](dsh-launcher/embed/dsh-launcher-plugin/README.md) —— 内置插件：桥接协议、重启语义、能力上报、内嵌放宽的安全边界
-- [`doc/dsh-launcher-plugin实现方案.md`](doc/dsh-launcher-plugin实现方案.md) —— 单线桥接插件方案（主题同步 / 重启 / 能力握手三合一）
-- [`doc/交接文档-dsh-launcher-plugin实施进度.md`](doc/交接文档-dsh-launcher-plugin实施进度.md) —— 该方案的实施进度交接
+- [`dsh-launcher/embed/dsh-launcher-plugin/README.md`](dsh-launcher/embed/dsh-launcher-plugin/README.md) —— **内置插件权威契约**：桥接帧表、重启语义与看门狗、主题双向同步与网页端即时通道、装载会话与定时器护栏、续跑交付、内嵌放宽的安全边界
+- [`doc/dsh-launcher-plugin实现方案.md`](doc/dsh-launcher-plugin实现方案.md) —— 单线桥接插件初版设计记录（顶部有「落地后的演进」0.2.0 → 0.2.8）
+- [`doc/交接文档-dsh-launcher-plugin实施进度.md`](doc/交接文档-dsh-launcher-plugin实施进度.md) —— 实施中途的历史快照（现状见插件 README）
 - [`需求.md`](doc/需求.md) —— 完整需求与关键决策记录
 - [`DSH版本查询与升级指南.md`](doc/DSH版本查询与升级指南.md) —— DSH 版本查询与升级的背景调查
 - [`插件市场实现方案.md`](doc/插件市场实现方案.md) —— 插件市场设计决策

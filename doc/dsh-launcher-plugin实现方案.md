@@ -1,12 +1,34 @@
 # dsh-launcher-plugin 实现方案（初版）
 
-> **⚠️ 实现变更（本文以下内容保留为历史设计记录，勿当作现状读）**：落地时把「一条 loopback HTTP 线 + 5 个 REST 端点」
-> 收敛成了**一条 loopback WebSocket**（用户要求「只保留 ws，旧接口全搬过来，不做降级」）：
-> `dsh-launcher/launcher_http.go` 已删除，改为 `dsh-launcher/launcher_bridge.go`（`GET /ws` 升级，握手仍带同一个
-> `Authorization: Bearer <token>`，`CheckOrigin` 只放行无 `Origin` 的 Node 客户端与自源）。
-> 帧仍用同一个 `{type, instanceId, launchId, payload}` 信封：插件→启动器 `hello`（原 `POST /connect` 全量快照）/`theme`/`restart`/
-> `pending-consumed`/`command-result`；启动器→插件 `pending`（原 `GET /pending`，改为服务端主动下发）/`set-theme`（新增，启动器内切主题）/
-> `restart-result`。心跳走 RFC ping/pong（20s ping、60s pong 判死）。**权威契约以 `dsh-launcher/embed/dsh-launcher-plugin/README.md` 的帧表为准。**
+> **⚠️ 本文是初版设计记录 —— 以下内容勿当作现状读。权威契约以
+> [`dsh-launcher/embed/dsh-launcher-plugin/README.md`](../dsh-launcher/embed/dsh-launcher-plugin/README.md) 的帧表为准。**
+> 落地后的演进（插件当前版本 **0.2.8**）：
+>
+> 1. **0.2.0 · REST → 一条 WebSocket。** 「一条 loopback HTTP 线 + 5 个 REST 端点」收敛成**一条 loopback WebSocket**
+>    （用户要求「只保留 ws，旧接口全搬过来，不做降级」）：`dsh-launcher/launcher_http.go` 已删除，改为
+>    `dsh-launcher/launcher_bridge.go`（`GET /ws` 升级）。服务端插件仍带 `Authorization: Bearer <token>`；
+>    网页端角色改用 `?token=` 查询参数（浏览器 WebSocket 不能带自定义头）；`CheckOrigin` 只放行无 `Origin` 的
+>    Node 客户端、自源、以及本机已知 DSH 网页源。帧仍用同一个 `{type, instanceId, launchId, payload}` 信封：
+>    插件→启动器 `hello`（原 `POST /connect` 全量快照）/`theme`/`restart`/`pending-consumed`/`command-result`；
+>    启动器→插件 `pending`（原 `GET /pending`，改为服务端主动下发）/`set-theme`/`restart-result`。
+>    心跳走 RFC ping/pong（20s ping、60s pong 判死）。
+> 2. **0.2.5 · 主题写盘不再自读 CAS。** `settings.update` 内部本来就会跑两次 `describe()`，第三次读取只买到 CAS，
+>    不划算（`mergeLayers` 的合并语义本来就保住别人改的其它字段）。
+> 3. **0.2.6 · 多出「网页端角色」。** 同一条线上接入第二个角色（帧 `page-hello` / `page-set-theme` / `page-theme` /
+>    `page-result`）：服务端半边用 `webserver/index-inject` 把
+>    `window.__DSH_LAUNCHER_BRIDGE__ = {url, token, instanceId, launchId, …}` 注入页面，网页端半边 `lib/client.js`
+>    直连启动器 —— 点启动器换主题时由**页面自己**乐观换肤（毫秒级重绘），配置写盘在后台跑；页面不在场时自动回退到
+>    服务端写盘路径（约 300ms，fail-open）。声明 `dsh.client` + `exports["./client"]` 是 DSH 官方扩展点。
+> 4. **0.2.7 · 双装载与定时器护栏。** `dsh.client` 声明会让宿主 Loader 重复装载服务端半边（同一 pid 两条「已装载」）；
+>    先装载的那份 fiber 被拆掉后，`cordis-plugin-timer` 的 `ctx.timeout` 定时器**不会**随之取消 → 用失效 ctx 续排
+>    轮询会抛 `cannot get required service "timer" in inactive context` 并把 DSH 进程打挂（2026-10-02 00:28 真机 exit 1）。
+>    修法：定时器回调全部 try/catch + 自己持有 disposer 并随 fiber 销毁取消 + `apply()` 幂等（第二次装载先收掉旧会话）。
+> 5. **0.2.8 · 续跑交付跨装载会话补交。** 「重启完成」消息常落在被拆掉的装载会话 #1 里而静默丢失（2026-10-02 01:27 真机）；
+>    负载改为**进程级**、重试绑当时存活的会话、新会话装载时补做，交付链改走可见痕迹（`console.error` + `command-result` 帧）。
+>
+> 兼容性面板：插件上报项 `pluginCapOrder` 现为
+> `[pluginLoaded, restartTool, themeReport, themeSet, embedRelax, restartDelivery]`，另有启动器侧探针 `pageChannel`
+> （「网页端已接入主题即时通道」）。
 
 一个新插件 `dsh-launcher-plugin`，把 launcher ↔ 实例的实时通信收敛为**一条 loopback HTTP 线**，同时承载三个能力：**主题同步（新增）、dsh-restart（迁移）、能力上报（迁移）**。`dsh-self-mcp` 随之退役，文件通道（`restart-request.json` / `pending.json` / `capabilities.json`）全部删除。
 
@@ -34,13 +56,13 @@ launcher (Go)                              dsh-launcher-plugin (实例内)
 
 ## 2. launcher 侧
 
-### 2.1 HTTP 服务（新增 `dsh-launcher/launcher_http.go`）
+### 2.1 HTTP 服务（⚠️ 历史：现为 `dsh-launcher/launcher_bridge.go` 的 WebSocket 桥）
 
 - `net/http`，只绑 `127.0.0.1`，端口由 OS 分配（`:0` 后读实际端口）。
 - Token：启动时生成随机 token，经 env 注入；所有请求要求 `Authorization: Bearer <token>`，不符返回 401。
 - 收到 `theme` 推送 → `EmitEvent("dsh:theme", payload)`，前端订阅（App.tsx 是唯一事件所有者）。
 
-### 2.2 接口清单
+### 2.2 接口清单（⚠️ 历史：5 个 REST 端点已全部删除，改为 WS 帧，见顶部第 1 条）
 
 统一请求体信封：`{ "type": "...", "instanceId": "...", "launchId": "...", "payload": { ... } }`，`launchId` 沿用 `DSH_LAUNCH_ID`，供前端判陈旧。
 
