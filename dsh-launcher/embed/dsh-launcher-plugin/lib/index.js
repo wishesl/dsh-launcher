@@ -8,8 +8,10 @@
  *   1. 主题同步（双向）：初读共享 profile 的 ui-theme 设置，变化即推 theme 帧，launcher 转成
  *      dsh:theme 事件驱动自身换肤；launcher 里的主题控件下发 set-theme 帧，插件把新值写回
  *      ui-theme（DSH 网页端订阅同一个 ns，打开的页面会当场换肤）；
- *   2. dsh-restart：确认词 restart-dsh；发 restart 帧**拿到 ack 才 ctx.appExit(0)**，
- *      拿不到 ack 就报错不退出（实例不会白死一次，比旧版"写完文件碰运气"更稳）；
+ *   2. dsh-restart：确认词 restart-dsh；发 restart 帧**拿到 ack 才退出**，拿不到 ack 就报错不退出
+ *      （实例不会白死一次）。退出动作 500ms 后开始：三条计时通道（timer 服务 ctx、apply 的 ctx、
+ *      全局 setTimeout）同时挂上，先 ctx.appExit(0) 优雅退出（DSH 自己还有 5s 强制退出上限），
+ *      3s 内进程还在就 process.exit / reallyExit / 进程信号逐个兜底，全程留痕、绝不静默卡死；
  *   3. 能力握手：连上后第一帧 hello 是全量快照（能力 + 主题），之后能力变化增量重发；
  *      断线按 RETRY_DELAYS_MS 退避重连，重连成功即重发快照（自愈）。
  *
@@ -26,7 +28,7 @@ import z from "@deepseek-ai/schemastery";
 
 /** 稳定 Cordis 插件名。 */
 const name = "dsh-launcher-plugin";
-/** 硬依赖：工具注册表 + Host 计时器（ctx.timeout）。 */
+/** 硬依赖：工具注册表 + timer 服务（`ctx.timeout`，退出与交付都要延时）。 */
 const inject = ["tools", "timer"];
 /** 无配置：装载与否完全由 launcher 的挂载覆盖层决定。 */
 const Config = z.object({});
@@ -38,6 +40,10 @@ const RETRY_DELAYS_MS = [500, 1500, 4000, 10000, 20000, 40000];
 const WS_OPEN = 1;
 /** 等 launcher 应答（restart ack）的上限。 */
 const RESTART_ACK_TIMEOUT_MS = 5000;
+/** 重启：ack 之后多久开始退出（让 dsh-restart 的工具结果先落盘）。 */
+const RESTART_EXIT_DELAY_MS = 500;
+/** 优雅退出没生效时的观察窗（DSH 自己的强制退出上限是 5s，这里更早动手）。 */
+const RESTART_EXIT_VERIFY_MS = 3000;
 
 /** DSH 主题设置命名空间（dsh-client-ui-theme 写进共享 profile 的 ui-theme）。 */
 const THEME_NS = "ui-theme";
@@ -55,9 +61,15 @@ const capabilityState = new Map();
 /** apply() 的 ctx：日志 / timer / appExit。 */
 let ctxRef = null;
 /** DSH 的退出入口（dsh-cmdline 在 host ctx 上 provide 的 appExit），经 inject 缓存。
- *  真机上出现过 `ctx.get("appExit")` 取不到的情况（2026-10-01 21:29 重启失败），
- *  所以这里多存一份，取用顺序见 resolveAppExit。 */
+ *  真机 0.2.2 打点显示 `ctx.get("appExit")` 本来就能取到（来源：ctx.get），缓存只是兜底；
+ *  取用顺序见 resolveAppExit。 */
 let appExitRef = null;
+/** timer 服务注入后的 ctx：`ctx.timeout` 只在这个 ctx 上保证可调用
+ *  （真机上工具里直接用 apply 的 ctx 调 `ctx.timeout` 会抛
+ *  `cannot get property "timeout" without inject`）。 */
+let timerCtxRef = null;
+/** 退出流程是否已开始：三条计时通道都可能触发回调，这里只放行一次。 */
+let exitStarted = false;
 /** 当前连接（null = 未连接）。 */
 let socket = null;
 /** 已发起升级、握手还没完成。 */
@@ -688,11 +700,97 @@ function resolveAppExit(ctx) {
 	return { exit: null, via: "" };
 }
 
+/**
+ * 重启相关的诊断轨迹：同时走两个"一定看得见"的通道。
+ *
+ * 1. `console.error` → DSH 进程的 stderr → launcher 捕获的实例日志；
+ * 2. 桥接 `command-result` 帧（id 留空 = 纯回报）→ launcher 的 app.log 记「回报：…」。
+ *
+ * 刻意不用 `ctx.logger`：真机实测（2026-10-01 22:16）它的输出既不进实例日志、也不进 app.log，
+ * 排障时等于没写。事故的教训就是"三个通道都看不见"。
+ */
+function restartTrace(line) {
+	try {
+		console.error(`[dsh-launcher-plugin] ${line}`);
+	} catch {
+		// 日志写不出去不能影响退出
+	}
+	sendFrame("command-result", { id: "", ok: true, detail: line });
+}
+
+/** 最后一招：确保进程真的死掉。逐个尝试，任何一个成功后面的都执行不到。 */
+function forceExit(reason) {
+	restartTrace(`兜底硬退：${reason}`);
+	const attempts = [
+		["process.exit", () => process.exit(0)],
+		["process.reallyExit", () => process.reallyExit(0)],
+		["process.kill(SIGTERM)", () => process.kill(process.pid, "SIGTERM")],
+		["process.kill(SIGKILL)", () => process.kill(process.pid, "SIGKILL")],
+	];
+	for (const [label, run] of attempts) {
+		try {
+			run();
+		} catch (error) {
+			restartTrace(`${label} 失败：${error?.message ?? String(error)}`);
+		}
+	}
+}
+
+/** 读一个可能被 cordis 属性拦截器挡下来的成员类型（自身不抛错）。 */
+function memberKind(target, prop) {
+	try {
+		return typeof target?.[prop];
+	} catch (error) {
+		return `抛错：${error?.message ?? String(error)}`;
+	}
+}
+
+/**
+ * 安排一次延时动作 —— **三条通道全都挂上**，谁先响算谁（回调必须幂等）。
+ *
+ * 真机事故（2026-10-01 22:16）：ack 之后进程 20s 不退，既没有异常、也没有任何"退出被调用"的
+ * 痕迹 —— 而 DSH 只要真的走到 `appExit`，自己就有 5s 强制退出上限，不可能 20s 还活着。
+ * 也就是说"ack 之后退出"那段延时代码没生效。
+ *
+ * 通道清单（真机 0.2.3 探针实测：装载时三条都能触发）：
+ *   ① timer 服务注入后的 ctx（`timerCtxRef.timeout`）
+ *   ② apply 的 ctx（`ctx.timeout`；在工具上下文里会抛 `cannot get property "timeout" without inject`）
+ *   ③ 全局 `setTimeout`（普通插件里就是真计时器；cordis 动态包 sandbox 才有替换）
+ *
+ * 为什么**不能只挂第一条**：0.2.3 只挂第一条就出事 —— DSH 一旦开始关闭，`ctx.timeout` 排进去的
+ * 回调不再触发（`appExit(0)` 之后那个 3s 硬退兜底整个没响，进程又活满 20s 等 launcher 看门狗），
+ * 而全局 `setTimeout` 那条照样会响。所以这里一次把三条都挂上，宁可重复触发。
+ */
+function scheduleExit(ctx, run, delay) {
+	const armed = [];
+	for (const [label, target] of [
+		["timerCtx.timeout", timerCtxRef],
+		["ctx.timeout", ctx],
+	]) {
+		if (!target) continue;
+		try {
+			target.timeout(run, delay);
+			armed.push(label);
+		} catch (error) {
+			restartTrace(`${label} 不可用：${error?.message ?? String(error)}`);
+		}
+	}
+	try {
+		setTimeout(run, delay);
+		armed.push("setTimeout");
+	} catch (error) {
+		restartTrace(`setTimeout 不可用：${error?.message ?? String(error)}`);
+	}
+	return armed.join("+");
+}
+
 function apply(ctx) {
 	ctxRef = ctx;
 	// 能执行到这里就说明插件确实装载了 —— 随握手上报，是面板的第一条。
 	setCapability("pluginLoaded", true);
 	ctx.logger.info(`[dsh-launcher-plugin] 已装载：桥接=${supervised ? bridgeURL : "未配置"}（launcher=${process.env.DSH_LAUNCHER === "1" ? "是" : "否"}）`);
+	// 装载打点：apply 可能被调用多次（真机上出现过 2~3 次 hello），pid 便于和进程树对账。
+	restartTrace(`已装载（plugin ${pluginVersion() || "?"}，pid ${process.pid}）`);
 
 	// 0) 内嵌支持：connection service 就绪后放宽浏览器会话校验（只有 web 组合才有它）
 	ctx.inject(["connection"], (connectionCtx) => {
@@ -705,10 +803,17 @@ function apply(ctx) {
 		const { exit, via } = resolveAppExit(exitCtx);
 		if (typeof exit === "function") {
 			appExitRef = exit;
-			ctx.logger.info(`[dsh-launcher-plugin] 已取得 appExit（来源：${via}），重启走优雅退出`);
+			restartTrace(`已取得 appExit（来源：${via}），重启走优雅退出`);
 		} else {
-			ctx.logger.warn("[dsh-launcher-plugin] 拿不到 appExit（重启时会走 process.exit 兜底退出）");
+			restartTrace("拿不到 appExit（重启时走硬退兜底）");
 		}
+	});
+
+	// 0.6) 计时器：退出与交付都靠它延时。timer 注入后的 ctx 才保证 `timeout` 可调用
+	//      （真机在工具里用 apply 的 ctx 调会抛 `cannot get property "timeout" without inject`）。
+	ctx.inject(["timer"], (timerCtx) => {
+		timerCtxRef = timerCtx;
+		restartTrace(`已取得 timer（timerCtx.timeout=${memberKind(timerCtx, "timeout")}，ctx.timeout=${memberKind(ctx, "timeout")}）`);
 	});
 
 	// 1) 主题：settings 就绪 → 初读 + 事件 + 轮询；5s 没就绪给一个可见结论
@@ -803,30 +908,42 @@ function apply(ctx) {
 					return { status: `rejected: launcher 未确认重启（${error.message}），实例不退出` };
 				}
 
-				// 延迟一拍再请求退出：先让 execute 的返回结果落盘
-				setTimeout(() => {
-					const { exit, via } = resolveAppExit(ctxRef ?? ctx);
+				// 延迟一拍再请求退出：先让 execute 的返回结果落盘。
+				// 三条计时通道全挂上（见 scheduleExit），是否重复由 exitStarted 挡。
+				const armed = scheduleExit(ctx, () => {
+					if (exitStarted) {
+						restartTrace("退出已在进行中，忽略重复触发");
+						return;
+					}
+					exitStarted = true;
+					restartTrace(`重启：ack 已收到，开始退出（plugin ${pluginVersion() || "?"}，pid ${process.pid}）`);
+					let exit = null;
+					let via = "";
+					try {
+						({ exit, via } = resolveAppExit(ctxRef ?? ctx));
+					} catch (error) {
+						restartTrace(`取 appExit 抛错：${error?.message ?? String(error)}`);
+					}
 					if (typeof exit === "function") {
-						ctx.logger.info(`[dsh-launcher-plugin] 请求 DSH 退出（appExit 来源：${via}）`);
+						restartTrace(`请求 DSH 优雅退出（appExit 来源：${via}）`);
 						try {
 							exit(0);
-							return;
 						} catch (error) {
-							ctx.logger.error(`[dsh-launcher-plugin] appExit 调用失败：${error.message}`);
+							restartTrace(`appExit 调用失败：${error?.message ?? String(error)}`);
 						}
+						// 优雅退出没生效（DSH 内部最坏 5s 强制退出）→ 3s 观察窗后自己动手。
+						// 真机 0.2.3 教训：DSH 一旦开始关闭，`ctx.timeout` 排进去的回调就不再触发
+						// （这条兜底整个没响，进程又活满 20s）—— 所以 scheduleExit 三条通道全挂。
+						scheduleExit(ctx, () => forceExit("appExit 调用后进程仍在"), RESTART_EXIT_VERIFY_MS);
+						return;
 					}
-					// 兜底：拿不到优雅退出入口也必须真的退出。否则 launcher 会一直停在
-					// 「已 ack，等待进程退出」（2026-10-01 21:29 真机事故：点重启没反应），
-					// 而且用户的重启指令已经确认过了，卡住不动才是最坏的结果。
-					// 代价是跳过优雅拆卸（session 内容早已落盘）；回报一帧让 launcher 日志也留痕。
-					ctx.logger.warn("[dsh-launcher-plugin] 取不到 appExit，退化为 process.exit(0)（跳过优雅拆卸）");
-					sendFrame("command-result", {
-						id: "",
-						ok: true,
-						detail: "appExit 不可用，已用 process.exit(0) 兜底退出",
-					});
-					process.exit(0);
-				}, 500);
+					// 兜底：拿不到优雅退出入口也必须真的退出。否则 launcher 只能靠 20s 看门狗救，
+					// 用户看到的就是"点了重启要等 20 秒"（2026-10-01 21:29 / 22:16 两次真机事故）。
+					// 代价是跳过优雅拆卸（session 内容早已落盘），回报走 restartTrace 的双通道留痕。
+					restartTrace("取不到 appExit，直接硬退（跳过优雅拆卸）");
+					forceExit("拿不到 appExit");
+				}, RESTART_EXIT_DELAY_MS);
+				restartTrace(`退出动作已排入计时器（${armed || "无可用计时器"}，延迟 ${RESTART_EXIT_DELAY_MS}ms）`);
 
 				return { status: "restarting" };
 			},

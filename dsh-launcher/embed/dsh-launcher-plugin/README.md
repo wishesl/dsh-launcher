@@ -67,10 +67,26 @@ launcher (Go)                                  dsh-launcher-plugin (实例内)
 
 1. 请求经 `restart` 帧提交（含重启完成负载），**收到 `restart-result {ok:true}` 才退出**；
    超时/被拒就报错、不退出 —— 实例不会白死一次。
-2. 退出走阶梯：`ctx.inject(["appExit"])` 缓存 → `ctx.get("appExit")` → `ctx.appExit`
-   依次尝试，日志写清用了哪条；**三条都拿不到就 `process.exit(0)` 兜底**（跳过优雅拆卸，
-   并发一帧 `command-result {detail}` 让 launcher 日志留痕）。旧实现只看 `ctx.get`，
-   拿不到就静默 no-op —— 用户看到的是「点了重启没反应」（2026-10-01 真机事故）。
+2. 退出动作在 ack 后 500ms 开始（先让工具结果落盘），**三条计时通道同时挂上**，谁先响算谁
+   （`exitStarted` 幂等，重复触发直接忽略）：
+   - `timer` 服务注入后的 ctx（`timerCtxRef.timeout`）；
+   - `apply` 的 ctx（`ctx.timeout`；在工具上下文里会抛 `cannot get property "timeout" without inject`）；
+   - 全局 `setTimeout`（**普通 npm 插件里就是真计时器**）。
+
+   回调里先取退出入口（`ctx.inject(["appExit"])` 缓存 → `ctx.get("appExit")` → `ctx.appExit`）：
+   拿到就 `appExit(0)` 优雅退出；3s 内进程还在，就 `process.exit(0)` → `process.reallyExit(0)`
+   → `process.kill(pid, SIGTERM|SIGKILL)` 逐个兜底。全程留痕，**没有任何一条分支是静默 no-op**。
+   - 为什么三条都挂（0.2.3 真机教训）：只挂 Host 计时器时，DSH 一旦开始关闭，`ctx.timeout`
+     排进去的回调就不再触发 —— `appExit(0)` 之后那个 3s 硬退兜底整个没响，进程又活满 20s
+     等 launcher 看门狗；而全局 `setTimeout` 那条照样会响。
+   - 为什么"全局 `setTimeout` 在插件里不可用"是错的（0.2.2 之前的结论已推翻）：cordis 的
+     sandbox（`@deepseek-ai/dsh-cordis-host-runner` 的 `sandbox.js`）确实会把
+     `setTimeout/setInterval/setImmediate` 换成"Node timers are unavailable，请用 ctx.timeout"
+     的抛错函数，但它只服务**动态包**（`dyn-<n>`，`evaluateHostCode` 在 vm 里求值模型写的
+     函数体）；普通 npm 插件跑在宿主进程里，拿到的是真计时器。0.2.3 探针实测：装载时
+     `timerCtx.timeout` / `ctx.timeout` / 全局 `setTimeout` 三条都会触发。
+   - 留痕走**双通道**：`console.error`（落实例日志）＋ `command-result {id:"", detail}` 帧
+     （落 launcher 的 app.log）。刻意不用 `ctx.logger`：实测它的输出两个日志都不进。
 3. launcher 侧另有看门狗：ack 后 20s 进程还没退，就强制收掉进程树并按「自重启」重新
    拉起（`launcher_bridge.go` 的 `armRestartWatchdog` + `managedProcess.forceRestart`）。
    插件退出失败最多多花 20 秒，不会把实例卡在"已确认却不动"的状态。

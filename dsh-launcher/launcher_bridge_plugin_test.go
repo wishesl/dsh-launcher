@@ -172,8 +172,15 @@ func TestBridgeRestartEndToEndWithRealPlugin(t *testing.T) {
 	if !strings.Contains(out, "RESTART TOOL RESULT") || !strings.Contains(out, "restarting") {
 		t.Fatalf("工具没有走到 restarting（ack 没回来？）\nstdout=%s\nstderr=%s", out, errOut)
 	}
-	if !strings.Contains(out, "退化为 process.exit(0)") {
-		t.Fatalf("取不到 appExit 时必须走硬退出兜底\nstdout=%s\nstderr=%s", out, errOut)
+	// 退出阶梯必须留痕（restartTrace 走 console.error → stderr，双通道之一）。
+	if !strings.Contains(errOut, "已装载（plugin") {
+		t.Fatalf("插件装载打点应该出现在 stderr\nstdout=%s\nstderr=%s", out, errOut)
+	}
+	if !strings.Contains(errOut, "重启：ack 已收到，开始退出") {
+		t.Fatalf("重启退出这一步没有被执行（Host 计时器没排上？）\nstdout=%s\nstderr=%s", out, errOut)
+	}
+	if !strings.Contains(errOut, "取不到 appExit，直接硬退") || !strings.Contains(errOut, "兜底硬退：拿不到 appExit") {
+		t.Fatalf("取不到 appExit 时必须走硬退出兜底且留痕\nstdout=%s\nstderr=%s", out, errOut)
 	}
 	// 3) 桥接侧确实把重启标志记上了（exit-reconcile 靠它决定重新拉起）。
 	if !app.bridge.consumeRestart("inst-a", "L1") {
