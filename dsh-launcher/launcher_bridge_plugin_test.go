@@ -371,6 +371,89 @@ func TestPluginTimerGuardSurvivesStaleContext(t *testing.T) {
 	}
 }
 
+// 静默回归（0.2.7）：真机 2026-10-02 00:58:33 日志
+//
+//	dsh: warning: 1 entry did not activate
+//	mkt-client-dsh-launcher-plugin (…/node_modules/dsh-launcher-plugin/lib/index.js):
+//	  Error: tool "dsh-restart" is already registered
+//	    at trackRestartTool (…/lib/index.js:871:22)
+//
+// 机理：`dsh.client` 声明让宿主 Loader 给同一个包多挂一行（双半包），两行跑同一份 apply，
+// 第二次 ctx.tools.register("dsh-restart") 必撞名。修复前 trackRestartTool 原样 rethrow
+// → 这一行装载失败 → DSH 销毁它的 fiber，而它恰好是最后建会话的那一行（上一行已被
+// beginSession 收掉）→ 插件静默：桥接不连、主题不再跟随。
+//
+// testdata/plugin-duplicate-tool-harness.mjs 用假 ctx 复现（tools.register 抛真机原文）：
+// 修复前的代码在这条测试里 apply 必抛（实测 exit 1，且会话被收掉），修复后必须不抛、
+// 留下"已由另一行装载注册（双半包）"的痕，并且会话还活着。
+func TestPluginDuplicateToolSurvivesSecondRow(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("没有 node，跳过双半包撞名回归测试")
+	}
+	harness := filepath.Join("testdata", "plugin-duplicate-tool-harness.mjs")
+	if _, err := os.Stat(harness); err != nil {
+		t.Fatalf("找不到 harness: %v", err)
+	}
+
+	outFile, err := os.CreateTemp(t.TempDir(), "plugin-dup-tool-out-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer outFile.Close()
+	errFile, err := os.CreateTemp(t.TempDir(), "plugin-dup-tool-err-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer errFile.Close()
+
+	// harness 自己会设 DSH_LAUNCHER*（要走 supervised 分支去连一个连不上的桥接），
+	// 这里仍然显式剔掉继承来的值，避免真机环境串味。
+	env := make([]string, 0, len(os.Environ()))
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "DSH_LAUNCHER") || strings.HasPrefix(kv, "DSH_INSTANCE_ID") || strings.HasPrefix(kv, "DSH_LAUNCH_ID") {
+			continue
+		}
+		env = append(env, kv)
+	}
+
+	cmd := exec.Command(node, "--import", "./testdata/plugin-test-register.mjs", harness)
+	cmd.Env = env
+	cmd.Stdout = outFile
+	cmd.Stderr = errFile
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("启动 harness 失败: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	select {
+	case werr := <-done:
+		if werr != nil {
+			t.Fatalf("harness 非 0 退出：撞名注册把这一行装载弄死了（真机上插件会静默）\n%v\nstdout=%s\nstderr=%s",
+				werr, readFileString(outFile.Name()), readFileString(errFile.Name()))
+		}
+	case <-time.After(30 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatalf("harness 30s 没结束\nstdout=%s\nstderr=%s",
+			readFileString(outFile.Name()), readFileString(errFile.Name()))
+	}
+
+	out := readFileString(outFile.Name())
+	errOut := readFileString(errFile.Name())
+	for _, marker := range []string{"HARNESS DUP TOOL OK", "HARNESS OK"} {
+		if !strings.Contains(out, marker) {
+			t.Fatalf("缺少 %s\nstdout=%s\nstderr=%s", marker, out, errOut)
+		}
+	}
+	if !strings.Contains(errOut, "已由另一行装载注册（双半包）") {
+		t.Fatalf("撞名注册没有留下护栏痕\nstdout=%s\nstderr=%s", out, errOut)
+	}
+	if strings.Contains(errOut, "装载会话 #1 结束") {
+		t.Fatalf("撞名注册之后会话被收掉了（插件会静默）\nstdout=%s\nstderr=%s", out, errOut)
+	}
+}
+
 func hasCapability(report pluginCapabilityReport, id string) bool {
 	for _, c := range report.Capabilities {
 		if c.ID == id && c.OK {

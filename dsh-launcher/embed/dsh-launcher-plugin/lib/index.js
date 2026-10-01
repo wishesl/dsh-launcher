@@ -865,15 +865,30 @@ function relaxEmbedAuth(ctx) {
 }
 //#endregion
 
-/** 注册工具的包装：把"注册成功 / 失败"记进能力（随握手上报）。 */
+/**
+ * 注册工具的包装：把"注册成功 / 失败"记进能力（随握手上报）。
+ *
+ * 这里**绝不往外抛**：apply 里任何一处抛出都会让这一行装载失败（真机日志
+ * `1 entry did not activate` + `tool "dsh-restart" is already registered`），而双半包
+ * （`dsh.client` 声明让宿主 Loader 多挂一行）下第二行必然撞名 —— 抛出去就等于
+ * 把最后建会话的那一行弄死，插件进入静默（见 README「装载会话」）。
+ * 撞名时工具已由另一行注册好，功能没缺，按成功上报。
+ */
 function trackRestartTool(register) {
 	try {
 		const disposable = register();
 		setCapability("restartTool", true);
 		return disposable;
 	} catch (error) {
-		setCapability("restartTool", false, `工具注册失败：${error.message}`);
-		throw error;
+		const message = error?.message ?? String(error);
+		if (/already registered/i.test(message)) {
+			setCapability("restartTool", true);
+			guardTrace(`工具 dsh-restart 已由另一行装载注册（双半包），本次跳过：${message}`);
+			return null;
+		}
+		setCapability("restartTool", false, `工具注册失败：${message}`);
+		guardTrace(`工具 dsh-restart 注册失败（已忽略，不影响主题同步）：${message}`);
+		return null;
 	}
 }
 
@@ -1007,7 +1022,10 @@ function apply(ctx) {
 	ctxRef = ctx;
 	try {
 		ctx.effect(() => () => {
-			if (session === s) endSession("fiber 销毁");
+			if (session === s) {
+				endSession("fiber 销毁");
+				if (!session) guardTrace("没有存活会话（fiber 已销毁且没有新的装载），插件转入静默，等下一次装载");
+			}
 		});
 	} catch (error) {
 		guardTrace(`挂会话清理失败（不影响功能）：${error?.message ?? String(error)}`);

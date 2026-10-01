@@ -130,6 +130,22 @@ launcher /ws  ◄── page-hello ──────  dsh-launcher-plugin 客�
 `TestPluginTimerGuardSurvivesStaleContext` —— 用假 ctx 复现同一时序（失效后 `timeout` 抛
 真机原文的错）：0.2.6 的代码在这条用例里必崩（exit 1，栈落在 `poll`），0.2.7 必须活着退出。
 
+**第二处（同日 00:58:33 真机，0.2.7 首跑暴露）**：双半包的第二行装载撞名 ——
+`ctx.tools.register("dsh-restart")` 第二次必然抛
+`tool "dsh-restart" is already registered`。修复前 `trackRestartTool` 把这个错**原样 rethrow**
+→ 该行 `dsh: warning: 1 entry did not activate` → DSH 销毁它的 fiber；而它恰好是**最后建会话的
+那一行**（上一行已被 `beginSession` 收掉）→ 插件转入**静默**：桥接不连、主题不再跟随
+（0.2.7 之前的表现是崩溃，现在是安静地不工作，更难发现）。
+
+0.2.7 起 `trackRestartTool` **绝不外抛**：撞名按成功上报（工具已由另一行注册好，功能没缺，
+留痕 `工具 dsh-restart 已由另一行装载注册（双半包），本次跳过`），其它注册失败只记能力 +
+留痕 `工具 dsh-restart 注册失败（已忽略，不影响主题同步）`。会话收尾时若发现"没有存活会话"
+也会留一行痕，方便下次一眼看出静默。
+
+回归锁：`dsh-launcher/testdata/plugin-duplicate-tool-harness.mjs` + Go 用例
+`TestPluginDuplicateToolSurvivesSecondRow`（修复前 apply 必抛且会话被收掉，修复后必须不抛、
+会话还活着）。
+
 ## dsh-restart
 
 确认词 `restart-dsh` 不变；子代理/无会话/重复请求护栏不变。区别：
