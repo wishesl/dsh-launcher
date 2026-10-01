@@ -212,7 +212,7 @@
   padding: 12px 14px;
 }
 .installed-row:hover { border-color: var(--border); }
-/* 内置插件 dsh-self-mcp 面板：与普通已装行区分 */
+/* 内置插件 dsh-launcher-plugin 面板：与普通已装行区分 */
 .self-restart-panel {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent-soft) 35%, var(--panel));

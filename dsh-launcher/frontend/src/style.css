@@ -45,6 +45,38 @@
   --sp-6: 24px;
 
   --mono: 'Cascadia Code', 'JetBrains Mono', Consolas, 'Courier New', monospace;
+
+  /* ---------- 换肤用：派生 token ----------
+     主题同步（dsh:theme → <html data-theme>）只覆盖 token，规则本身不写死颜色。
+     这里几个是"必须有主题变体、又只有自己知道"的角色：
+     - --on-accent：落在实心 accent 背景上的文字（浅色主题是白，深色主题是深墨）
+     - --brand-grad：品牌方块 / 主按钮的墨黑渐变（深色主题翻成浅色）
+     - --dot：中性状态点（非绿非红，只表示"无状态"）
+     - --danger-text / --ok-text / --ok-soft / --ok-border：状态色的文字面与浅底，
+       直接用 --red 当文字色在深色面板上会发闷，所以单独一档。
+     - --scroll-thumb：滚动条滑块（默认透明，hover 才显）
+     - --overlay：弹窗遮罩
+     - --skeleton-a/--skeleton-b：骨架屏微光的两端
+     深色覆盖段见文件末尾（同时给 [data-theme="dark"] 和系统暗色下的 [data-theme="system"]）。*/
+  --on-accent: #ffffff;
+  --brand-grad: linear-gradient(135deg, #2b3142, #141b2e);
+  --brand-grad-btn: linear-gradient(180deg, #2b3142, var(--accent-strong));
+  --dot: #c2c8d6;
+  /* 停机状态的左侧色条（中性灰，不是"错误"） */
+  --rail-off: #b6bdcc;
+  --danger-text: #b91c1c;
+  --ok-text: #15803d;
+  --ok-soft: #f0fdf4;
+  --ok-border: #86efac;
+  --danger-soft: #fef2f2;
+  --scroll-thumb: #d3d8e3;
+  --scroll-thumb-hover: #b3bacb;
+  --overlay: rgba(20, 27, 46, 0.45);
+  --skeleton-a: #f0f2f8;
+  --skeleton-b: #f8f9fc;
+  --switch-track: #d4d9e4;
+  --switch-knob: #ffffff;
+  --field-bg: #ffffff;
 }
 
 * { box-sizing: border-box; }
@@ -132,7 +164,7 @@ html, body, #root {
   width: 100%;
   min-height: 0;
   border: none;
-  background: #fff;
+  background: var(--panel);
 }
 .embed-empty {
   flex: 1;
@@ -168,14 +200,14 @@ html, body, #root {
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn-sm { padding: 6px 11px; font-size: 12.5px; border-radius: 7px; }
 .btn-icon { width: 30px; height: 30px; padding: 0; display: inline-grid; place-items: center; line-height: 0; }
-.btn-primary { background: linear-gradient(180deg, #2b3142, var(--accent-strong)); color: #fff; box-shadow: 0 2px 8px rgba(20, 27, 46, .22); }
+.btn-primary { background: var(--brand-grad-btn); color: var(--on-accent); box-shadow: 0 2px 8px rgba(20, 27, 46, .22); }
 .btn-primary:hover:not(:disabled) { filter: brightness(1.08); box-shadow: 0 3px 12px rgba(20, 27, 46, .28); }
-.btn-danger { background: var(--red); color: #fff; }
+.btn-danger { background: var(--red); color: var(--on-accent); }
 .btn-danger:hover:not(:disabled) { background: #c52222; }
 .btn-ghost { border-color: var(--border); background: var(--panel); }
 .btn-ghost:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .btn-accent { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
-.btn-accent:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.btn-accent:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
 .danger-text { color: var(--red); }
 .danger-text:hover:not(:disabled) { border-color: var(--red) !important; color: var(--red) !important; background: var(--red-soft) !important; }
 
@@ -198,8 +230,8 @@ html, body, #root {
   border-radius: 10px;
   display: grid; place-items: center;
   font-weight: 800; font-size: 14px; letter-spacing: .5px;
-  color: #fff;
-  background: linear-gradient(135deg, #2b3142, #141b2e);
+  color: var(--on-accent);
+  background: var(--brand-grad);
   box-shadow: 0 4px 12px rgba(20, 27, 46, .22);
 }
 /* 品牌图标只用裸 mark：旧版是「白底 + 1px 描边 + 阴影 + 内边距」的方块，
@@ -264,7 +296,7 @@ html, body, #root {
   background: var(--panel);
   font-size: 12.5px;
 }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: #c2c8d6; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dot); }
 .dot-live { background: var(--green); box-shadow: 0 0 8px rgba(22, 163, 74, .5); }
 .dot-warn { background: var(--amber); box-shadow: 0 0 8px rgba(217, 119, 6, .5); }
 .chip-label { color: var(--text-3); font-size: 11.5px; }
@@ -306,7 +338,7 @@ html, body, #root {
      让它和顶栏、右栏形成一个整体，只在窗口最左下角收出圆角与外框呼应。 */
   border-radius: 0 0 0 14px;
   /* 左/右分割线：比默认 border 更深一档，让两栏边界一眼能看出来。 */
-  border-right: 1px solid #c8cddb;
+  border-right: 1px solid var(--border);
   box-shadow: var(--shadow-card);
   overflow: hidden;
 }
@@ -375,7 +407,7 @@ html, body, #root {
 }
 .side-status-dot {
   width: 8px; height: 8px; border-radius: 50%;
-  background: #c8cddb; flex: none;
+  background: var(--rail-off); flex: none;
 }
 .side-status-dot.on {
   background: var(--green);
@@ -477,7 +509,7 @@ html, body, #root {
 .compat-badge {
   display: inline-grid; place-items: center;
   min-width: 16px; height: 16px; padding: 0 4px;
-  border-radius: 999px; background: var(--red); color: #fff;
+  border-radius: 999px; background: var(--red); color: #fff; /* 红底白字：两个主题都够对比，固定不换皮 */
   font-size: 10.5px; font-weight: 700; line-height: 1;
 }
 .status-strip {
@@ -569,10 +601,10 @@ body.reordering { cursor: grabbing; user-select: none; }
 .rail-running, .rail-ready { --rail: var(--green); }
 .rail-starting, .rail-stopping, .rail-restarting { --rail: var(--amber); }
 .rail-crashed { --rail: var(--red); }
-.rail-stopped { --rail: #b6bdcc; }
+.rail-stopped { --rail: var(--rail-off); }
 
 .instance-card {
-  --rail: #b6bdcc;
+  --rail: var(--rail-off);
   display: flex; flex-direction: row; align-items: stretch; gap: 0;
   background: var(--panel);
   border: 1px solid var(--border-soft);
@@ -981,7 +1013,7 @@ body.resizing .log-drawer { transition: none; }
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   overflow: hidden;
-  background: #f7f8fb;
+  background: var(--panel-2);
 }
 .market-drawer-head {
   flex: none;
@@ -1021,7 +1053,7 @@ body.resizing .log-drawer { transition: none; }
 .log-view {
   flex: 1; min-height: 0;
   overflow-y: auto;
-  background: #f7f8fb;
+  background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
@@ -1035,17 +1067,17 @@ body.resizing .log-drawer { transition: none; }
 .log-system .log-tag { color: var(--accent); }
 .log-stdout .log-tag { color: var(--text-2); }
 .log-stderr .log-tag { color: var(--red); }
-.log-text { color: #232b3c; white-space: pre-wrap; word-break: break-all; }
+.log-text { color: var(--text-2); white-space: pre-wrap; word-break: break-all; }
 .log-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex: none; }
 .log-filter {
   font-size: 12px; padding: 4px 8px;
   border: 1px solid var(--border); border-radius: 7px;
-  background: #fff; color: var(--text);
+  background: var(--field-bg); color: var(--text);
 }
 .log-search {
   flex: 1; font-size: 12px; padding: 4px 10px;
   border: 1px solid var(--border); border-radius: 7px;
-  background: #fff; color: var(--text);
+  background: var(--field-bg); color: var(--text);
 }
 .log-search:focus, .log-filter:focus { outline: none; border-color: var(--accent); }
 .log-hint {
@@ -1057,7 +1089,7 @@ body.resizing .log-drawer { transition: none; }
   font-size: 12.5px; margin-bottom: 8px;
 }
 .log-hint-ok { border-style: solid; color: var(--green); border-color: var(--green); background: var(--green-soft); }
-.log-hint-err { border-style: solid; color: #b91c1c; border-color: var(--red); background: var(--red-soft); }
+.log-hint-err { border-style: solid; color: var(--danger-text); border-color: var(--red); background: var(--red-soft); }
 .log-empty { color: var(--text-3); padding: 18px; text-align: center; }
 
 /* ============================================================
@@ -1105,7 +1137,7 @@ body.resizing .log-drawer { transition: none; }
 .env-output {
   margin: 4px 0 0;
   max-height: 180px; overflow-y: auto;
-  background: #f7f8fb;
+  background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
@@ -1197,7 +1229,7 @@ body.resizing .log-drawer { transition: none; }
 @keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
 .skeleton-card {
   border-radius: 12px;
-  background: linear-gradient(90deg, #f0f2f8 25%, #f8f9fc 50%, #f0f2f8 75%);
+  background: linear-gradient(90deg, var(--skeleton-a) 25%, var(--skeleton-b) 50%, var(--skeleton-a) 75%);
   background-size: 800px 100%;
   animation: shimmer 1.3s infinite linear;
   min-height: 96px;
@@ -1226,8 +1258,8 @@ body.resizing .log-drawer { transition: none; }
   width: 40px;
   height: 22px;
   border-radius: 999px;
-  background: #d4d9e4;
-  border: 1px solid #c6ccd9;
+  background: var(--switch-track);
+  border: 1px solid var(--border);
   transition: background .15s, border-color .15s;
 }
 .switch-track::after {
@@ -1238,7 +1270,7 @@ body.resizing .log-drawer { transition: none; }
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--switch-knob);
   box-shadow: 0 1px 3px rgba(20, 27, 46, .25);
   transition: transform .15s;
 }
@@ -1285,12 +1317,12 @@ body.resizing .log-drawer { transition: none; }
 .ver-row { padding: 6px; border-radius: 6px; font-size: 12.5px; }
 .ver-row:hover { background: var(--panel-2); }
 .ver-row.latest { background: var(--accent-soft); }
-.tag-latest { background: var(--green); color: #fff; border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 700; }
-.tag-next { background: var(--amber); color: #fff; border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 700; }
+.tag-latest { background: var(--green); color: var(--on-accent); border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 700; }
+.tag-next { background: var(--amber); color: var(--on-accent); border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 700; }
 /* 「最佳适配」= 启动器实际验证过的版本。它是推荐、不是许可：所以用 accent 而不是状态色，
    免得被读成"只有这个能用"（能不能用由右栏「兼容性」的实时探测决定，不按版本号判断）。 */
 .tag-best {
-  background: var(--accent); color: #fff;
+  background: var(--accent); color: var(--on-accent);
   border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 700;
   margin-right: 6px;
 }
@@ -1310,7 +1342,7 @@ body.resizing .log-drawer { transition: none; }
    ============================================================ */
 .modal-backdrop {
   position: fixed; inset: 0;
-  background: rgba(20, 27, 46, .45);
+  background: var(--overlay);
   display: grid; place-items: center;
   z-index: 100;
 }
@@ -1389,7 +1421,7 @@ body.resizing .log-drawer { transition: none; }
 .form-error {
   background: var(--red-soft);
   border: 1px solid var(--red);
-  color: #b91c1c;
+  color: var(--danger-text);
   border-radius: var(--radius-sm);
   padding: 7px 10px;
   font-size: 12.5px;
@@ -1432,7 +1464,7 @@ body.resizing .log-drawer { transition: none; }
    ============================================================ */
 .toast {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-  background: #ffffff; color: var(--text);
+  background: var(--field-bg); color: var(--text);
   border: 1px solid var(--border);
   padding: 9px 18px; border-radius: 999px;
   font-size: 13px;
@@ -1441,9 +1473,9 @@ body.resizing .log-drawer { transition: none; }
   max-width: min(720px, 90vw);
 }
 .toast-error {
-  background: #fef2f2;
+  background: var(--danger-soft);
   border-color: var(--red);
-  color: #b91c1c;
+  color: var(--danger-text);
 }
 
 /* 全局滚动条：窄、淡、默认隐藏；只有 hover 到内容区或滚动条本身时才浮现。
@@ -1456,14 +1488,14 @@ body.resizing .log-drawer { transition: none; }
   background: transparent;
   border-radius: 6px;
 }
-*:hover::-webkit-scrollbar-thumb { background: #d3d8e3; }
-*:hover::-webkit-scrollbar-thumb:hover { background: #b3bacb; }
+*:hover::-webkit-scrollbar-thumb { background: var(--scroll-thumb); }
+*:hover::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
 * {
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
 }
 *:hover {
-  scrollbar-color: #d3d8e3 transparent;
+  scrollbar-color: var(--scroll-thumb) transparent;
 }
 
 /* ============================================================
@@ -1507,7 +1539,7 @@ button.brand-ver:hover { border-color: var(--accent); color: var(--accent); back
   background: var(--panel-2);
 }
 .update-badge.new { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
-.update-badge.ok { border-color: #16a34a; color: #15803d; background: #f0fdf4; }
+.update-badge.ok { border-color: #16a34a; color: var(--ok-text); background: var(--ok-soft); }
 .update-badge.muted { color: var(--text-3); }
 
 .update-meta {
@@ -1551,15 +1583,15 @@ button.brand-ver:hover { border-color: var(--accent); color: var(--accent); back
 
 .update-done {
   font-size: 13px;
-  color: #15803d;
-  background: #f0fdf4;
-  border: 1px solid #86efac;
+  color: var(--ok-text);
+  background: var(--ok-soft);
+  border: 1px solid var(--ok-border);
   border-radius: var(--radius-sm);
   padding: 9px 12px;
 }
 .update-error {
-  margin: 0; font-size: 12.5px; color: #b91c1c;
-  background: #fef2f2; border: 1px solid var(--red);
+  margin: 0; font-size: 12.5px; color: var(--danger-text);
+  background: var(--danger-soft); border: 1px solid var(--red);
   border-radius: var(--radius-sm); padding: 9px 12px;
 }
 
@@ -1594,3 +1626,154 @@ button.brand-ver:hover { border-color: var(--accent); color: var(--accent); back
   padding: 10px 12px;
 }
 .update-restart-ask p { margin: 0; font-size: 12.5px; color: var(--text); }
+
+/* ============================================================
+   深色主题（跟随实例内 dsh-launcher-plugin 上报的 ui-theme）
+   ------------------------------------------------------------
+   见《dsh-launcher-plugin实现方案.md》§2.4 与 src/theme.ts：
+     data-theme="light"  → 不覆盖，用上面 :root 的浅色 token
+     data-theme="dark"   → 下面这段
+     data-theme="system" → 这段，但只在系统偏好是暗色时生效
+   所以下面两份**内容完全一致**，改一份必须同步另一份（用 :is() 合并会被
+   Vite 3 / esbuild 的 CSS 压缩削平，所以宁可老实写两遍）。
+   浅色是缺省：data-theme 缺失时（极早期的首帧、或非 Wails 预览）永远是浅色。
+   ============================================================ */
+
+/* ---------- 深色 token（两份的公共内容，改这里要同步改下面那份） ---------- */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* surfaces：从最暗的底到最亮的卡，层级与浅色一一对应、只是方向相反 */
+  --bg: #0d1017;
+  --panel: #171b24;
+  --panel-2: #1f2430;
+  --panel-3: #29303d;
+  --border: #2f3644;
+  --border-soft: #262c39;
+
+  /* text */
+  --text: #e8ebf2;
+  --text-2: #a7b0c0;
+  --text-3: #737d90;
+  --muted: #8892a5;
+
+  /* 默认强调色翻成浅墨：深色面板上细描边/文字用它才有对比。
+     实心填充的两个例外（主按钮的墨黑渐变、切换开关的 on 态）单独覆盖，见下。 */
+  --accent: #e8ebf2;
+  --accent-strong: #ffffff;
+  --accent-soft: rgba(232, 235, 242, 0.13);
+
+  /* 状态色：亮一档，才在深底上有足够对比 */
+  --green: #34d399;
+  --green-soft: rgba(52, 211, 153, 0.16);
+  --red: #f87171;
+  --red-soft: rgba(248, 113, 113, 0.16);
+  --amber: #fbbf24;
+  --amber-soft: rgba(251, 191, 36, 0.16);
+
+  /* shape & elevation：深色下阴影要更沉，否则卡片浮不起来 */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-pop: 0 14px 44px rgba(0, 0, 0, 0.55);
+
+  /* 派生 token */
+  --on-accent: #0d1017;                 /* 浅墨底上的文字改深色 */
+  --brand-grad: linear-gradient(135deg, #eef1f7, #b9c0ce);
+  --brand-grad-btn: linear-gradient(180deg, #f4f6fa, #c8cfdb);
+  --dot: #4a5265;
+  --rail-off: #39414f;
+  --danger-text: #fca5a5;               /* 状态色的"文字面"：深底上要更亮 */
+  --ok-text: #6ee7a8;
+  --ok-soft: rgba(52, 211, 153, 0.14);
+  --ok-border: rgba(52, 211, 153, 0.45);
+  --danger-soft: rgba(248, 113, 113, 0.14);
+  --scroll-thumb: #39414f;
+  --scroll-thumb-hover: #4c5566;
+  --overlay: rgba(0, 0, 0, 0.6);
+  --skeleton-a: #1f2430;
+  --skeleton-b: #262d3a;
+  --switch-track: #39414f;
+  --switch-knob: #c8cfdb;
+  --field-bg: #1f2430;
+}
+
+/* 主按钮：token 已经翻成浅色，墨黑阴影要在浅底按钮上才成立 */
+[data-theme="dark"] .btn-primary { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); }
+[data-theme="dark"] .btn-primary:hover:not(:disabled) { box-shadow: 0 3px 12px rgba(0, 0, 0, 0.5); }
+/* 品牌方块：浅底 + 深字（渐变已经把底色翻过来了，字也要跟着翻） */
+[data-theme="dark"] .brand-logo {
+  color: #0d1017;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+/* 切换开关 on 态：用深墨实心 + 浅色滑块，跟主按钮同一套语言（不要跟着 --accent 翻白） */
+[data-theme="dark"] .switch input:checked + .switch-track {
+  background: var(--text-2);
+  border-color: var(--text-2);
+}
+[data-theme="dark"] .switch input:checked + .switch-track::after { background: #171b24; }
+/* 交通灯圆点、自更新终端窗口是"固定的实体"，两个主题下都不该换皮 */
+[data-theme="dark"] .update-log { border-color: var(--border-soft); }
+
+/* ---------- 系统暗色：与上面完全一致，只改外层选择器 ---------- */
+@media (prefers-color-scheme: dark) {
+  [data-theme="system"] {
+    color-scheme: dark;
+
+    --bg: #0d1017;
+    --panel: #171b24;
+    --panel-2: #1f2430;
+    --panel-3: #29303d;
+    --border: #2f3644;
+    --border-soft: #262c39;
+
+    --text: #e8ebf2;
+    --text-2: #a7b0c0;
+    --text-3: #737d90;
+    --muted: #8892a5;
+
+    --accent: #e8ebf2;
+    --accent-strong: #ffffff;
+    --accent-soft: rgba(232, 235, 242, 0.13);
+
+    --green: #34d399;
+    --green-soft: rgba(52, 211, 153, 0.16);
+    --red: #f87171;
+    --red-soft: rgba(248, 113, 113, 0.16);
+    --amber: #fbbf24;
+    --amber-soft: rgba(251, 191, 36, 0.16);
+
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-pop: 0 14px 44px rgba(0, 0, 0, 0.55);
+
+    --on-accent: #0d1017;
+    --brand-grad: linear-gradient(135deg, #eef1f7, #b9c0ce);
+    --brand-grad-btn: linear-gradient(180deg, #f4f6fa, #c8cfdb);
+    --dot: #4a5265;
+    --rail-off: #39414f;
+    --danger-text: #fca5a5;
+    --ok-text: #6ee7a8;
+    --ok-soft: rgba(52, 211, 153, 0.14);
+    --ok-border: rgba(52, 211, 153, 0.45);
+    --danger-soft: rgba(248, 113, 113, 0.14);
+    --scroll-thumb: #39414f;
+    --scroll-thumb-hover: #4c5566;
+    --overlay: rgba(0, 0, 0, 0.6);
+    --skeleton-a: #1f2430;
+    --skeleton-b: #262d3a;
+    --switch-track: #39414f;
+    --switch-knob: #c8cfdb;
+    --field-bg: #1f2430;
+  }
+  [data-theme="system"] .btn-primary { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); }
+  [data-theme="system"] .btn-primary:hover:not(:disabled) { box-shadow: 0 3px 12px rgba(0, 0, 0, 0.5); }
+  [data-theme="system"] .brand-logo {
+    color: #0d1017;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  }
+  [data-theme="system"] .switch input:checked + .switch-track {
+    background: var(--text-2);
+    border-color: var(--text-2);
+  }
+  [data-theme="system"] .switch input:checked + .switch-track::after { background: #171b24; }
+  [data-theme="system"] .update-log { border-color: var(--border-soft); }
+}
+

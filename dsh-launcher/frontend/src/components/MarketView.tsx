@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api, errMsg } from '../api';
-import { githubRepoOf, githubURLFromSpec, specRepoOf } from '../util';
+import { BUILTIN_PLUGIN_NAME, githubRepoOf, githubURLFromSpec, specRepoOf } from '../util';
 import type {
   FavoriteDraft,
   FavoritePlugin,
@@ -269,9 +269,9 @@ export default function MarketView({
     return m;
   }, [updates]);
   const updatable = updates?.updatable ?? 0;
-  // 内置插件 dsh-self-mcp：current = 已装副本版本（.dsh-builtin 里的 package.json），
+  // 内置桥接插件 dsh-launcher-plugin：current = 已装副本版本（.dsh-builtin 里的 package.json），
   // latest = 启动器内嵌版本。两者不一致时给出「更新」入口 —— 内置插件唯一的升级路径。
-  const builtinCheck = updatesByName.get('dsh-self-mcp');
+  const builtinCheck = updatesByName.get(BUILTIN_PLUGIN_NAME);
   const builtinInstalledVer = builtinCheck?.current ?? '';
   const builtinBundledVer = builtinCheck?.latest ?? '';
   const builtinHasUpdate = !!builtinCheck?.hasUpdate;
@@ -478,7 +478,7 @@ export default function MarketView({
     runUpdate(check, false);
   };
 
-  // 内置插件 dsh-self-mcp（自管理重启）：安装到全局 profile。
+  // 内置桥接插件 dsh-launcher-plugin（主题同步 / dsh-restart / 内嵌支持）：安装到全局 profile。
   const installSelfRestart = async () => {
     if (!targetInstance) {
       showToast('请先在主界面添加实例，再选择安装目标', 'error');
@@ -496,8 +496,8 @@ export default function MarketView({
       } else if (r.ok) {
         showToast(
           builtinHasUpdate
-            ? `已把 dsh-self-mcp 覆盖为内置 v${builtinBundledVer}，重启实例后生效`
-            : '已安装/重新安装 dsh-self-mcp，重启实例后生效（实例表单可勾选「启用自管理重启」）'
+            ? `已把 ${BUILTIN_PLUGIN_NAME} 覆盖为内置 v${builtinBundledVer}，重启实例后生效`
+            : `已安装/重新安装 ${BUILTIN_PLUGIN_NAME}，重启实例后生效`
         );
         if (wasRunning) {
           showToast('正在重新启动实例…');
@@ -523,7 +523,12 @@ export default function MarketView({
       showToast('请先添加实例', 'error');
       return;
     }
-    if (!window.confirm('确定卸载内置插件 dsh-self-mcp？相关实例的「自管理重启」勾选将失效。')) return;
+    if (
+      !window.confirm(
+        `确定卸载内置插件 ${BUILTIN_PLUGIN_NAME}？\n卸载后：主题不会跟随 DSH 切换、dsh-restart 工具不可用、内嵌访问校验也不再放宽。`
+      )
+    )
+      return;
     const wasRunning = await stopIfRunning();
     if (targetInstance.status !== 'stopped' && targetInstance.status !== 'crashed' && !wasRunning) return;
     onClearMarketLogs();
@@ -532,7 +537,7 @@ export default function MarketView({
     try {
       const r = await api.uninstallSelfRestartPlugin(targetId);
       if (r.ok) {
-        showToast('已卸载 dsh-self-mcp');
+        showToast(`已卸载 ${BUILTIN_PLUGIN_NAME}`);
         if (wasRunning) {
           showToast('正在重新启动实例…');
           await api.launchInstance(targetId);
@@ -896,11 +901,11 @@ export default function MarketView({
 
       {tab === 'installed' && (
         <div className="market-installed">
-          {/* 内置插件：dsh-self-mcp（自管理重启） */}
+          {/* 内置插件：dsh-launcher-plugin（主题同步 / dsh-restart / 内嵌支持） */}
           <div className="installed-row self-restart-panel">
             <div className="installed-info">
               <div className="installed-head">
-                <span className="installed-name">dsh-self-mcp</span>
+                <span className="installed-name">{BUILTIN_PLUGIN_NAME}</span>
                 <span className="pill tag-local">launcher 内置</span>
                 {(selfRestartInstalled ? builtinInstalledVer : builtinBundledVer) && (
                   <span className="installed-version mono">
@@ -912,13 +917,14 @@ export default function MarketView({
                 )}
               </div>
               <div className="installed-desc">
-                自管理重启：启动后各实例可在表单勾选「启用自管理重启」，模型获得 dsh-restart 工具；
-                重启完成后自动向发起会话注入「重启完成」并继续，用于调试需要重启才生效的插件。
-                内置视图（伪桌面版）依赖本插件的会话校验放宽。
+                启动器与实例之间的一条 loopback HTTP 桥，承载三件事：①DSH 切换亮/暗主题时启动器跟着换肤；
+                ②模型获得 dsh-restart 工具，重启完成后自动向发起会话注入「重启完成」并继续；
+                ③内置视图（伪桌面版）的会话校验放宽。
+                装在全局 profile 里，装了就自动挂载，不需要按实例勾选。
               </div>
               <div className="installed-sub">
                 <span className="mono">{selfRestartInstalled ? '已安装到全局 profile' : '未安装'}</span>
-                <span> · 未勾选的实例不挂载，无残留</span>
+                <span> · 未安装时以上功能静默降级，不影响启动</span>
                 {builtinHasUpdate && (
                   <span className="pill tag-warn">
                     已装副本 v{builtinInstalledVer} 旧于内置 v{builtinBundledVer}

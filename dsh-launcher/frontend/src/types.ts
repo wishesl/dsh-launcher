@@ -24,7 +24,10 @@ export interface Instance {
   buildCmd?: string;    // 构建命令（源码启动，「安装到目录」第二步，默认 "pnpm run build"）
   startCmd?: string;    // 启动命令（源码启动，「启动」时执行，默认 "pnpm dsh web"）
   autoStart: boolean;
-  selfRestart?: boolean; // 自管理重启（dsh-restart）：启动时挂载 dsh-self-mcp 插件（需已安装）
+  /** @deprecated 旧实例配置里的历史字段（自管理重启勾选）。挂载桥接插件现在
+   *  只取决于「全局是否装了 dsh-launcher-plugin」，与实例无关，UI 已无此项；
+   *  保留只为读写老 instances.json 时不丢字段。 */
+  selfRestart?: boolean;
   createdAt: any;       // RFC3339 string
   pid: number;
   status: InstanceStatus | string; // union kept loose for forward compat
@@ -271,10 +274,21 @@ export interface CapabilityReport {
   instanceName: string;
   version: string;
   status: string;
-  plugin: string;   // "dsh-self-mcp@0.2.0"；插件未报告时为空
+  plugin: string;   // "dsh-launcher-plugin@0.2.0"；插件未报告时为空
   pluginAt: string; // 报告时间（RFC3339）
   stale: boolean;   // 报告来自上一个进程（pid 不匹配）
   items: CapabilityItem[];
+}
+
+// ---------- 主题同步（dsh-launcher-plugin → launcher，见《dsh-launcher-plugin实现方案.md》） ----------
+
+/**
+ * `dsh:theme` 的载荷。`preference` 由后端归一为 `light | dark | system` 三态：
+ * system 交给 CSS 的 `prefers-color-scheme` 解析，前端不猜。
+ */
+export interface ThemeEvent {
+  instanceId: string;
+  preference: 'light' | 'dark' | 'system' | string;
 }
 
 // ---------- 启动器自更新（见 update.go /《版本升级实现方案.md》） ----------

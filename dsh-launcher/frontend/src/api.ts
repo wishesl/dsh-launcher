@@ -86,6 +86,7 @@ import type {
   ServiceState,
   ShareImportResult,
   StatusEvent,
+  ThemeEvent,
   UIWidths,
   UpdateCheckResult,
   UpdateSettings,
@@ -135,7 +136,8 @@ export const api = {
     InstallPlugin(instanceId, entryUrl),
   uninstallPlugin: (instanceId: string, name: string): Promise<MarketOpResult> =>
     UninstallPlugin(instanceId, name),
-  // 内置插件 dsh-self-mcp（自管理重启）
+  // 内置桥接插件 dsh-launcher-plugin（主题同步 / dsh-restart / 内嵌支持）；
+  // 函数名沿用历史的 SelfRestart 前缀，避免动 Wails 绑定名。
   selfRestartPluginInstalled: (): Promise<boolean> => SelfRestartPluginInstalled(),
   installSelfRestartPlugin: (instanceId: string): Promise<MarketOpResult> =>
     InstallSelfRestartPlugin(instanceId),
@@ -232,6 +234,13 @@ export const api = {
   },
   offNotice(): void {
     EventsOff('dsh:notice');
+  },
+  /** 实例内 dsh-launcher-plugin 推送的 ui-theme 变化（方案 §2.1）。 */
+  onTheme(cb: (e: ThemeEvent) => void): void {
+    EventsOn('dsh:theme', cb);
+  },
+  offTheme(): void {
+    EventsOff('dsh:theme');
   },
   onCloseRequest(cb: () => void): void {
     EventsOn('dsh:close-requested', cb);

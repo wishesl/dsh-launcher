@@ -132,7 +132,6 @@ export default function InstanceCard({
     instance.localVersion ? `本地副本：${instance.localVersion}${outdated ? '（有新版）' : ''}` : '本地无副本',
     instance.pid > 0 ? `PID ${instance.pid}` : null,
     instance.extraArgs ? `args: ${instance.extraArgs}` : null,
-    instance.selfRestart ? 'self-restart' : null,
   ].filter(Boolean).join('\n');
 
   return (

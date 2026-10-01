@@ -4,6 +4,7 @@ import { api, errMsg } from './api';
 import { BrowserOpenURL, Environment } from '../wailsjs/runtime/runtime';
 import type { CapabilityReport, ExitChoice, Instance, LauncherRelease, LayoutMode, LogEvent, LogTab, MarketOpState, RegistryInfo, ServiceState, UpdateOpState, UpdateSettings } from './types';
 import { clamp, capsAlert, embedGateReason, maskUrlSecrets } from './util';
+import { applyThemePreference, bootstrapTheme } from './theme';
 import Header from './components/Header';
 import Sidebar, { type ViewKey } from './components/Sidebar';
 import VersionView from './components/VersionView';
@@ -219,6 +220,8 @@ export default function App() {
   const updateLogsRef = useRef<string[]>([]);
   // 启动后自检只跑一次：改偏好（或 StrictMode 双挂载）不该反复打 GitHub（匿名限流 60/h）。
   const updateAutoChecked = useRef(false);
+  // 主题初值只 bootstrap 一次（StrictMode 双挂载不该把已收到的实例主题按回系统）。
+  const themeBooted = useRef(false);
   const toastTimer = useRef<number | undefined>(undefined);
   // "本次启动不再提示": remembered exit choice for THIS app run only —
   // deliberately not persisted, the chooser asks again on next launch.
@@ -380,6 +383,14 @@ export default function App() {
     }
   }, [showToast]);
 
+  // 启动时的主题初值（本地缓存 → 系统偏好）。只跑一次：StrictMode 双挂载重启这个
+  // effect 时，实例可能已经推过一次真实主题，重复 bootstrap 会把它按回"系统"闪一下。
+  useEffect(() => {
+    if (themeBooted.current) return;
+    themeBooted.current = true;
+    bootstrapTheme();
+  }, []);
+
   // Re-read the backend's service-reachability snapshot (best-effort).
   const refreshServices = useCallback(async () => {
     try {
@@ -453,6 +464,12 @@ export default function App() {
         setExitAsk(true);
       }
     });
+    // 主题同步：实例内的 dsh-launcher-plugin 推 ui-theme 变化 → 启动器换肤。
+    // preference 由后端归一为 light|dark|system，system 交给 CSS 的
+    // prefers-color-scheme 解析（见 theme.ts 与方案 §2.4）。
+    api.onTheme((e) => {
+      applyThemePreference(e.preference);
+    });
     // 启动器自更新：完整日志 + 进度状态 + 托盘「检查更新」的开启通知。
     // 日志只进弹窗（AGENTS.md §0.1 的显式例外，见《版本升级实现方案.md》§6.3）。
     api.onUpdateLog((e) => {
@@ -495,6 +512,7 @@ export default function App() {
       api.offMarketLog();
       api.offMarketStatus();
       api.offCloseRequest();
+      api.offTheme();
       api.offUpdateLog();
       api.offUpdateStatus();
       api.offUpdateOpen();

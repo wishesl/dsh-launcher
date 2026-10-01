@@ -534,17 +534,6 @@ export default function InstanceForm({ registry, bestFit, editing, onClose, onSa
             </span>
           </div>
 
-          <div className="form-autostart">
-            <Switch
-              checked={!!form.selfRestart}
-              onChange={(v) => set({ selfRestart: v })}
-            />
-            <span>
-              启用自管理重启（dsh-restart）
-              <span className="muted">（需已在全局安装 dsh-self-mcp 插件；启动时挂载 dsh-restart 工具，重启后自动注入「重启完成」并继续）</span>
-            </span>
-          </div>
-
           {error && <div className="form-error">{error}</div>}
         </div>
 
