@@ -54,6 +54,10 @@ const supervised = bridgeURL !== "" && bridgeToken !== "";
 const capabilityState = new Map();
 /** apply() 的 ctx：日志 / timer / appExit。 */
 let ctxRef = null;
+/** DSH 的退出入口（dsh-cmdline 在 host ctx 上 provide 的 appExit），经 inject 缓存。
+ *  真机上出现过 `ctx.get("appExit")` 取不到的情况（2026-10-01 21:29 重启失败），
+ *  所以这里多存一份，取用顺序见 resolveAppExit。 */
+let appExitRef = null;
 /** 当前连接（null = 未连接）。 */
 let socket = null;
 /** 已发起升级、握手还没完成。 */
@@ -653,6 +657,37 @@ function trackRestartTool(register) {
 	}
 }
 
+/**
+ * 取 DSH 的退出入口。返回 { exit, via }，exit 为 null 表示三条路都没拿到。
+ *
+ * 为什么要三条：官方消费者（dsh-cmdline / dsh-headless）用的都是裸 `ctx.get("appExit")`，
+ * 所以它排第一；但真机上这一段没生效（重启请求 ack 之后进程一直活着），而 cordis 的
+ * 服务解析在"祖先后 provide"这种次序下实测三种取法都能拿到（见 .dsh-tmp 的两个探针），
+ * 说明失败可能与具体挂载分支有关。与其赌，不如三条都试，并把用了哪条写进日志。
+ */
+function resolveAppExit(ctx) {
+	if (typeof appExitRef === "function") {
+		return { exit: appExitRef, via: "inject 缓存" };
+	}
+	try {
+		const direct = ctx.get("appExit");
+		if (typeof direct === "function") {
+			return { exit: direct, via: "ctx.get" };
+		}
+	} catch (error) {
+		// 没注册 / 未激活时 cordis 会抛，继续试下一条
+	}
+	try {
+		const prop = ctx.appExit;
+		if (typeof prop === "function") {
+			return { exit: prop, via: "ctx.appExit" };
+		}
+	} catch (error) {
+		// 同上
+	}
+	return { exit: null, via: "" };
+}
+
 function apply(ctx) {
 	ctxRef = ctx;
 	// 能执行到这里就说明插件确实装载了 —— 随握手上报，是面板的第一条。
@@ -662,6 +697,18 @@ function apply(ctx) {
 	// 0) 内嵌支持：connection service 就绪后放宽浏览器会话校验（只有 web 组合才有它）
 	ctx.inject(["connection"], (connectionCtx) => {
 		relaxEmbedAuth(connectionCtx);
+	});
+
+	// 0.5) 退出入口：DSH 的 appExit 由 dsh-cmdline 在 host ctx 上 provide（web 组合里
+	//      排在插件挂载之后）。服务就绪就拿一份缓存起来，dsh-restart 用。
+	ctx.inject(["appExit"], (exitCtx) => {
+		const { exit, via } = resolveAppExit(exitCtx);
+		if (typeof exit === "function") {
+			appExitRef = exit;
+			ctx.logger.info(`[dsh-launcher-plugin] 已取得 appExit（来源：${via}），重启走优雅退出`);
+		} else {
+			ctx.logger.warn("[dsh-launcher-plugin] 拿不到 appExit（重启时会走 process.exit 兜底退出）");
+		}
 	});
 
 	// 1) 主题：settings 就绪 → 初读 + 事件 + 轮询；5s 没就绪给一个可见结论
@@ -758,8 +805,27 @@ function apply(ctx) {
 
 				// 延迟一拍再请求退出：先让 execute 的返回结果落盘
 				setTimeout(() => {
-					const exit = ctx.get("appExit");
-					if (typeof exit === "function") exit(0);
+					const { exit, via } = resolveAppExit(ctxRef ?? ctx);
+					if (typeof exit === "function") {
+						ctx.logger.info(`[dsh-launcher-plugin] 请求 DSH 退出（appExit 来源：${via}）`);
+						try {
+							exit(0);
+							return;
+						} catch (error) {
+							ctx.logger.error(`[dsh-launcher-plugin] appExit 调用失败：${error.message}`);
+						}
+					}
+					// 兜底：拿不到优雅退出入口也必须真的退出。否则 launcher 会一直停在
+					// 「已 ack，等待进程退出」（2026-10-01 21:29 真机事故：点重启没反应），
+					// 而且用户的重启指令已经确认过了，卡住不动才是最坏的结果。
+					// 代价是跳过优雅拆卸（session 内容早已落盘）；回报一帧让 launcher 日志也留痕。
+					ctx.logger.warn("[dsh-launcher-plugin] 取不到 appExit，退化为 process.exit(0)（跳过优雅拆卸）");
+					sendFrame("command-result", {
+						id: "",
+						ok: true,
+						detail: "appExit 不可用，已用 process.exit(0) 兜底退出",
+					});
+					process.exit(0);
 				}, 500);
 
 				return { status: "restarting" };

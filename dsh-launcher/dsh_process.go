@@ -52,6 +52,15 @@ const (
 	defaultSourceStartCmd = "pnpm dsh web"
 )
 
+// waitDelayAfterExit 是"进程已退出、stdout/stderr 管道还没关"时 cmd.Wait() 的
+// 等待上限。插件在拿不到 appExit 时会用 process.exit(0) 兜底退出，此时 MCP 等
+// 孙进程可能仍攥着 launcher 给 `cmd /c npx …` 的管道：没有这个上限，Wait() 会
+// 永远等不到 EOF，exit-reconcile 不执行 —— 实例已经死了却一直显示运行中，自重启
+// 也不会被拉起。到期后 Go 会关闭管道并让 Wait 返回 exec.ErrWaitDelay。
+// 取 5s：与 DSH 自己的 PROCESS_SHUTDOWN_TIMEOUT_MS 对齐，正常退出时管道会立刻
+// 关闭、这个上限根本用不上。
+const waitDelayAfterExit = 5 * time.Second
+
 // sourceStartCommand returns the launch command for a 源码启动 instance: its
 // user-editable 启动命令 (default "pnpm dsh web"), with any extra args appended.
 func sourceStartCommand(inst Instance) string {
@@ -143,12 +152,16 @@ type managedProcess struct {
 	cmd      *exec.Cmd
 	job      *winJob // KILL_ON_JOB_CLOSE: kernel kills the tree even on hard app death
 
-	done       chan struct{}
-	once       sync.Once
-	stopReq    atomic.Bool
-	urlMu      sync.Mutex
-	candidates []string // web URLs advertised by the process output, in order
-	authURL    string   // newest token-bearing URL from the startup log (内嵌模式用)
+	done    chan struct{}
+	once    sync.Once
+	stopReq atomic.Bool
+	// forcedRestart —— 桥接看门狗的强制重启标记：插件 ack 了却没退出时，启动器
+	// 收掉进程树，但要按"自重启"（而不是"用户停止"/"崩溃"）来对账，这样
+	// exit-reconcile 照常重新拉起实例。详见 launcher_bridge.go 的 armRestartWatchdog。
+	forcedRestart atomic.Bool
+	urlMu         sync.Mutex
+	candidates    []string // web URLs advertised by the process output, in order
+	authURL       string   // newest token-bearing URL from the startup log (内嵌模式用)
 }
 
 // newLaunchID 生成一次启动的随机凭据（16 位十六进制）。
@@ -167,6 +180,23 @@ func newLaunchID() string {
 
 func (p *managedProcess) requestStop()        { p.stopReq.Store(true) }
 func (p *managedProcess) stopRequested() bool { return p.stopReq.Load() }
+
+// forceRestart —— 桥接看门狗专用：插件 ack 了却没退出时强制收掉进程树。
+//
+// 与 stop() 的唯一区别是**不置 stopReq**：那一位代表"用户/上层要求停止"，会让
+// exit-reconcile 走"已停止、不再拉起"。这里用户的意图恰恰是"重启"，所以只打
+// forcedRestart 标记（对账时按自重启处理），其余收树动作与 stop() 完全一致。
+func (p *managedProcess) forceRestart() {
+	if p == nil {
+		return
+	}
+	p.forcedRestart.Store(true)
+	if p.done != nil {
+		p.once.Do(func() { close(p.done) })
+	}
+	p.job.close()
+	killProcessTree(p.pid, p.cmd)
+}
 
 func (p *managedProcess) addWebCandidate(u string) {
 	p.urlMu.Lock()
@@ -360,6 +390,8 @@ func (a *App) LaunchInstance(id string) error {
 		a.setStopped(snapshot.ID)
 		return err
 	}
+	// 见 waitDelayAfterExit：孙进程攥着管道时，别让 cmd.Wait() 无限等下去。
+	cmd.WaitDelay = waitDelayAfterExit
 
 	if err := cmd.Start(); err != nil {
 		a.systemLog(snapshot.ID, 0, "启动失败: "+err.Error())
@@ -439,7 +471,13 @@ func (a *App) LaunchInstance(id string) error {
 	go func() {
 		waitErr := cmd.Wait()
 		code, codeText := exitCodeOf(waitErr)
-		crashed := waitErr != nil && !mp.stopRequested()
+		if errors.Is(waitErr, exec.ErrWaitDelay) && code <= 0 {
+			// WaitDelay 到期只说明"进程确实退了、只是 stdout/stderr 还被孙进程攥着"，
+			// 不是异常退出。若当成 crashed，自重启就不会被拉起 —— 这里按干净退出处理，
+			// 并在日志里留下"管道未关闭"的线索（上面 WaitDelay 的注释有背景）。
+			code, codeText, waitErr = 0, "(exit 0, 输出管道未关闭)", nil
+		}
+		crashed := waitErr != nil && !mp.stopRequested() && !mp.forcedRestart.Load()
 		if crashed {
 			a.systemLog(snapshot.ID, mp.pid, "进程异常退出 "+codeText+"（非用户停止）")
 		} else {

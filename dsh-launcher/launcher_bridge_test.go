@@ -59,7 +59,7 @@ func readBridgeFrame(t *testing.T, c *websocket.Conn) bridgeEnvelope {
 func helloFrame(launchID, theme string) bridgeEnvelope {
 	payload, _ := json.Marshal(bridgeConnectPayload{
 		Plugin:        selfRestartPluginName,
-		PluginVersion: "0.2.0",
+		PluginVersion: "0.2.1",
 		ReportedAt:    time.Now().UTC().Format(time.RFC3339),
 		Capabilities:  []pluginCapability{{ID: "pluginLoaded", OK: true}},
 		Theme:         &bridgeTheme{Preference: theme},
@@ -139,7 +139,7 @@ func TestBridgeWebSocketProtocol(t *testing.T) {
 	// hello：全量快照（能力 + 主题）。
 	sendBridgeFrame(t, conn, helloFrame("L1", "dark"))
 	report := waitHandshake(t, app.bridge, "inst-a", "L1")
-	if report.PluginVersion != "0.2.0" || len(report.Capabilities) != 1 || report.Capabilities[0].ID != "pluginLoaded" {
+	if report.PluginVersion != "0.2.1" || len(report.Capabilities) != 1 || report.Capabilities[0].ID != "pluginLoaded" {
 		t.Fatalf("握手内容不对: %+v", report)
 	}
 
@@ -258,5 +258,164 @@ func TestBridgeNewConnectionReplacesOld(t *testing.T) {
 	_ = first.SetReadDeadline(time.Now().Add(2 * time.Second))
 	if _, _, rerr := first.ReadMessage(); rerr == nil {
 		t.Fatal("同实例的新连接必须把旧连接踢掉")
+	}
+}
+
+// 连接断开 = 握手快照作废：否则实例已经停了/插件已经断了，顶栏胶囊还一直显示
+// 「插件已连接」（真机反馈：一直是绿的，不刷新）。
+func TestBridgeDisconnectClearsHandshake(t *testing.T) {
+	app, _ := newSelfRestartTestApp(t)
+	app.bridge.start()
+	t.Cleanup(app.bridge.stop)
+
+	conn, _, err := dialBridge(t, app, app.bridge.token, nil)
+	if err != nil {
+		t.Fatalf("连接失败: %v", err)
+	}
+	sendBridgeFrame(t, conn, helloFrame("L1", "dark"))
+	waitHandshake(t, app.bridge, "inst-a", "L1")
+
+	_ = conn.Close()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := app.bridge.handshake("inst-a"); !ok {
+			// 连接也没了、快照也没了 —— 面板这下只能报「插件未连接」，是与事实一致的结论。
+			app.bridge.mu.Lock()
+			_, stillConnected := app.bridge.clients["inst-a"]
+			app.bridge.mu.Unlock()
+			if stillConnected {
+				t.Fatal("握手清了，连接却还在")
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("断开后握手快照必须一并失效")
+}
+
+// 进程断开后重连（hello）必须把快照恢复：拔线重连不该让能力面板一直空着。
+func TestBridgeReconnectRestoresHandshake(t *testing.T) {
+	app, _ := newSelfRestartTestApp(t)
+	app.bridge.start()
+	t.Cleanup(app.bridge.stop)
+
+	first, _, err := dialBridge(t, app, app.bridge.token, nil)
+	if err != nil {
+		t.Fatalf("连接失败: %v", err)
+	}
+	sendBridgeFrame(t, first, helloFrame("L1", "dark"))
+	waitHandshake(t, app.bridge, "inst-a", "L1")
+	_ = first.Close()
+	waitHandshakeGone(t, app.bridge, "inst-a")
+
+	second, _, err := dialBridge(t, app, app.bridge.token, nil)
+	if err != nil {
+		t.Fatalf("重连失败: %v", err)
+	}
+	defer second.Close()
+	sendBridgeFrame(t, second, helloFrame("L1", "dark"))
+	waitHandshake(t, app.bridge, "inst-a", "L1")
+}
+
+func waitHandshakeGone(t *testing.T, b *launcherBridge, id string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := b.handshake(id); !ok {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("%s 的握手快照该在断开后消失", id)
+}
+
+// ack 之后进程一直不退（插件侧退出调用没生效）→ 看门狗强制收树，但保留"自重启"语义，
+// 让 exit-reconcile 照常重新拉起实例。真机事故：2026-10-01 21:29 点了重启没反应。
+func TestBridgeRestartWatchdogForcesRestart(t *testing.T) {
+	grace := bridgeRestartGrace
+	bridgeRestartGrace = 30 * time.Millisecond
+	t.Cleanup(func() { bridgeRestartGrace = grace })
+
+	app, _ := newSelfRestartTestApp(t)
+	app.bridge.start()
+	t.Cleanup(app.bridge.stop)
+
+	conn, _, err := dialBridge(t, app, app.bridge.token, nil)
+	if err != nil {
+		t.Fatalf("连接失败: %v", err)
+	}
+	defer conn.Close()
+
+	mp := &managedProcess{instanceID: "inst-a", launchID: "L1"}
+	app.mu.Lock()
+	app.processes["inst-a"] = mp
+	app.mu.Unlock()
+
+	sendBridgeFrame(t, conn, helloFrame("L1", "dark"))
+	waitHandshake(t, app.bridge, "inst-a", "L1")
+
+	restartPayload, _ := json.Marshal(bridgeRestartPayload{ID: "r-1", Reason: "看门狗测试"})
+	sendBridgeFrame(t, conn, bridgeEnvelope{
+		Type: frameRestart, InstanceID: "inst-a", LaunchID: "L1", Payload: restartPayload,
+	})
+	if env := readBridgeFrame(t, conn); env.Type != frameRestartResult {
+		t.Fatalf("期望 %s，得到 %s", frameRestartResult, env.Type)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if mp.forcedRestart.Load() {
+			// 强制收树必须仍然按"自重启"对账：stopReq 绝不能置（置了就变成"用户停止"，
+			// exit-reconcile 不会重新拉起，用户看到的是实例被关掉）。
+			if mp.stopRequested() {
+				t.Fatal("看门狗不该置 stopReq：那会让 reconcile 不再拉起实例")
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("ack 后进程没退出，看门狗必须在宽限后强制收树")
+}
+
+// 进程自己按时退出了 → 撤销兜底，别去动下一次启动的新进程。
+func TestBridgeRestartExitDisarmsWatchdog(t *testing.T) {
+	grace := bridgeRestartGrace
+	bridgeRestartGrace = 80 * time.Millisecond
+	t.Cleanup(func() { bridgeRestartGrace = grace })
+
+	app, _ := newSelfRestartTestApp(t)
+	app.bridge.start()
+	t.Cleanup(app.bridge.stop)
+
+	conn, _, err := dialBridge(t, app, app.bridge.token, nil)
+	if err != nil {
+		t.Fatalf("连接失败: %v", err)
+	}
+	defer conn.Close()
+
+	mp := &managedProcess{instanceID: "inst-a", launchID: "L1"}
+	app.mu.Lock()
+	app.processes["inst-a"] = mp
+	app.mu.Unlock()
+
+	sendBridgeFrame(t, conn, helloFrame("L1", "dark"))
+	waitHandshake(t, app.bridge, "inst-a", "L1")
+
+	restartPayload, _ := json.Marshal(bridgeRestartPayload{ID: "r-1"})
+	sendBridgeFrame(t, conn, bridgeEnvelope{
+		Type: frameRestart, InstanceID: "inst-a", LaunchID: "L1", Payload: restartPayload,
+	})
+	if env := readBridgeFrame(t, conn); env.Type != frameRestartResult {
+		t.Fatalf("期望 %s，得到 %s", frameRestartResult, env.Type)
+	}
+
+	// 模拟 exit-reconcile：进程退了，重启标志被消费 → 兜底必须撤销。
+	if !app.bridge.consumeRestart("inst-a", "L1") {
+		t.Fatal("重启标志应属于 L1")
+	}
+	time.Sleep(200 * time.Millisecond)
+	if mp.forcedRestart.Load() {
+		t.Fatal("进程已正常退出，看门狗不该再强制收树")
 	}
 }

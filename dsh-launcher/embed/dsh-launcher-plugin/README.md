@@ -38,7 +38,7 @@ launcher (Go)                                  dsh-launcher-plugin (实例内)
 | `theme` | 增量主题 `{preference}` |
 | `restart` | 请求自重启 `{id, reason, pending}` |
 | `pending-consumed` | 续跑负载已注入成功，launcher 可以清掉 |
-| `command-result` | 启动器命令的应答 `{id, ok, error}`（当前只有 set-theme） |
+| `command-result` | 启动器命令的应答 `{id, ok, error, detail?}`（`set-theme` 用；`detail` 是插件侧要说给 launcher 日志的自由文本） |
 
 启动器 → 插件：
 
@@ -65,9 +65,16 @@ launcher (Go)                                  dsh-launcher-plugin (实例内)
 
 确认词 `restart-dsh` 不变；子代理/无会话/重复请求护栏不变。区别：
 
-1. 请求经 `restart` 帧提交（含重启完成负载），**收到 `restart-result {ok:true}` 才
-   `ctx.appExit(0)`**；超时/被拒就报错、不退出 —— 实例不会白死一次。
-2. 新进程启动后由 launcher 主动推 `pending` 帧；注入「重启完成」成功再发
+1. 请求经 `restart` 帧提交（含重启完成负载），**收到 `restart-result {ok:true}` 才退出**；
+   超时/被拒就报错、不退出 —— 实例不会白死一次。
+2. 退出走阶梯：`ctx.inject(["appExit"])` 缓存 → `ctx.get("appExit")` → `ctx.appExit`
+   依次尝试，日志写清用了哪条；**三条都拿不到就 `process.exit(0)` 兜底**（跳过优雅拆卸，
+   并发一帧 `command-result {detail}` 让 launcher 日志留痕）。旧实现只看 `ctx.get`，
+   拿不到就静默 no-op —— 用户看到的是「点了重启没反应」（2026-10-01 真机事故）。
+3. launcher 侧另有看门狗：ack 后 20s 进程还没退，就强制收掉进程树并按「自重启」重新
+   拉起（`launcher_bridge.go` 的 `armRestartWatchdog` + `managedProcess.forceRestart`）。
+   插件退出失败最多多花 20 秒，不会把实例卡在"已确认却不动"的状态。
+4. 新进程启动后由 launcher 主动推 `pending` 帧；注入「重启完成」成功再发
    `pending-consumed`；确认前负载留在 launcher 内存，下次启动重新下发
    （旧 `pending.json` 的跨重启语义原样保留）。
 

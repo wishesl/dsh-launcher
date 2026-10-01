@@ -36,6 +36,13 @@ const (
 	bridgePingPeriod = 20 * time.Second
 )
 
+// bridgeRestartGrace —— restart 帧 ack 之后等进程退出的宽限。DSH 侧一旦真的调用退出
+// 入口，最坏 5s 内必定 process.exit（PROCESS_SHUTDOWN_TIMEOUT_MS），所以 20s 足够松；
+// 超时说明插件侧的退出调用没生效，看门狗强制收树（见 armRestartWatchdog）。
+//
+// 是变量而不是常量：测试要把它压到几十毫秒（否则一个用例得等 20 秒）。
+var bridgeRestartGrace = 20 * time.Second
+
 // 帧类型（信封里的 type）。
 //
 //	插件 → launcher：hello / theme / restart / pending-consumed / command-result
@@ -70,6 +77,7 @@ type launcherBridge struct {
 	handshakes map[string]pluginCapabilityReport // instanceID → 最近一次 hello 全量快照
 	restarts   map[string]string                 // instanceID → 已 ack 的发起 launchID（一次性重启标志）
 	pending    map[string]json.RawMessage        // instanceID → 重启完成续跑负载（注入成功确认后才清）
+	watchdogs  map[string]*time.Timer            // instanceID → ack 后的退出兜底定时器（进程退出即撤销）
 }
 
 // bridgeClient —— 一条已建立的插件连接。instanceID / launchID 由对方的第一帧 hello 绑定，
@@ -123,6 +131,9 @@ type bridgeCommandResult struct {
 	ID    string `json:"id"`
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
+	// Detail —— 非主题类命令回报的自由文本（例如插件退出走了 process.exit 兜底）。有它
+	// 就原文记进 launcher 日志：真机排障时"插件说了什么"比"命令 id 对不对"有用得多。
+	Detail string `json:"detail,omitempty"`
 }
 
 // bridgeRestartResult —— launcher → 插件：重启请求是否被受理（id 回带插件给的请求 id）。
@@ -145,6 +156,7 @@ func newLauncherBridge(a *App) *launcherBridge {
 		handshakes: map[string]pluginCapabilityReport{},
 		restarts:   map[string]string{},
 		pending:    map[string]json.RawMessage{},
+		watchdogs:  map[string]*time.Timer{},
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
@@ -312,7 +324,10 @@ func (b *launcherBridge) handleFrame(c *bridgeClient, env bridgeEnvelope) {
 		if len(env.Payload) > 0 {
 			_ = json.Unmarshal(env.Payload, &payload)
 		}
-		if payload.OK {
+		if payload.Detail != "" {
+			// 非主题类回报（如插件侧的退出兜底）：原文照记，别套"主题"的句式。
+			b.note("bridge: 实例 " + c.instanceID + " 回报：" + payload.Detail)
+		} else if payload.OK {
 			b.note("主题：实例 " + c.instanceID + " 已应用主题设置（命令 " + payload.ID + "）")
 		} else {
 			b.note("主题：实例 " + c.instanceID + " 写入 ui-theme 失败（命令 " + payload.ID + "）: " + payload.Error)
@@ -357,6 +372,16 @@ func (b *launcherBridge) handleHello(c *bridgeClient, env bridgeEnvelope) {
 	if payload.Theme != nil {
 		b.emitTheme(c.instanceID, payload.Theme.Preference)
 	}
+	// 连接建立也写日志（只断开写会让人查不清"到底连上过没有"，真机排障时吃过这个亏）。
+	name := payload.Plugin
+	if name == "" {
+		name = "未知插件"
+	}
+	version := payload.PluginVersion
+	if version == "" {
+		version = "版本未知"
+	}
+	b.note("bridge: 实例 " + c.instanceID + " 的插件已连接（" + name + " " + version + "，launch=" + env.LaunchID + "）")
 	b.pushPending(c, pending)
 }
 
@@ -388,6 +413,54 @@ func (b *launcherBridge) handleRestartFrame(c *bridgeClient, env bridgeEnvelope)
 	b.mu.Unlock()
 	b.note("dsh-restart: 收到自重启请求（instance=" + c.instanceID + "），已 ack，等待进程退出")
 	_ = c.send(frameRestartResult, bridgeRestartResult{ID: payload.ID, OK: true})
+	b.armRestartWatchdog(c.instanceID, c.launchID)
+}
+
+// armRestartWatchdog —— ack 之后的兜底。插件拿到 ack 就该调用 DSH 的退出入口；可一旦
+// 那一侧没生效（真机 2026-10-01 21:29：ack 了但进程一直活着，launcher 只能干等），
+// 用户看到的就是"点了重启没反应"。宽限过后强制收掉进程树，并保留"自重启"语义
+// （forceRestart），让 exit-reconcile 照常把实例拉起来 —— 用户要的结果一定拿到。
+func (b *launcherBridge) armRestartWatchdog(instanceID, launchID string) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	if timer := b.watchdogs[instanceID]; timer != nil {
+		timer.Stop()
+	}
+	b.watchdogs[instanceID] = time.AfterFunc(bridgeRestartGrace, func() {
+		b.fireRestartWatchdog(instanceID, launchID)
+	})
+	b.mu.Unlock()
+}
+
+func (b *launcherBridge) fireRestartWatchdog(instanceID, launchID string) {
+	b.mu.Lock()
+	delete(b.watchdogs, instanceID)
+	b.mu.Unlock()
+	b.app.mu.Lock()
+	mp := b.app.processes[instanceID]
+	b.app.mu.Unlock()
+	if mp == nil || mp.launchID != launchID {
+		// 进程已经退了（或已经被换掉）：兜底无事可做，别误伤新进程。
+		return
+	}
+	b.note("dsh-restart: 实例 " + instanceID + " 已 ack 但 " + bridgeRestartGrace.String() + " 内没有退出，强制收掉进程树并重新拉起")
+	b.app.systemLog(instanceID, mp.pid, "重启超时：插件已确认但进程没有退出，启动器强制重启")
+	mp.forceRestart()
+}
+
+// disarmRestartWatchdog —— 进程退出路径（exit-reconcile 消费重启标志）撤销兜底。
+func (b *launcherBridge) disarmRestartWatchdog(instanceID string) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	if timer := b.watchdogs[instanceID]; timer != nil {
+		timer.Stop()
+		delete(b.watchdogs, instanceID)
+	}
+	b.mu.Unlock()
 }
 
 // pushPending —— 把该实例待续跑的负载推过去（没有就什么都不发）。不消费：注入成功由
@@ -423,10 +496,13 @@ func (b *launcherBridge) unregister(c *bridgeClient) {
 	removed := b.clients[c.instanceID] == c
 	if removed {
 		delete(b.clients, c.instanceID)
+		// 握手快照必须跟着连接一起失效：报告只在"有人还在线报着"时才成立。以前这里
+		// 只删连接，实例停了/插件断了胶囊还一直显示"插件已连接"（真机反馈）。
+		delete(b.handshakes, c.instanceID)
 	}
 	b.mu.Unlock()
 	if removed {
-		b.note("bridge: 实例 " + c.instanceID + " 的插件连接已断开")
+		b.note("bridge: 实例 " + c.instanceID + " 的插件连接已断开（握手快照一并失效）")
 	}
 }
 
@@ -551,6 +627,8 @@ func (b *launcherBridge) consumeRestart(instanceID, launchID string) bool {
 	if b == nil {
 		return false
 	}
+	// 进程已经退出：ack 后的退出兜底定时器没有意义了，撤掉（免得它去动新进程）。
+	b.disarmRestartWatchdog(instanceID)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	stored, ok := b.restarts[instanceID]
