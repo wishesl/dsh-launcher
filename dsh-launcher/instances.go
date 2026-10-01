@@ -124,10 +124,13 @@ func (s *instanceStore) find(id string) *Instance {
 	return nil
 }
 
+// add 把新实例插到列表最前面：刚建好的那台应该在第一眼就能看到的位置，
+// 而不是排在十几台老实例的末尾（用户还得往下滚去找）。顺序仍是 store 的唯一真相：
+// 列表 / 日志标签 / 托盘菜单都按它渲染，落盘也跟着走。
 func (s *instanceStore) add(inst Instance) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.loaded = append(s.loaded, inst)
+	s.loaded = append([]Instance{inst}, s.loaded...)
 }
 
 func (s *instanceStore) remove(id string) {

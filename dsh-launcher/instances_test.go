@@ -45,6 +45,29 @@ func TestResetRuntimeMustMutateStore(t *testing.T) {
 	}
 }
 
+// 新加的实例必须落在列表最前面：用户刚建完就该在第一眼看到的位置，
+// 而不是被塞到十几台老实例的末尾。
+func TestInstanceStoreAddPrepends(t *testing.T) {
+	s := &instanceStore{path: filepath.Join(t.TempDir(), "instances.json")}
+	s.loaded = []Instance{{ID: "a"}, {ID: "b"}}
+
+	s.add(Instance{ID: "new"})
+
+	got := []string{}
+	for _, inst := range s.loaded {
+		got = append(got, inst.ID)
+	}
+	want := []string{"new", "a", "b"}
+	if len(got) != len(want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("order = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestInstanceStoreReorder(t *testing.T) {
 	newStore := func() *instanceStore {
 		s := &instanceStore{path: filepath.Join(t.TempDir(), "instances.json")}
