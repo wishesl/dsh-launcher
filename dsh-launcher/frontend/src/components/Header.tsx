@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Instance, RegistryInfo } from '../types';
-import { RotateCw, ChevronsLeft, ChevronsRight, Terminal, Monitor, LogOut } from 'lucide-react';
+import type { ThemePreference } from '../theme';
+import { RotateCw, ChevronsLeft, ChevronsRight, Terminal, Monitor, LogOut, Sun, Moon } from 'lucide-react';
 import WinControls from './WinControls';
 import dshLogo from '../assets/logo.png';
 
@@ -38,6 +39,13 @@ interface Props {
   updateAvailable: boolean;
   /** 点版本 pill → 打开「DSH Launcher 更新」弹窗（自更新主入口）。 */
   onOpenUpdate: () => void;
+  // 顶栏常驻主题切换：themePreference 是 DSH ui-theme 的权威值，themeDark 是"现在
+  // 看着是不是深色"（pref=system 时由系统决定），themePending 非空表示已下发还没等到
+  // 实例回音。按钮只负责翻转，写路径仍走 App.tsx 的 onSetTheme。
+  themePreference: ThemePreference;
+  themeDark: boolean;
+  themePending: ThemePreference | null;
+  onToggleTheme: () => void;
 }
 
 export default function Header({
@@ -62,12 +70,22 @@ export default function Header({
   onToggleCollapse,
   updateAvailable,
   onOpenUpdate,
+  themePreference,
+  themeDark,
+  themePending,
+  onToggleTheme,
 }: Props) {
   // Ready = the configured port actually serves DSH (service state), NOT the
   // launcher's process status — so an externally-started DSH on the same port
   // still counts and the open button always works when the service is up.
   const ready = !!serviceLive;
   const running = !ready && !!dshLive && dshLive.status !== 'stopped' && dshLive.status !== 'crashed';
+
+  const themeName = (p: ThemePreference) => (p === 'light' ? '浅色' : p === 'dark' ? '深色' : '跟随系统');
+  // 悬停提示说清三件事：现在是什么、系统模式下实际是深还是浅、点下去会变成什么。
+  const themeTitle = themePending
+    ? `已下发「${themeName(themePending)}」，等待实例确认…（点击切到${themeDark ? '浅色' : '深色'}）`
+    : `当前：${themeName(themePreference)}${themePreference === 'system' ? `（${themeDark ? '深色' : '浅色'}）` : ''} —— 点击切到${themeDark ? '浅色' : '深色'}`;
 
   // 内嵌模式下「刷新」按钮的下拉：刷新 iframe / 重启 DSH 进程
   const [refreshMenuOpen, setRefreshMenuOpen] = useState(false);
@@ -170,6 +188,23 @@ export default function Header({
         </div>
         {/* 操作按钮组：靠右，紧邻窗口按钮（见 CSS 的 .header-actions） */}
         <div className="header-actions">
+        {/* 常驻主题开关：唯一一个不受 embedMode 影响的按钮 —— 内嵌着 DSH 网页时也
+            要能一键反向下发主题。图标表示"点下去会变成什么"：现在深色显示太阳。
+            pending 时（已下发、等实例回音）右上角亮一个琥珀点，跟运行日志的活动点同一套。 */}
+        <button
+          type="button"
+          className={`btn btn-icon btn-ghost theme-toggle-btn ${themePending ? 'is-pending' : ''}`}
+          onClick={onToggleTheme}
+          title={themeTitle}
+          aria-label={themeDark ? '切换到浅色主题' : '切换到深色主题'}
+          aria-pressed={themeDark}
+        >
+          {themeDark ? (
+            <Sun size={16} strokeWidth={1.75} aria-hidden />
+          ) : (
+            <Moon size={16} strokeWidth={1.75} aria-hidden />
+          )}
+        </button>
         {/* 「重启 DSH 进程」按钮：内嵌模式下隐藏 —— 因为内嵌模式已经有「刷新 iframe」按钮
             （都是 RotateCw 图标），两个放一起重复了。 */}
         {!embedMode && (

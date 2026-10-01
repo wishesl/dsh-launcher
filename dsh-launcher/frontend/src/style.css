@@ -1049,6 +1049,20 @@ body.resizing .log-drawer { transition: none; }
 }
 .active-log-btn { border-color: var(--accent) !important; color: var(--accent) !important; background: var(--accent-soft) !important; }
 
+/* 顶栏常驻主题开关：pending = 命令已下发但还没等到实例回音（右上角琥珀点） */
+.theme-toggle-btn { position: relative; }
+.theme-toggle-btn.is-pending { color: var(--muted); }
+.theme-toggle-btn.is-pending::after {
+  content: '';
+  position: absolute;
+  top: 4px; right: 4px;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 5px rgba(217, 119, 6, .55);
+  animation: pulse 1.2s infinite;
+}
+
 /* log view (inside drawer / panels) */
 .log-view {
   flex: 1; min-height: 0;

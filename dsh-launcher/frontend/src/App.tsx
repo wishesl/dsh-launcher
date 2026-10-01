@@ -219,6 +219,12 @@ export default function App() {
   // 但还没收到 DSH 回音的选择。启动器先乐观换肤，DSH 一回话就以它为准。
   const [themePref, setThemePref] = useState<ThemePreference>('system');
   const [themePending, setThemePending] = useState<ThemePreference | null>(null);
+  // 顶栏常驻按钮要知道"现在看着是深色还是浅色"才能决定点一下切哪边。pref=system 时
+  // 实际观感由系统决定，所以单独跟着 matchMedia 走（跟随系统时用户在系统里换色，
+  // 这个按钮的图标要跟着翻）。
+  const [systemDark, setSystemDark] = useState(
+    () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-color-scheme: dark)').matches
+  );
 
   const logsRef = useRef<Record<string, LogEvent[]>>({});
   const marketLogsRef = useRef<string[]>([]);
@@ -264,6 +270,26 @@ export default function App() {
     },
     [showToast]
   );
+
+  // 系统深浅色变化（只影响 pref=system 时的观感）。
+  useEffect(() => {
+    const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
+    if (!mq) return;
+    const onChange = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  // 当前"看着是深色吗"：刚下发的选择优先（回音未到前界面已经是那一极），否则按权威值
+  // （显式 dark 就是；system 时看系统）。
+  const themeShown: ThemePreference = themePending ?? themePref;
+  const themeDark = themeShown === 'dark' || (themeShown === 'system' && systemDark);
+
+  // 顶栏常驻按钮：一键在亮/暗之间翻转。system 下点它 = 切到与当前观感相反的那一极
+  // （仍是走同一个 onSetTheme 写路径：下发 → 实例写 ui-theme → dsh:theme 回音）。
+  const onToggleTheme = useCallback(() => {
+    void onSetTheme(themeDark ? 'light' : 'dark');
+  }, [onSetTheme, themeDark]);
 
   // 重新探测一台实例的能力（本地读取，不阻塞）。取不到就保持上一次的结果，
   // 不让面板因为一次读取失败而清空。
@@ -935,6 +961,10 @@ export default function App() {
         onToggleCollapse={() => setCollapsed((v) => !v)}
         updateAvailable={updateAvailable}
         onOpenUpdate={openUpdate}
+        themePreference={themeShown}
+        themeDark={themeDark}
+        themePending={themePending}
+        onToggleTheme={onToggleTheme}
       />
 
       <div
