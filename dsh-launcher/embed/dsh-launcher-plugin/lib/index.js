@@ -83,6 +83,11 @@ let syncScheduled = false;
 let themePreference = "";
 /** settings 服务（主题读写的唯一入口；未就绪为 null）。 */
 let settingsService = null;
+/** 我们自己的 ui-theme 写入进行中：这期间的 document-updated 是自己写出来的，
+ *  监听器不必再 describe 一次（那次 describe 会把回程时间再抬一截）。 */
+let themeWriteInFlight = false;
+/** 主题诊断锚点：收到 set-theme 的时刻，只用于把各段耗时打进实例日志。 */
+let themeAnchor = 0;
 /** 待交付的重启完成负载（null = 无）。 */
 let pendingRestart = null;
 /** 本次启动是否已收到 launcher 下发的 pending（挡住重复交付）。 */
@@ -288,7 +293,9 @@ function failInflight(reason) {
 /** 主题增量推送（幂等状态）。未连接就跳过：重连后的快照会带上当前值。 */
 function pushTheme(preference) {
 	if (!supervised) return;
-	if (!sendFrame("theme", { preference })) {
+	if (sendFrame("theme", { preference })) {
+		themeTrace(`推送 theme=${preference}（自收到 ${themeSince()}）`);
+	} else {
 		ctxRef?.logger?.debug?.("[dsh-launcher-plugin] 桥接未连接，主题推送跳过（重连后随快照补齐）");
 	}
 }
@@ -458,21 +465,39 @@ function readThemePreference(settings) {
 	}
 }
 
-/** 当前 ui-theme 的 revision（乐观并发的期望值）；读不到 → undefined（不校验）。 */
-function currentThemeRevision(settings) {
+/**
+ * 主题诊断留痕：只写 stderr（console.error → launcher 捕获的实例日志），不发桥接帧 ——
+ * 主题每次点击都会走一遍，回报帧会把启动器的日志面板刷满。
+ */
+function themeTrace(line) {
 	try {
-		return themeRow(settings)?.revision;
+		console.error(`[dsh-launcher-plugin] 主题：${line}`);
 	} catch {
-		return undefined;
+		// 日志写不出去不能影响主题切换
 	}
 }
 
-/** 写 ui-theme。revision 冲突（有人并发改过）时重读一次再试一遍；其余错误直接抛。 */
+/** 距收到 set-theme 过了多少毫秒（没有锚点就写 ?）。 */
+function themeSince() {
+	return themeAnchor === 0 ? "?" : `${Date.now() - themeAnchor}ms`;
+}
+
+/**
+ * 写 ui-theme。**故意不带期望 revision**。
+ *
+ * dsh-settings 的 `update` 一次调用内部本来就要跑两遍全量 `describe()`
+ * （`write` 的 edit 回调里一次、写完再一次），而 describe 要把每个命名空间的
+ * schema 序列化成 JSON 快照——这是点击路径里最可疑的一段开销（0.2.5 的
+ * 诊断留痕会把每段毫秒数打出来）。
+ * 我们再补第三次只为 CAS（"preference 被并发改过就报冲突"），收益很小：
+ * update 的合并语义（mergeLayers）本身就保住别人改的其它字段。
+ * 失败重试保留（文件锁超时之类的瞬时错误）。
+ */
 async function writeThemePreference(settings, preference) {
 	let lastError;
 	for (let attempt = 0; attempt < 2; attempt += 1) {
 		try {
-			await settings.update(THEME_NS, { preference }, currentThemeRevision(settings));
+			await settings.update(THEME_NS, { preference });
 			return;
 		} catch (error) {
 			lastError = error;
@@ -499,13 +524,22 @@ async function applyThemeCommand(payload) {
 		if (settingsService === null || typeof settingsService.update !== "function") {
 			throw new Error("settings 服务没有 update（该组合改不了主题）");
 		}
-		await writeThemePreference(settingsService, preference);
+		themeAnchor = Date.now();
+		themeTrace(`收到 set-theme=${preference}（id=${id || "-"}）`);
+		themeWriteInFlight = true;
+		try {
+			await writeThemePreference(settingsService, preference);
+		} finally {
+			themeWriteInFlight = false;
+		}
+		themeTrace(`写入 ui-theme=${preference} 完成（自收到 ${themeSince()}）`);
 		themePreference = preference; // 自己写的值：watcher 之后读到同值不会再推一次
 		setCapability("themeSet", true);
 		sendFrame("command-result", { id, ok: true });
 		sendFrame("theme", { preference });
 		ctxRef?.logger?.info?.(`[dsh-launcher-plugin] 已按启动器请求写入 ui-theme = ${preference}`);
 	} catch (error) {
+		themeTrace(`写入失败：${error.message}（自收到 ${themeSince()}）`);
 		setCapability("themeSet", false, `写入 ui-theme 失败：${error.message}`);
 		sendFrame("command-result", { id, ok: false, error: error.message });
 		ctxRef?.logger?.warn?.(`[dsh-launcher-plugin] 写入 ui-theme 失败：${error.message}`);
@@ -520,8 +554,12 @@ async function applyThemeCommand(payload) {
  * 事件在的话就是毫秒级，事件不在最迟 1s 跟上。
  */
 function watchTheme(settingsCtx, settings) {
-	const check = () => {
+	const check = (source) => {
+		const started = Date.now();
 		const pref = readThemePreference(settings);
+		if (source !== "poll") {
+			themeTrace(`${source}：读 ui-theme 用时 ${Date.now() - started}ms，值=${pref ?? "null"}`);
+		}
 		if (pref === null || pref === themePreference) return;
 		themePreference = pref;
 		pushTheme(pref);
@@ -534,13 +572,24 @@ function watchTheme(settingsCtx, settings) {
 	}
 	// 事件挂在上下文上（settings/forms 是 service 实例，本身不发这个事件）。
 	settingsCtx.on?.("settings/document-updated", (ns) => {
-		if (ns === THEME_NS || ns === undefined) check();
+		if (ns !== THEME_NS && ns !== undefined) return;
+		if (themeWriteInFlight) {
+			// 这是我们自己刚写出来的那次变更：值已知，写完 applyThemeCommand 会推帧。
+			// 在这里再 describe 一次只会白白拖慢启动器收到回音的时间。
+			themeTrace(`事件命中但自身写入进行中，跳过读取（自收到 ${themeSince()}）`);
+			return;
+		}
+		themeTrace(`事件命中（自收到 ${themeSince()}）`);
+		check("事件");
 	});
+	// 兜底轮询：真机实测（2026-10-01 23:33）事件路径 77–90ms 就到，
+	// 所以把兜底从 1s 放宽到 5s——只有事件真的不通时才用得上；
+	// 每次轮询都要跑一遍全量 describe（同步阻塞），频率越低越不容易挤到点击上。
 	const poll = () => {
-		check();
-		ctxRef?.timeout?.(poll, 1000);
+		check("poll");
+		ctxRef?.timeout?.(poll, 5000);
 	};
-	ctxRef?.timeout?.(poll, 1000);
+	ctxRef?.timeout?.(poll, 5000);
 }
 //#endregion
 

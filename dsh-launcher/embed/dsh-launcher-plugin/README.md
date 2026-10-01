@@ -53,13 +53,20 @@ launcher (Go)                                  dsh-launcher-plugin (实例内)
 ## 主题双向同步
 
 - **DSH → 启动器**：监听共享 profile 的 `ui-theme` settings（`preference`: `light|dark|system`），
-  初读 + `settings/document-updated` 事件 + 1s 轮询兜底（事件冒泡不保证），变化就发 `theme` 帧。
+  初读 + `settings/document-updated` 事件 + **5s 轮询兜底**（事件冒泡在别的 DSH 版本上不保证；
+  真机实测事件路径 77–90ms 就到，兜底只是安全网，频率压低是为了少跑全量 `describe()`）。
   只带 `preference`：`system` 由启动器前端用 `@media (prefers-color-scheme)` 解析，
   插件不做二次解析，也不怕 OS 主题中途变化。
-- **启动器 → DSH**：收到 `set-theme` 后调 `settings.update("ui-theme", {preference}, revision)`，
-  写成功才算数；版本冲突（`SettingsConflictError`）会重读 revision 再试一次，最多两次。
+- **启动器 → DSH**：收到 `set-theme` 后调 `settings.update("ui-theme", {preference})` ——
+  **不带期望 revision**：`describe()` 要把每个命名空间的 schema 序列化成 JSON 快照，而
+  `settings.update` 内部本来就要跑两遍（`write` 的 edit 回调里一次、写完再一次），
+  插件再补第三次只为 CAS 不划算；`mergeLayers` 的合并语义本来就保住别人改的其它字段。
+  失败重试仍保留（最多两次，针对文件锁超时之类的瞬时错误）。
+  写入期间置 `themeWriteInFlight`：自己写出来的 `document-updated` 不再 describe 一次，
   写成功后回 `command-result {ok:true}` + 一条 `theme` 帧；失败回 `{ok:false, error}`，
   并把能力 `themeSet` 降级为失败（下一次 hello 上报），启动器据此提示「只在本机生效」。
+- **耗时诊断**：每次点击都会往实例日志（stderr）写几行 `主题：…`（收到 set-theme / 写入完成用时 /
+  事件命中与读取用时 / 推送时刻）。只走 `console.error`，不发桥接帧 —— 免得刷满启动器日志面板。
 
 ## dsh-restart
 
