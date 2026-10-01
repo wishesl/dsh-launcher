@@ -1355,27 +1355,37 @@ body.resizing .log-drawer { transition: none; }
 }
 .cmd-box code { flex: 1; overflow-x: auto; white-space: nowrap; }
 .ver-table { margin-top: 14px; }
+/* 表头与数据行共用同一套列宽。「标记」列留够放满三个标签的宽度
+   （最佳适配+latest+next ≈ 165px），常见宽度下三个标签一行排完，
+   太窄时才换行 —— 否则标签会溢出本列压到表头上（见 .ver-tags）。 */
 .ver-table-head, .ver-row {
-  display: grid; grid-template-columns: 1.2fr 1.5fr .7fr; gap: 8px; align-items: center;
+  display: grid; grid-template-columns: 1fr 1.2fr minmax(172px, 1fr);
+  gap: 12px; align-items: center;
 }
 .ver-table-head {
   font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-3);
-  padding: 4px 6px; border-bottom: 1px solid var(--border);
+  padding: 4px 8px; border-bottom: 1px solid var(--border);
 }
-.ver-row { padding: 6px; border-radius: 6px; font-size: 12.5px; }
+.ver-row { padding: 6px 8px; border-radius: 6px; font-size: 12.5px; }
 .ver-row:hover { background: var(--panel-2); }
 .ver-row.latest { background: var(--accent-soft); }
-.tag-latest { background: var(--green); color: var(--on-accent); border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 700; }
-.tag-next { background: var(--amber); color: var(--on-accent); border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 700; }
+/* 标记列：等间距横排，放不下才换行（gap 统一负责间距，标签自己不带 margin） */
+.ver-tags { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* 三种标签共用一套盒子尺寸：行高固定、inline-flex 居中。
+   以前是纯 inline 盒，背景会溢出所在行盒，压住表头就是这么来的。 */
+.tag-best, .tag-latest, .tag-next {
+  display: inline-flex; align-items: center;
+  height: 18px; padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px; font-weight: 700; line-height: 1; white-space: nowrap;
+}
+.tag-latest { background: var(--green); color: var(--on-accent); }
+.tag-next { background: var(--amber); color: var(--on-accent); }
 /* 「最佳适配」= 启动器实际验证过的版本。它是推荐、不是许可：所以用 accent 而不是状态色，
    免得被读成"只有这个能用"（能不能用由右栏「兼容性」的实时探测决定，不按版本号判断）。 */
-.tag-best {
-  background: var(--accent); color: var(--on-accent);
-  border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 700;
-  margin-right: 6px;
-}
+.tag-best { background: var(--accent); color: var(--on-accent); }
 /* 跟在版本号文字后面时（实例表单的「最新版」卡片）需要左边留一口气 */
-.radio-sub .tag-best { margin-left: 6px; margin-right: 0; }
+.radio-sub .tag-best { margin-left: 6px; }
 .ver-row.best-fit { background: var(--accent-soft); }
 .ver-big.best-fit { color: var(--accent); }
 .best-fit-note {

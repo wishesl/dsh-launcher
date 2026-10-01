@@ -107,7 +107,7 @@ export default function VersionPanel({ registry, loading, bestFit }: Props) {
           >
             <span className="mono">{v.version}</span>
             <span>{fmtDate(v.published)}</span>
-            <span>
+            <span className="ver-tags">
               {v.version === bestFit && <span className="tag-best">最佳适配</span>}
               {v.isLatest && <span className="tag-latest">latest</span>}
               {v.version === registry?.next && <span className="tag-next">next</span>}
