@@ -40,6 +40,8 @@ const ctx = {
 	},
 	// 故意不回调任何服务（appExit / settings / connection 全部拿不到）。
 	inject: () => undefined,
+	// 0.2.6 的页面坐标注入走这个钩子；本测试不关心它，给个空实现即可。
+	on: () => () => {},
 };
 
 apply(ctx);

@@ -5,6 +5,9 @@
 `dsh-self-mcp` 随之退役，文件通道（`restart-request.json` / `pending.json` /
 `capabilities.json`）全部删除 —— 本插件**零文件、零落盘**。
 
+0.2.6 起同一条线多接一个角色：**网页端即时通道**（见下），让"点启动器换主题"从
+"等 DSH 写完配置再采纳（约 300ms）"变成**页面当场变色（毫秒级）**。
+
 ## 工作方式
 
 ```
@@ -19,6 +22,16 @@ launcher (Go)                                  dsh-launcher-plugin (实例内)
         │                                            ▲ env 注入
         ▼ 订阅 dsh:theme                         DSH_LAUNCHER_EVENTS / DSH_LAUNCHER_TOKEN
    前端 data-theme + WindowSet*Theme
+```
+
+同一个 `/ws` 还接一个**网页端角色**（`role=page`）：DSH 网页里的客户端半边
+（`lib/client.js`）用 `?token=…` 连同一个端口，Origin 必须是本机已知的 DSH 网页地址。
+
+```
+launcher /ws  ◄── page-hello ──────  dsh-launcher-plugin 客户端半边（DSH 网页里）
+              ── page-set-theme ───►  theme.setTheme()  ← 毫秒级变色，写盘后台跑
+              ◄── page-theme ───────  theme/change（页面里自己点的主题）
+              ◄── page-result ──────  成功/失败（失败则退回服务端写入路径）
 ```
 
 - **门控**：launcher 挂载覆盖层（`--patch` 临时 overlay）+ env 注入同时生效；
@@ -50,8 +63,30 @@ launcher (Go)                                  dsh-launcher-plugin (实例内)
 
 `restart` / `set-theme` 都靠 `id` 配应答；插件侧用 5s 超时兜底，超时视为失败。
 
+网页端角色（`role=page`，0.2.6+）只认主题帧，别的帧一律忽略：
+
+| 方向 | type | 含义 |
+| --- | --- | --- |
+| 页面 → 启动器 | `page-hello` | 页面接上即时通道 `{plugin, pluginVersion}`；launchId 对不上就回 `page-result{ok:false}` 并断开 |
+| 启动器 → 页面 | `page-set-theme` | 让页面当场换主题 `{id, preference}`（写盘由 DSH 自己后台跑） |
+| 页面 → 启动器 | `page-theme` | 页面里自己换的主题 `{preference}`，启动器当场采纳 |
+| 页面 → 启动器 | `page-result` | `page-set-theme` 的结果 `{id, ok, error?, preference?}`；`ok:false` 时启动器退回服务端写入路径 |
+
 ## 主题双向同步
 
+- **即时通道（0.2.6+，默认路径）**：DSH 网页里的客户端半边 `lib/client.js` 直接连启动器的
+  环回 WS，启动器点主题 → 页面 `theme.setTheme()` **当场变色**（毫秒级），DSH 自己的配置
+  写入在后台跑（客户端 `setTheme` 本来就是乐观更新：先 `publish()` 再 `host.set()`）。
+  为什么绕这一下：服务端只能改配置项，一次写入要抢文件锁 + 与 HMR 互斥 + 原子写 +
+  两次全量 `describe()`，真机实测 300–350ms；而"改配置 → 网页端 `adopt()` 重绘"这条路
+  必然带上这段延迟。**页面在场时服务端插件不再重复写**（同一次点击只写一遍配置）。
+  客户端半边的坐标（url/token/instanceId/launchId）由服务端半边用 DSH 官方的
+  `webserver/index-inject` 钩子注入成 `window.__DSH_LAUNCHER_BRIDGE__`（DSH 主题插件自己
+  也用这个钩子）。页面里自己换主题 → 客户端半边监听 `theme/change` 立刻回报，启动器当场采纳。
+- **退回路径（fail-open）**：页面没连上、客户端入口没加载（老 DSH / 约定变更）、
+  `page-set-theme` 应用失败 —— 任何一步不成立就自动走下面这条服务端写入路径，
+  并在 `page-result` 里说明原因；启动器侧 `pageChannel` 能力项如实显示"未接入"。
+  绝不假装成功。
 - **DSH → 启动器**：监听共享 profile 的 `ui-theme` settings（`preference`: `light|dark|system`），
   初读 + `settings/document-updated` 事件 + **5s 轮询兜底**（事件冒泡在别的 DSH 版本上不保证；
   真机实测事件路径 77–90ms 就到，兜底只是安全网，频率压低是为了少跑全量 `describe()`）。
@@ -105,6 +140,10 @@ launcher (Go)                                  dsh-launcher-plugin (实例内)
 
 `pluginLoaded / restartTool / themeReport / themeSet / embedRelax / restartDelivery`
 随 `hello` 快照上报 —— 握手即"本次启动"，陈旧判定（launchId 比对）整个消失。
+
+另有一个**启动器侧**的项 `pageChannel`（不在上面的快照里，由启动器自己看"这个实例有没有
+网页端连接"）：接入 = 主题即时通道可用；未接入 = 主题仍会同步，只是要多等 DSH 自己写一次
+配置（约 300ms）。它**不参与**握手版本比对，只作展示与诊断。
 
 ## 开发
 

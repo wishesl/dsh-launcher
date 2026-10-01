@@ -178,7 +178,7 @@ func stalePluginReport(currentLaunchID, reportedLaunchID string) bool {
 // launcherCapabilities 是启动器自己就能判定的几项：这些是不依赖插件、也不依赖
 // DSH 私有接口的耦合点，坏掉通常是"启动日志格式变了"或"门控没通过"。
 func (a *App) launcherCapabilities(inst *Instance, mp *managedProcess) []CapabilityItem {
-	items := make([]CapabilityItem, 0, 4)
+	items := make([]CapabilityItem, 0, 5)
 
 	// ① 启动器能否确定这台 DSH 的访问地址（「打开 DSH」用的就是它）。
 	//
@@ -232,6 +232,25 @@ func (a *App) launcherCapabilities(inst *Instance, mp *managedProcess) []Capabil
 		Detail:  detail,
 		Source:  "launcher",
 		Hint:    "没挂载时主题同步 / dsh-restart 都不存在，插件能力也无从报告",
+	})
+
+	// ④ 网页端即时通道：DSH 页面里的客户端半边（dsh-launcher-plugin/lib/client.js）连上后，
+	//    点启动器的主题按钮页面会当场换肤，写盘放到后台（省掉实测 330–350ms）。
+	//    没接入不是故障（页面可能根本没打开，或 DSH 还没重启加载客户端入口）→ unknown，
+	//    因为主题照样同步，只是走服务端写入那条慢路。
+	pageReady := a.bridge != nil && a.bridge.hasPage(inst.ID)
+	pageDetail := "未接入：主题仍会同步，只是要等 DSH 自己把配置写一遍（实测约 300ms）"
+	if pageReady {
+		pageDetail = "已接入：主题点击即时生效（页面当场换肤，写盘在后台进行）"
+	}
+	items = append(items, CapabilityItem{
+		ID:      "pageChannel",
+		Label:   "网页端已接入主题即时通道",
+		OK:      pageReady,
+		Unknown: !pageReady,
+		Detail:  pageDetail,
+		Source:  "launcher",
+		Hint:    "接入需要插件 0.2.6+ 且 DSH 重启过一次（客户端入口在启动时装载）",
 	})
 
 	return items

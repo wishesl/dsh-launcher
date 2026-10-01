@@ -30,6 +30,9 @@ const settings = {
 	},
 };
 
+/** webserver/index-inject 钩子：0.2.6 起服务端插件该往页面注入桥接坐标（即时通道）。 */
+let injected = null;
+
 const ctx = {
 	logger: {
 		info: record("info"),
@@ -41,6 +44,13 @@ const ctx = {
 	effect: (fn) => fn(),
 	get: (name) => (name === "appExit" ? (code) => logs.push(`appExit(${code})`) : undefined),
 	tools: { register: () => ({ dispose() {} }) },
+	on: (event, listener, options) => {
+		if (event !== "webserver/index-inject") return () => {};
+		const table = [];
+		listener(table);
+		injected = { rows: table, prepend: options?.prepend === true };
+		return () => {};
+	},
 	inject: (deps, cb) => {
 		if (Array.isArray(deps) && deps.includes("settings")) {
 			cb({ get: (n) => (n === "settings" ? settings : undefined), on: () => undefined });
@@ -50,6 +60,31 @@ const ctx = {
 };
 
 apply(ctx);
+
+// 0.2.6 即时通道的注入契约：body 脚本 + prepend，脚本里坐标要齐（页面半边靠它连桥）。
+if (injected === null) {
+	console.error("HARNESS FAIL: 没有注册 webserver/index-inject 注入");
+	process.exit(1);
+}
+const injectedRow = injected.rows.find((row) => row.kind === "script" && row.placement === "body");
+if (injectedRow === void 0 || injected.prepend !== true) {
+	console.error(`HARNESS FAIL: 注入行形状不对 ${JSON.stringify(injected)}`);
+	process.exit(1);
+}
+if (!injectedRow.text.startsWith("window.__DSH_LAUNCHER_BRIDGE__ = ")) {
+	console.error(`HARNESS FAIL: 注入脚本不是桥接坐标 ${injectedRow.text}`);
+	process.exit(1);
+}
+const injectedCoordinates = JSON.parse(
+	injectedRow.text.slice("window.__DSH_LAUNCHER_BRIDGE__ = ".length, injectedRow.text.lastIndexOf(";")),
+);
+for (const key of ["url", "token", "instanceId", "launchId"]) {
+	if (typeof injectedCoordinates[key] !== "string" || injectedCoordinates[key] === "") {
+		console.error(`HARNESS FAIL: 注入坐标缺 ${key}: ${injectedRow.text}`);
+		process.exit(1);
+	}
+}
+console.log(`HARNESS INJECT OK (${injectedCoordinates.url})`);
 
 const deadline = Date.now() + 8000;
 const tick = setInterval(() => {

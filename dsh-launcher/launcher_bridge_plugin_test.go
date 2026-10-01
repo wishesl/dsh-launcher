@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -96,6 +97,10 @@ func TestBridgeEndToEndWithRealPlugin(t *testing.T) {
 	if !strings.Contains(out, `"preference":"light"`) {
 		t.Fatalf("settings 里没有写成 light\nstdout=%s", out)
 	}
+	// 0.2.6 即时通道：同一份代码必须把页面坐标注入 DSH 页面（webserver/index-inject）。
+	if !strings.Contains(out, "HARNESS INJECT OK") {
+		t.Fatalf("没有给页面注入桥接坐标\nstdout=%s\nstderr=%s", out, readFileString(errFile.Name()))
+	}
 }
 
 // 端到端契约测试（最要命的一条）：插件侧**取不到 appExit** 时，dsh-restart 也必须真的
@@ -185,6 +190,107 @@ func TestBridgeRestartEndToEndWithRealPlugin(t *testing.T) {
 	// 3) 桥接侧确实把重启标志记上了（exit-reconcile 靠它决定重新拉起）。
 	if !app.bridge.consumeRestart("inst-a", "L1") {
 		t.Fatal("桥接应记下属于 L1 的重启标志")
+	}
+}
+
+// 端到端契约测试（网页端即时通道）：用 node 跑**真实的** lib/client.js（testdata/
+// plugin-client-harness.mjs 提供 window.__ModuleLoader__ + 假 ctx/theme 服务），经真
+// WebSocket 连真桥接，验证 0.2.6 那条新链路：page-hello 握手 → 启动器下发 page-set-theme
+// → 页面当场 setTheme → page-result 回执 → 页面里换主题时 page-theme 回报被启动器采纳。
+func TestBridgePageChannelEndToEndWithRealClient(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("没有 node，跳过真客户端半边端到端测试")
+	}
+	harness := filepath.Join("testdata", "plugin-client-harness.mjs")
+	if _, err := os.Stat(harness); err != nil {
+		t.Fatalf("找不到 harness: %v", err)
+	}
+
+	app, _ := newSelfRestartTestApp(t)
+	app.settings = newSettingsStore()
+	app.bridge.start()
+	t.Cleanup(app.bridge.stop)
+	if app.bridge.url == "" {
+		t.Fatal("桥接必须监听成功")
+	}
+	app.mu.Lock()
+	app.processes["inst-a"] = &managedProcess{instanceID: "inst-a", launchID: "L1"}
+	app.mu.Unlock()
+
+	// 页面全局的桥接坐标（等价于服务端插件 webserver/index-inject 注入的那段脚本）。
+	coordinates, err := json.Marshal(map[string]string{
+		"url":           "ws" + strings.TrimPrefix(app.bridge.url, "http") + "/ws",
+		"token":         app.bridge.token,
+		"instanceId":    "inst-a",
+		"launchId":      "L1",
+		"plugin":        selfRestartPluginName,
+		"pluginVersion": "0.2.6",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	outFile, err := os.CreateTemp(t.TempDir(), "client-out-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer outFile.Close()
+	errFile, err := os.CreateTemp(t.TempDir(), "client-err-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer errFile.Close()
+
+	cmd := exec.Command(node, harness)
+	cmd.Env = append(os.Environ(), "CLIENT_HARNESS_BRIDGE="+string(coordinates))
+	cmd.Stdout = outFile
+	cmd.Stderr = errFile
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("启动 harness 失败: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	// 1) 网页端握手：launcher 侧必须把这条连接认成 page 角色（hasPage）。
+	waitPage(t, app.bridge, "inst-a")
+
+	// 2) 启动器改主题 → 页面收到 page-set-theme → 真客户端半边调 theme.setTheme。
+	if err := app.SetThemePreference("dark"); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case werr := <-done:
+		if werr != nil {
+			t.Fatalf("harness 退出码非 0: %v\nstdout=%s\nstderr=%s",
+				werr, readFileString(outFile.Name()), readFileString(errFile.Name()))
+		}
+	case <-time.After(20 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatalf("harness 20s 没结束\nstdout=%s\nstderr=%s",
+			readFileString(outFile.Name()), readFileString(errFile.Name()))
+	}
+
+	out := readFileString(outFile.Name())
+	errOut := readFileString(errFile.Name())
+	if !strings.Contains(out, "HARNESS ID OK") || !strings.Contains(out, "HARNESS APPLY OK") {
+		t.Fatalf("client.js 的模块契约不对\nstdout=%s\nstderr=%s", out, errOut)
+	}
+	if !strings.Contains(out, "HARNESS SET THEME dark") {
+		t.Fatalf("页面没有收到/应用 page-set-theme\nstdout=%s\nstderr=%s", out, errOut)
+	}
+	if !strings.Contains(out, "HARNESS REPORTED light") || !strings.Contains(out, "HARNESS OK") {
+		t.Fatalf("页面侧的回报流程没走完\nstdout=%s\nstderr=%s", out, errOut)
+	}
+
+	// 3) 页面里换的主题（page-theme）被启动器当场采纳 —— 不等 DSH 自己写一遍配置。
+	if got := app.settings.get().Theme; got != "light" {
+		t.Fatalf("网页端回报的主题该被启动器采纳，settings 里是 %q\nstdout=%s\nstderr=%s", got, out, errOut)
+	}
+	// 4) 页面在场时服务端插件不该被重复下发（同一次点击只写一遍配置）。
+	if _, pluginCount := app.bridge.sendThemeCommand("probe", "light"); pluginCount != 0 {
+		t.Fatalf("有网页端即时通道时不该再给服务端插件下发（pluginCount=%d）", pluginCount)
 	}
 }
 

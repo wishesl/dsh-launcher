@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -328,6 +329,150 @@ func waitHandshakeGone(t *testing.T, b *launcherBridge, id string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("%s 的握手快照该在断开后消失", id)
+}
+
+// dialPageBridge 连桥接（模拟 DSH 网页端：浏览器的 WebSocket 不能自定义握手头，token 只能
+// 放 query；Origin 由浏览器强制带上，页面自己改不了）。
+func dialPageBridge(t *testing.T, app *App, origin string) (*websocket.Conn, *http.Response, error) {
+	t.Helper()
+	wsURL := "ws" + strings.TrimPrefix(app.bridge.url, "http") + "/ws?token=" + url.QueryEscape(app.bridge.token)
+	header := http.Header{}
+	if origin != "" {
+		header.Set("Origin", origin)
+	}
+	dialer := websocket.Dialer{HandshakeTimeout: 3 * time.Second}
+	return dialer.Dial(wsURL, header)
+}
+
+func pageHelloFrame(instanceID, launchID string) bridgeEnvelope {
+	payload, _ := json.Marshal(bridgePageHelloPayload{
+		Plugin:        selfRestartPluginName,
+		PluginVersion: "0.2.6",
+	})
+	return bridgeEnvelope{Type: framePageHello, InstanceID: instanceID, LaunchID: launchID, Payload: payload}
+}
+
+func waitPage(t *testing.T, b *launcherBridge, id string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if b.hasPage(id) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("3s 内没有出现 %s 的网页端即时通道", id)
+}
+
+// 网页端即时通道：有页面在场时主题只走页面（当场换肤），页面报失败才退回服务端写入。
+func TestBridgePageChannelThemeAndFallback(t *testing.T) {
+	app, _ := newSelfRestartTestApp(t)
+	app.bridge.start()
+	t.Cleanup(app.bridge.stop)
+	app.processes["inst-a"] = &managedProcess{instanceID: "inst-a", launchID: "L1"}
+
+	// 服务端插件（同一实例的另一条连接）。
+	plugin, _, err := dialBridge(t, app, app.bridge.token, nil)
+	if err != nil {
+		t.Fatalf("插件连接失败: %v", err)
+	}
+	defer plugin.Close()
+	sendBridgeFrame(t, plugin, helloFrame("L1", "light"))
+	waitHandshake(t, app.bridge, "inst-a", "L1")
+
+	// 网页端：Origin 是本机已知的 DSH 网页地址。
+	page, _, err := dialPageBridge(t, app, "http://127.0.0.1:3080")
+	if err != nil {
+		t.Fatalf("网页端应该能连上: %v", err)
+	}
+	defer page.Close()
+	sendBridgeFrame(t, page, pageHelloFrame("inst-a", "L1"))
+	waitPage(t, app.bridge, "inst-a")
+
+	// 有页面在场：主题只发给页面，服务端插件不该同时收到（否则同一次点击写两遍配置）。
+	if err := app.SetThemePreference("dark"); err != nil {
+		t.Fatal(err)
+	}
+	env := readBridgeFrame(t, page)
+	if env.Type != framePageSetTheme {
+		t.Fatalf("页面期望收到 %s，得到 %s", framePageSetTheme, env.Type)
+	}
+	var set bridgeSetThemePayload
+	_ = json.Unmarshal(env.Payload, &set)
+	if set.Preference != "dark" {
+		t.Fatalf("页面收到的主题是 %q", set.Preference)
+	}
+
+	// 页面报失败 → 退回服务端写入：同一次点击不能让用户白点。
+	body, _ := json.Marshal(bridgePageResult{ID: set.ID, OK: false, Error: "theme service unavailable", Preference: "dark"})
+	sendBridgeFrame(t, page, bridgeEnvelope{Type: framePageResult, InstanceID: "inst-a", LaunchID: "L1", Payload: body})
+	fallback := readBridgeFrame(t, plugin)
+	if fallback.Type != frameSetTheme {
+		t.Fatalf("插件期望收到退回的 %s，得到 %s", frameSetTheme, fallback.Type)
+	}
+	var fb bridgeSetThemePayload
+	_ = json.Unmarshal(fallback.Payload, &fb)
+	if fb.Preference != "dark" {
+		t.Fatalf("退回写入的主题是 %q", fb.Preference)
+	}
+}
+
+// 网页端连接的边界：过期 launch 拒绝、非本机 Origin 拒绝、page 角色拿不到主题以外的能力。
+func TestBridgePageChannelGating(t *testing.T) {
+	app, _ := newSelfRestartTestApp(t)
+	app.bridge.start()
+	t.Cleanup(app.bridge.stop)
+	app.processes["inst-a"] = &managedProcess{instanceID: "inst-a", launchID: "L1"}
+
+	// ① 不是实例地址的 Origin（本机别的服务）→ 403。
+	if _, resp, err := dialPageBridge(t, app, "http://127.0.0.1:9999"); err == nil {
+		t.Fatal("非实例地址的 Origin 不该升级成功")
+	} else if resp != nil {
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("非实例地址 Origin 期望 403，得到 %d", resp.StatusCode)
+		}
+	}
+
+	// ② 过期 launch 的页面握手：回失败结果并断开，不留下连接。
+	stale, _, err := dialPageBridge(t, app, "http://127.0.0.1:3080")
+	if err != nil {
+		t.Fatalf("网页端应该能连上: %v", err)
+	}
+	defer stale.Close()
+	sendBridgeFrame(t, stale, pageHelloFrame("inst-a", "L0"))
+	res := readBridgeFrame(t, stale)
+	if res.Type != framePageResult {
+		t.Fatalf("期望 %s，得到 %s", framePageResult, res.Type)
+	}
+	var pr bridgePageResult
+	_ = json.Unmarshal(res.Payload, &pr)
+	if pr.OK {
+		t.Fatal("过期 launch 的网页端握手不该成功")
+	}
+	if app.bridge.hasPage("inst-a") {
+		t.Fatal("被拒的网页端不该留下连接")
+	}
+
+	// ③ 正常握手后，页面发重启帧：既没有应答，也不该记下重启标志。
+	page, _, err := dialPageBridge(t, app, "http://127.0.0.1:3080")
+	if err != nil {
+		t.Fatalf("网页端应该能连上: %v", err)
+	}
+	defer page.Close()
+	sendBridgeFrame(t, page, pageHelloFrame("inst-a", "L1"))
+	waitPage(t, app.bridge, "inst-a")
+	sendBridgeFrame(t, page, bridgeEnvelope{Type: frameRestart, InstanceID: "inst-a", LaunchID: "L1"})
+	_ = page.SetReadDeadline(time.Now().Add(400 * time.Millisecond))
+	if _, _, err := page.ReadMessage(); err == nil {
+		t.Fatal("网页端发重启帧不该得到任何应答")
+	}
+	app.bridge.mu.Lock()
+	_, restarted := app.bridge.restarts["inst-a"]
+	app.bridge.mu.Unlock()
+	if restarted {
+		t.Fatal("网页端不该能触发重启")
+	}
 }
 
 // ack 之后进程一直不退（插件侧退出调用没生效）→ 看门狗强制收树，但保留"自重启"语义，

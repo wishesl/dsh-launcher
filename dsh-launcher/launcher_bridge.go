@@ -28,6 +28,18 @@ import (
 // 没有 HTTP REST 端点：旧的 /connect、/theme、/restart、/pending、/pending-consumed
 // 已全部搬成帧（用户要求：只保留 ws，不做降级）。第一帧必须是 hello，它把连接绑定到
 // 实例 + launchID —— 之前靠 URL 查询参数/请求体携带的身份，现在就是连接自身的状态。
+//
+// 一条连接有两种角色（第一帧决定，之后不可改）：
+//
+//	plugin（hello）    —— 服务端插件（Node）：能力握手 / 主题 / dsh-restart / 续跑负载
+//	page（page-hello） —— DSH 网页端的客户端半边（dsh-launcher-plugin/lib/client.js）：
+//	                      主题即时通道。点一下启动器的主题按钮，页面当场换肤、启动器当场
+//	                      跟上，而"把 ui-theme 写进 profile"（实测 330–350ms）放到后台跑。
+//
+// page 角色只认主题帧（page-theme / page-result）：浏览器页面里的东西权限最小化，即使
+// 页面脚本被篡改也拿不到重启、续跑这些能力（role 门控见 handleFrame）。网页端不能自定义
+// WS 握手头，所以它的 token 走 query（?token=…，token 本来就在注入的页面全局里，暴露面
+// 不变）；Origin 必须是本机已知的 DSH 网页地址（见 App.pageOriginSet）。
 
 const (
 	bridgeReadLimit  = 1 << 20 // 单帧上限 1 MiB（续跑负载可能带一段上下文）
@@ -47,6 +59,8 @@ var bridgeRestartGrace = 20 * time.Second
 //
 //	插件 → launcher：hello / theme / restart / pending-consumed / command-result
 //	launcher → 插件：pending / set-theme / restart-result
+//	网页端 → launcher：page-hello / page-theme / page-result
+//	launcher → 网页端：page-set-theme
 //
 // 只增不改：不认识的帧直接忽略（老 launcher + 新插件也不会互相打死）。
 const (
@@ -59,6 +73,17 @@ const (
 	framePending       = "pending"
 	frameSetTheme      = "set-theme"
 	frameRestartResult = "restart-result"
+
+	framePageHello    = "page-hello"
+	framePageTheme    = "page-theme"
+	framePageResult   = "page-result"
+	framePageSetTheme = "page-set-theme"
+)
+
+// 连接角色：由第一帧决定（hello → plugin，page-hello → page）。空 = 还没握手。
+const (
+	bridgeRolePlugin = "plugin"
+	bridgeRolePage   = "page"
 )
 
 type launcherBridge struct {
@@ -74,19 +99,22 @@ type launcherBridge struct {
 
 	mu         sync.Mutex
 	clients    map[string]*bridgeClient          // instanceID → 当前连接（每实例只留最新一条）
+	pages      map[string]*bridgeClient          // instanceID → 网页端即时通道连接
 	handshakes map[string]pluginCapabilityReport // instanceID → 最近一次 hello 全量快照
 	restarts   map[string]string                 // instanceID → 已 ack 的发起 launchID（一次性重启标志）
 	pending    map[string]json.RawMessage        // instanceID → 重启完成续跑负载（注入成功确认后才清）
 	watchdogs  map[string]*time.Timer            // instanceID → ack 后的退出兜底定时器（进程退出即撤销）
 }
 
-// bridgeClient —— 一条已建立的插件连接。instanceID / launchID 由对方的第一帧 hello 绑定，
+// bridgeClient —— 一条已建立的连接。instanceID / launchID 由对方的第一帧绑定，
 // 此后所有入帧都以这条连接的身份解释（不再信报文里的 instanceId/launchId）。
 type bridgeClient struct {
 	instanceID string
 	launchID   string
-	conn       *websocket.Conn
-	writeMu    sync.Mutex // WriteMessage 不能并发；Ping 走 WriteControl，gorilla 允许并发
+	// role —— bridgeRolePlugin / bridgeRolePage（空 = 还没握手）。page 角色只认主题帧。
+	role    string
+	conn    *websocket.Conn
+	writeMu sync.Mutex // WriteMessage 不能并发；Ping 走 WriteControl，gorilla 允许并发
 }
 
 // bridgeEnvelope —— 所有帧的统一信封（实现方案 §2.2）。
@@ -143,6 +171,22 @@ type bridgeRestartResult struct {
 	Error string `json:"error,omitempty"`
 }
 
+// bridgePageHelloPayload —— 网页端（客户端半边）的握手：只报身份，不带能力快照。
+// 能力报告的权威来源始终是服务端插件的 hello（页面可能根本没打开）。
+type bridgePageHelloPayload struct {
+	Plugin        string `json:"plugin"`
+	PluginVersion string `json:"pluginVersion"`
+}
+
+// bridgePageResult —— 网页端回报一条 page-set-theme 的执行结果。失败时启动器拿
+// preference 退回服务端写入（同一次点击不能让用户白点）。
+type bridgePageResult struct {
+	ID         string `json:"id"`
+	OK         bool   `json:"ok"`
+	Error      string `json:"error,omitempty"`
+	Preference string `json:"preference,omitempty"`
+}
+
 // themeEvent —— EmitEvent("dsh:theme") 的载荷。
 type themeEvent struct {
 	InstanceID string `json:"instanceId"`
@@ -153,6 +197,7 @@ func newLauncherBridge(a *App) *launcherBridge {
 	b := &launcherBridge{
 		app:        a,
 		clients:    map[string]*bridgeClient{},
+		pages:      map[string]*bridgeClient{},
 		handshakes: map[string]pluginCapabilityReport{},
 		restarts:   map[string]string{},
 		pending:    map[string]json.RawMessage{},
@@ -164,11 +209,21 @@ func newLauncherBridge(a *App) *launcherBridge {
 	}
 	// Origin 白名单：Node 客户端不发 Origin，浏览器一定发（且改不了）。所以
 	// 「没有 Origin」= 非浏览器客户端，放行；「Origin = 桥接自己的地址」= 握手 URL
-	// 派生的自源（部分 WS 客户端会带上），也放行。其余一律 403 —— 任意本地网页
+	// 派生的自源（部分 WS 客户端会带上），也放行；「Origin = 本机已知的 DSH 网页地址」
+	// 放行 —— 那是网页端即时通道（page 角色，只认主题帧）。其余一律 403：任意本地网页
 	// 都无法借道这条已认证的 loopback 通道（哪怕它猜到端口）。
 	b.upgrader.CheckOrigin = func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
-		return origin == "" || (b.origin != "" && origin == b.origin)
+		if origin == "" {
+			return true
+		}
+		if b.origin != "" && origin == b.origin {
+			return true
+		}
+		if b.app != nil && b.app.pageOriginSet()[origin] {
+			return true
+		}
+		return false
 	}
 	b.token = newBridgeID(24)
 	// crypto/rand 失败属于环境级异常：token 留空 → auth 恒 401 → 桥接不可用，
@@ -207,11 +262,15 @@ func (b *launcherBridge) stop() {
 		return
 	}
 	b.mu.Lock()
-	clients := make([]*bridgeClient, 0, len(b.clients))
+	clients := make([]*bridgeClient, 0, len(b.clients)+len(b.pages))
 	for _, c := range b.clients {
 		clients = append(clients, c)
 	}
+	for _, c := range b.pages {
+		clients = append(clients, c)
+	}
 	b.clients = map[string]*bridgeClient{}
+	b.pages = map[string]*bridgeClient{}
 	b.mu.Unlock()
 	for _, c := range clients {
 		_ = c.conn.Close()
@@ -229,9 +288,16 @@ func (b *launcherBridge) note(line string) {
 }
 
 // auth —— Bearer token 常量时间校验（token 由 launcher 随 env 下发，插件在握手头里回带）。
+//
+// 网页端例外：浏览器的 WebSocket 构造器**不能**自定义握手请求头，所以页面把 token 放在
+// query 里带回来（`ws://…/ws?token=…`）。这不降低安全强度 —— token 本来就在注入给页面的
+// 全局里（injectPageCoordinates），而页面连接另有 Origin 白名单 + page 角色门控。
 func (b *launcherBridge) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if got == "" {
+			got = r.URL.Query().Get("token")
+		}
 		if b.token == "" || len(got) != len(b.token) ||
 			subtle.ConstantTimeCompare([]byte(got), []byte(b.token)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -300,12 +366,33 @@ func (b *launcherBridge) pingLoop(c *bridgeClient, done <-chan struct{}) {
 }
 
 func (b *launcherBridge) handleFrame(c *bridgeClient, env bridgeEnvelope) {
-	if env.Type == frameHello {
+	switch env.Type {
+	case frameHello:
 		b.handleHello(c, env)
+		return
+	case framePageHello:
+		b.handlePageHello(c, env)
 		return
 	}
 	if c.instanceID == "" {
 		b.note("bridge: 收到 hello 之前的帧（type=" + env.Type + "），已忽略")
+		return
+	}
+	// 角色门控：网页端连接（page）只允许报主题。页面里跑的是浏览器脚本，能力面必须最小 ——
+	// 即使脚本被改，也拿不到重启/续跑（那些只认 plugin 角色的连接）。
+	if c.role == bridgeRolePage {
+		switch env.Type {
+		case framePageTheme:
+			var payload bridgeTheme
+			if len(env.Payload) > 0 {
+				_ = json.Unmarshal(env.Payload, &payload)
+			}
+			b.emitTheme(c.instanceID, payload.Preference)
+		case framePageResult:
+			b.handlePageResult(c, env)
+		default:
+			b.note("bridge: 网页端连接发来非主题帧（type=" + env.Type + "），已忽略")
+		}
 		return
 	}
 	switch env.Type {
@@ -351,6 +438,7 @@ func (b *launcherBridge) handleHello(c *bridgeClient, env bridgeEnvelope) {
 	}
 	c.instanceID = env.InstanceID
 	c.launchID = env.LaunchID
+	c.role = bridgeRolePlugin
 	report := pluginCapabilityReport{
 		Plugin:        payload.Plugin,
 		PluginVersion: payload.PluginVersion,
@@ -383,6 +471,86 @@ func (b *launcherBridge) handleHello(c *bridgeClient, env bridgeEnvelope) {
 	}
 	b.note("bridge: 实例 " + c.instanceID + " 的插件已连接（" + name + " " + version + "，launch=" + env.LaunchID + "）")
 	b.pushPending(c, pending)
+}
+
+// handlePageHello —— 网页端即时通道握手（客户端半边 dsh-launcher-plugin/lib/client.js）。
+//
+// 身份校验和插件一样严：必须是"当前在跑的那一次 launch"，否则回一条失败结果再断开。
+// 过期页面（浏览器标签里留着上一次注入的坐标）不能把主题即时通道指到新进程上。
+//
+// 被拒 / 断开都只是降级：插件仍走服务端写入路径，主题照样同步，只是慢 ~300ms（fail-open）。
+func (b *launcherBridge) handlePageHello(c *bridgeClient, env bridgeEnvelope) {
+	if env.InstanceID == "" || env.LaunchID == "" {
+		_ = c.send(framePageResult, bridgePageResult{OK: false, Error: "missing instanceId/launchId"})
+		_ = c.conn.Close()
+		return
+	}
+	var payload bridgePageHelloPayload
+	if len(env.Payload) > 0 {
+		_ = json.Unmarshal(env.Payload, &payload)
+	}
+	b.app.mu.Lock()
+	mp := b.app.processes[env.InstanceID]
+	b.app.mu.Unlock()
+	if mp == nil || mp.launchID != env.LaunchID {
+		b.note("bridge: 实例 " + env.InstanceID + " 的网页端握手被拒（不是当前进程），主题改走服务端写入")
+		_ = c.send(framePageResult, bridgePageResult{OK: false, Error: "launch mismatch"})
+		_ = c.conn.Close()
+		return
+	}
+	c.role = bridgeRolePage
+	c.instanceID = env.InstanceID
+	c.launchID = env.LaunchID
+	b.mu.Lock()
+	prev := b.pages[c.instanceID]
+	b.pages[c.instanceID] = c
+	b.mu.Unlock()
+	if prev != nil && prev != c {
+		// 一个实例只留最新一条网页端连接（刷新页面会重连）。
+		_ = prev.conn.Close()
+	}
+	name := payload.Plugin
+	if name == "" {
+		name = "未知插件"
+	}
+	version := payload.PluginVersion
+	if version == "" {
+		version = "版本未知"
+	}
+	b.note("bridge: 实例 " + c.instanceID + " 的网页端已接入主题即时通道（" + name + " " + version + "）")
+}
+
+// handlePageResult —— 网页端回报一条 page-set-theme 的结果。失败（页面脚本没跑起来、
+// theme 服务取不到、连接断了）就退回服务端写入：同一次点击不能让用户白点，宁可慢 300ms。
+func (b *launcherBridge) handlePageResult(c *bridgeClient, env bridgeEnvelope) {
+	var payload bridgePageResult
+	if len(env.Payload) > 0 {
+		_ = json.Unmarshal(env.Payload, &payload)
+	}
+	if payload.OK {
+		b.note("主题：实例 " + c.instanceID + " 的网页端已即时换肤（命令 " + payload.ID + "）")
+		return
+	}
+	if payload.Preference == "" {
+		b.note("主题：实例 " + c.instanceID + " 的网页端回报失败但没带主题值，已忽略：" + payload.Error)
+		return
+	}
+	b.note("主题：实例 " + c.instanceID + " 的网页端即时通道失败（" + payload.Error + "），退回服务端写入")
+	b.fallbackThemeToPlugin(c.instanceID, payload.Preference)
+}
+
+// fallbackThemeToPlugin —— 只给该实例的服务端插件连接补一条 set-theme（写盘路径）。
+func (b *launcherBridge) fallbackThemeToPlugin(instanceID, preference string) {
+	b.mu.Lock()
+	target := b.clients[instanceID]
+	b.mu.Unlock()
+	if target == nil {
+		b.note("主题：实例 " + instanceID + " 没有在线的服务端插件，退回失败（它连上后会重新同步）")
+		return
+	}
+	if err := target.send(frameSetTheme, bridgeSetThemePayload{ID: newBridgeID(8), Preference: preference}); err != nil {
+		b.note("主题：退回服务端写入失败（instance=" + instanceID + "）：" + err.Error())
+	}
 }
 
 // handleRestartFrame —— 重启：命令语义。校验发起者确实是当前在跑的那次 launch 才记标志 +
@@ -492,6 +660,20 @@ func (b *launcherBridge) unregister(c *bridgeClient) {
 	if c.instanceID == "" {
 		return
 	}
+	// 网页端连接（page）与插件连接分开记账：页面关掉/刷新不影响握手快照与胶囊状态，
+	// 插件断开才让"插件已连接"失效。
+	if c.role == bridgeRolePage {
+		b.mu.Lock()
+		removed := b.pages[c.instanceID] == c
+		if removed {
+			delete(b.pages, c.instanceID)
+		}
+		b.mu.Unlock()
+		if removed {
+			b.note("bridge: 实例 " + c.instanceID + " 的网页端即时通道已断开（主题退回服务端写入）")
+		}
+		return
+	}
 	b.mu.Lock()
 	removed := b.clients[c.instanceID] == c
 	if removed {
@@ -528,14 +710,100 @@ func (b *launcherBridge) sendCommand(frameType string, payload any) int {
 	return sent
 }
 
+// sendThemeCommand —— 主题下发：**有网页端即时通道的实例只走页面**（页面当场换肤，写盘交给
+// DSH 自己后台完成），其余实例走服务端插件（写盘 330–350ms，但一定能落盘）。
+//
+// 两边都发会让同一次点击写两遍配置 —— 那正是要消掉的 300ms，所以按实例二选一。
+func (b *launcherBridge) sendThemeCommand(id, preference string) (pageCount, pluginCount int) {
+	if b == nil {
+		return 0, 0
+	}
+	type target struct {
+		client  *bridgeClient
+		frame   string
+		payload any
+	}
+	b.mu.Lock()
+	targets := make([]target, 0, len(b.clients)+len(b.pages))
+	for instanceID, c := range b.clients {
+		if _, ok := b.pages[instanceID]; ok {
+			continue // 该实例走页面即时通道
+		}
+		targets = append(targets, target{client: c, frame: frameSetTheme,
+			payload: bridgeSetThemePayload{ID: id, Preference: preference}})
+	}
+	for _, c := range b.pages {
+		targets = append(targets, target{client: c, frame: framePageSetTheme,
+			payload: bridgeSetThemePayload{ID: id, Preference: preference}})
+	}
+	b.mu.Unlock()
+	for _, t := range targets {
+		if err := t.client.send(t.frame, t.payload); err != nil {
+			b.note("主题：下发失败（instance=" + t.client.instanceID + "）：" + err.Error())
+			continue
+		}
+		if t.frame == framePageSetTheme {
+			pageCount++
+		} else {
+			pluginCount++
+		}
+	}
+	return pageCount, pluginCount
+}
+
+// hasPage —— 该实例是否已有网页端即时通道（capabilities.go 用它报 pageChannel）。
+func (b *launcherBridge) hasPage(instanceID string) bool {
+	if b == nil || instanceID == "" {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	_, ok := b.pages[instanceID]
+	return ok
+}
+
+// pageOriginSet —— 本机已知的 DSH 网页地址集合（Origin 白名单）。网页端即时通道要能被
+// 浏览器页面连上，而浏览器的 Origin 只能是 scheme://host:port 这种形状，所以这里把每个
+// 实例的服务地址换算出三种本机写法（127.0.0.1 / localhost / [::1]）。
+//
+// 只列本机：DSH 服务默认只监听 loopback；就算配置成对外监听，也不该让外部页面接进来。
+func (a *App) pageOriginSet() map[string]bool {
+	origins := map[string]bool{}
+	if a == nil || a.store == nil {
+		return origins
+	}
+	for _, inst := range a.store.list() {
+		raw, ok := instanceServiceURL(&inst)
+		if !ok {
+			continue
+		}
+		scheme, rest := "http", raw
+		if i := strings.Index(raw, "://"); i >= 0 {
+			scheme, rest = raw[:i], raw[i+3:]
+		}
+		if i := strings.IndexAny(rest, "/?#"); i >= 0 {
+			rest = rest[:i]
+		}
+		_, port, err := net.SplitHostPort(rest)
+		if err != nil || port == "" {
+			continue
+		}
+		for _, host := range []string{"127.0.0.1", "localhost", "[::1]"} {
+			origins[scheme+"://"+host+":"+port] = true
+		}
+	}
+	return origins
+}
+
 // ---------------------------------------------------------------------------
 // 启动器 → 插件 的命令（Wails 绑定：前端「设置 → 主题」用）
 // ---------------------------------------------------------------------------
 
-// SetThemePreference 把用户在启动器里选的主题下发给所有在线实例的桥接插件。
+// SetThemePreference 把用户在启动器里选的主题下发给在线实例。
 //
-// 插件写进共享 profile 的 ui-theme 设置；打开的 DSH 网页端会自己实时采纳
-// （dsh-client-ui-theme 订阅了同一个 ns），插件随后把新值推回来，启动器据此确认。
+// 两条路按实例二选一（见 sendThemeCommand）：网页端即时通道在场 → 页面当场换肤、写盘后台跑；
+// 否则 → 服务端插件写进共享 profile 的 ui-theme 设置。两条路最终都落盘，打开的 DSH 网页端
+// 会自己实时采纳（dsh-client-ui-theme 订阅了同一个 ns），插件随后把新值推回来，启动器据此确认。
 //
 // 没有实例在线不算失败：前端保留「未同步」状态，等实例连上（hello 带回它当前的主题）
 // 再补推一次。返回 error 只用于非法入参（Wails 会把它变成 Promise 拒绝）。
@@ -548,14 +816,17 @@ func (a *App) SetThemePreference(preference string) error {
 	}
 	// 一个实例都没连上也要落盘：用户的意图先记住，下次启动的窗口底色才不会开倒车。
 	a.rememberTheme(preference)
-	sent := a.bridge.sendCommand(frameSetTheme, bridgeSetThemePayload{
-		ID:         newBridgeID(8),
-		Preference: preference,
-	})
-	if sent == 0 {
+	pageCount, pluginCount := a.bridge.sendThemeCommand(newBridgeID(8), preference)
+	switch {
+	case pageCount > 0 && pluginCount > 0:
+		a.bridge.note(fmt.Sprintf("主题：已下发 %s（%d 个实例走网页端即时通道，%d 个走服务端写入）",
+			preference, pageCount, pluginCount))
+	case pageCount > 0:
+		a.bridge.note(fmt.Sprintf("主题：已向 %d 个实例的网页端即时下发 %s（写盘后台进行）", pageCount, preference))
+	case pluginCount > 0:
+		a.bridge.note(fmt.Sprintf("主题：已向 %d 个实例下发 %s", pluginCount, preference))
+	default:
 		a.bridge.note("主题：" + preference + " 已在本机生效；当前没有已连接的实例，等实例连上后再同步")
-	} else {
-		a.bridge.note(fmt.Sprintf("主题：已向 %d 个实例下发 %s", sent, preference))
 	}
 	return nil
 }

@@ -8,6 +8,10 @@
  *   1. 主题同步（双向）：初读共享 profile 的 ui-theme 设置，变化即推 theme 帧，launcher 转成
  *      dsh:theme 事件驱动自身换肤；launcher 里的主题控件下发 set-theme 帧，插件把新值写回
  *      ui-theme（DSH 网页端订阅同一个 ns，打开的页面会当场换肤）；
+ *      0.2.6 起还有一条**即时通道**：本插件把桥接坐标注入 DSH 页面（webserver/index-inject），
+ *      页面里的客户端半边 lib/client.js 直接连桥接 —— 点启动器的主题按钮，页面当场换肤、
+ *      启动器当场跟上，而"把配置写进 profile"（实测 330–350ms）交给 DSH 自己在后台完成。
+ *      页面没连上/没加载客户端入口时自动退回服务端写入（fail-open，绝不假装成功）；
  *   2. dsh-restart：确认词 restart-dsh；发 restart 帧**拿到 ack 才退出**，拿不到 ack 就报错不退出
  *      （实例不会白死一次）。退出动作 500ms 后开始：三条计时通道（timer 服务 ctx、apply 的 ctx、
  *      全局 setTimeout）同时挂上，先 ctx.appExit(0) 优雅退出（DSH 自己还有 5s 强制退出上限），
@@ -150,6 +154,37 @@ function sendSnapshot() {
 		capabilities: [...capabilityState.values()],
 		theme: themePreference ? { preference: themePreference } : undefined,
 	});
+}
+
+/**
+ * 把桥接连接坐标注入 DSH 页面（`webserver/index-inject` 钩子，dsh-client-ui-theme 用的是同
+ * 一个钩子、同一批行形状）。页面里的客户端半边（lib/client.js）靠它连上 launcher 的 loopback
+ * 桥，走主题即时通道：点启动器的主题按钮，页面当场换肤、启动器当场跟上，而"把 ui-theme 写进
+ * 共享 profile"（实测 330–350ms）放到后台跑。
+ *
+ * 注入的是一段 body 脚本，token 因此出现在页面里。这不新增暴露面：token 本来就随 env 进了实例
+ * 进程（页面脚本与实例同源），且 launcher 侧对 page 角色做了门控 —— 只认主题帧 + Origin 白名单
+ * + launch 校验（见 launcher_bridge.go 的 handlePageHello）。
+ *
+ * 只在 launcher 拉起的实例里注入：没有桥接坐标的页面连不上，注入只是噪音。
+ */
+function injectPageCoordinates(ctx) {
+	if (!supervised || !instanceId || !launchId) return;
+	const coordinates = {
+		url: bridgeSocketURL(),
+		token: bridgeToken,
+		instanceId,
+		launchId,
+		plugin: name,
+		pluginVersion: pluginVersion(),
+	};
+	ctx.on("webserver/index-inject", (table) => {
+		table.push({
+			kind: "script",
+			placement: "body",
+			text: `window.__DSH_LAUNCHER_BRIDGE__ = ${JSON.stringify(coordinates)};`,
+		});
+	}, { prepend: true });
 }
 
 /** 防抖的全连：能力变化 → 150ms 后合并成一次快照。 */
@@ -1005,6 +1040,11 @@ function apply(ctx) {
 	if (supervised) {
 		maintain();
 	}
+
+	// 4) 网页端即时通道：把桥接坐标注入 DSH 页面，页面里的客户端半边（lib/client.js）据此
+	//    连上桥接。客户端入口由 DSH 启动时按 package.json 的 dsh.client 自动装载 —— 升级插件
+	//    后要重启一次 DSH 才生效；没生效只是退回服务端写入（慢 ~300ms），不影响正确性。
+	injectPageCoordinates(ctx);
 }
 
 export { Config, apply, inject, name };

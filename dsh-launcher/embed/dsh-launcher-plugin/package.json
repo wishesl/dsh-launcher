@@ -1,12 +1,15 @@
 {
   "name": "dsh-launcher-plugin",
-  "description": "dsh-launcher 桥接插件：双向主题同步（ui-theme ↔ 启动器）+ dsh-restart 自重启 + 能力握手，全部走一条 loopback WebSocket",
-  "version": "0.2.5",
+  "description": "dsh-launcher 桥接插件：双向主题同步（ui-theme ↔ 启动器，网页端走即时通道）+ dsh-restart 自重启 + 能力握手，全部走一条 loopback WebSocket",
+  "version": "0.2.6",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
     ".": {
       "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
     },
     "./package.json": "./package.json"
   },
@@ -14,6 +17,15 @@
     "lib"
   ],
   "license": "MIT",
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-theme"
+      ],
+      "immediately": true
+    }
+  },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.1"
   }
