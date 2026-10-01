@@ -484,7 +484,7 @@ export default function InstanceForm({ registry, bestFit, editing, onClose, onSa
             />
             <span>
               启动时不自动打开浏览器
-              <span className="muted">（--no-open：DSH 启动后不弹浏览器，由启动器自己管内嵌视图 / 打开按钮）</span>
+              <span className="muted">（--no-open：DSH 启动后不弹浏览器，由启动器自己管内嵌视图 / 卡片「已就绪」标签打开）</span>
             </span>
           </div>
           </>

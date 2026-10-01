@@ -642,7 +642,7 @@ body.reordering { cursor: grabbing; user-select: none; }
   border: 1px solid var(--border-soft);
   border-left: 4px solid var(--rail);
   border-radius: 12px;
-  /* 紧凑模式：padding 收到 10/14 */
+  /* 两行结构：竖向留 10，横向右边 14（左边留给手柄） */
   padding: 10px 14px 10px 0;
   box-shadow: var(--shadow-card);
   transition: box-shadow .15s, border-color .15s;
@@ -650,24 +650,124 @@ body.reordering { cursor: grabbing; user-select: none; }
 .instance-card:hover { box-shadow: 0 4px 16px rgba(20, 27, 46, .08); border-color: var(--border); }
 .instance-card.active { box-shadow: 0 0 0 3px var(--accent-soft); border-color: var(--accent); }
 
-/* 卡片主体（行 1 + 行 2 包成一列） */
+/* 卡片主体：左「身份区」（两行）+ 右「操作区」（两行）。
+   窗口够宽时并排；不够宽时整个操作区换行（.instance-ops 的 margin-left:auto 保证仍贴右）。 */
 .instance-body {
   flex: 1; min-width: 0;
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 10px 20px;
+}
+
+/* 身份区：行 1 = 名称 + 状态；行 2 = 版本 / 来源 / 自启 / 目录。
+   flex-basis 300 是"何时让操作区换行"的阈值，按身份区的真实需求取：
+   行 1 = 名称（max-width 260） + 状态徽标（约 60） + 间隙 ≈ 330。
+   原来写 380，比真实需求宽了近一倍，于是"身份区 380 + 操作区 374 + 间隙"
+   超过常见的可用宽度（实测 724），停止中的卡片全都提前换行：
+   操作区掉到第二行、卡片从两行变成四行、高度 84 → 137px，
+   而运行中的卡片操作条少一个「重装」（309）没超，仍是两行 —— 一屏里高矮不齐。
+   300 恰好保住名字的 260 上限不被挤成省略号，又不会提前换行。 */
+.instance-ident {
+  flex: 1 1 300px; min-width: 0;
   display: flex; flex-direction: column; gap: 6px;
 }
+.instance-ident-top { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.instance-ident-meta { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* 第二行放不下时整行隐藏（判定在 InstanceCard.tsx 里实测这行的 max-content）：
+   与其把目录剪成「…\deepseek\harness…」，不如这行不显示。 */
+.instance-ident-meta.is-hidden { display: none; }
 
-.instance-top { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-width: 0; }
 .instance-name {
-  font-weight: 700; font-size: 14px;
+  font-weight: 650; font-size: 14.5px; letter-spacing: -.01em;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  max-width: 220px;
+  max-width: 260px;
 }
-.instance-top-spacer { flex: 1 1 auto; }
-.instance-state { margin-left: auto; }
 
-/* 行 2：主操作区 —— 左对齐（手柄已经在卡片主体外，这里不需要 padding-left） */
-.instance-actions-row {
-  display: flex; align-items: center; gap: 8px;
+/* 目录：第二行的弹性尾巴 —— 把卡片中段那段空白用真实信息填掉（完整路径在 tooltip 里）。
+   整行放不下时这行会整行隐藏（见上面的 .is-hidden），所以这里的省略号正常情况下不会露脸。 */
+.instance-path {
+  flex: 1 1 auto; min-width: 40px;
+  font-family: var(--mono); font-size: 11.5px; color: var(--text-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* 操作区：上行 = 服务标签 + 启动/停止（主操作单独一个）；下行 = 次级操作条。
+   整块右对齐、垂直居中，与左侧两行等高。
+   ⚠️ margin-left:auto 是"换行后仍贴右"的关键；flex 必须可收缩（`none` 会在窄窗口横向溢出卡片）。 */
+.instance-ops {
+  flex: 0 1 auto; min-width: 0;
+  margin-left: auto;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+}
+.instance-ops-main {
+  display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end;
+  gap: 8px;
+}
+
+/* 次级操作条：浅底分组（工具栏观感）——比"一排裸文字"更有结构，点击区也更大 */
+.inst-bar {
+  display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end;
+  gap: 2px;
+  padding: 2px;
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+}
+.inst-act {
+  flex: none;
+  appearance: none;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 9px;
+  border: 0; border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  font-family: inherit; font-size: 12px; font-weight: 500;
+  line-height: 1; white-space: nowrap;
+  cursor: pointer;
+  transition: background .15s, color .15s, box-shadow .15s;
+}
+.inst-act:hover:not(:disabled) { background: var(--panel); color: var(--text); box-shadow: var(--shadow-card); }
+.inst-act:disabled { opacity: .45; cursor: not-allowed; }
+.inst-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.inst-act.active { background: var(--panel); color: var(--accent); font-weight: 600; }
+.inst-act.accent { color: var(--accent); font-weight: 700; }
+.inst-act.danger { color: var(--danger-text); }
+.inst-act.danger:hover:not(:disabled) { background: var(--panel); color: var(--red); }
+.inst-act-sep { flex: none; width: 1px; height: 14px; background: var(--border-soft); }
+
+/* 主操作（启动/停止）：单独一个、固定在最右；定宽 + 实心图标，两种状态不跳位、一眼可辨 */
+.inst-power { flex: none; min-width: 86px; gap: 6px; }
+
+/* ---------- 窄档（卡片 ≤760px）：只有一条规则 —— 操作区往左压，什么都不换行 ----------
+   宽屏放不下时（身份区 300 + 间隙 + 操作条 374/386 ≈ 735/747）如果只是让 `.instance-body`
+   自己换行，操作区会整块掉到第二行，卡片变成「名称 / 元信息 / 启动 / 操作条」四段、137px 高，
+   左半边两大段空白 —— 就是被吐槽的"缩小了就乱"。
+   窄档要的效果（用户原话"右边按钮直接在左边之上给他压住就行了"）：
+     行 1 = 名称 + 状态 …… 服务标签 + 启动/停止   ← 名称/状态/启动 永远不被压
+     行 2 = 版本 / 来源 / 自启 / 目录 ……          ← 右段被操作条压住（硬切，不是省略号）
+   收缩时**不换行、不隐藏、不折行**，只是操作条继续往左滑；卡片高度全程 84px。
+   做法：操作区盒子宽度算 0（`flex: 0 0 0; width: 0`）且**不设 margin-left:auto**
+   （auto margin 会吃掉剩余空间、身份区就不再 grow 了），于是身份区拿到整行宽度、
+   操作区被挤到行尾；操作区内部仍是"启动 / 操作条"两行（高 62，靠 align-items:flex-end
+   整块向左溢出），正好压在身份区第二行右段上。
+   ⚠️ 别改成 `position:absolute` + `display:contents`：那样操作区高度会塌成一行，
+   操作条上沿会盖住「启动」按钮（踩过）。
+   ⚠️ 也别加"放不下就把第二行藏掉/让操作条另起一行"的兜底：那就又变成两种样子了（用户否过）。 */
+.instance-card { container-type: inline-size; }
+@container (max-width: 760px) {
+  .instance-ident { flex: 1 1 140px; }
+  /* 这一档不隐藏第二行：被操作条压住比整行消失更划算（目录全路径仍在 tooltip 里） */
+  .instance-ident-meta.is-hidden { display: flex; }
+  .instance-ops { flex: 0 0 0; width: 0; margin-left: 0; }
+  /* 容器宽度是 0，子块必须按自身内容宽度排（否则操作条会被压成 0 宽、
+     5 个按钮一列一列折下去，卡片涨到 200px —— 踩过）。 */
+  .instance-ops > * { flex: none; width: max-content; }
+}
+
+/* 再窄一档（卡片 ≤640）：操作条（386px）快比整行还宽了，继续带文字压下去就会盖住
+   自启开关、再窄还会溢出卡片左边。这一档**只把按钮变窄**（只留图标，文字仍在 title/tooltip 里），
+   规则还是同一条"压住"，不换行、不隐藏。 */
+@container (max-width: 640px) {
+  .inst-act { gap: 0; padding: 5px 7px; font-size: 0; }
 }
 
 /* status badge: colored dot + label */
@@ -699,18 +799,25 @@ body.reordering { cursor: grabbing; user-select: none; }
   box-shadow: 0 0 0 2px var(--amber-soft);
 }
 
-/* ⋯ 菜单：定位 + 弹出层 */
-.inst-menu { position: relative; flex: none; }
-/* ⋯ 按钮去掉边框：纯图标、无背景，hover 时只变字色 */
-.inst-menu-btn {
-  padding: 4px 6px; min-width: 26px;
-  color: var(--text-3);
-  border: 0 !important;
-  background: transparent !important;
+/* 服务标签（点开 DSH web）：沿用 .tag-ok/.tag-warn/.tag-muted 的配色，
+   但它是按钮，这里把按钮默认外观压回标签的样子（margin-left 也去掉，
+   间距交给外层 gap；外链小图标表示"点了会在浏览器打开"）。 */
+button.instance-svc-tag {
+  flex: none;
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-left: 0;
+  padding: 4px 10px;
+  background: transparent;
+  font-family: inherit; font-size: 11px; font-weight: 600; line-height: 1.35;
+  cursor: pointer;
+  transition: background .15s;
 }
-.inst-menu-btn:hover { color: var(--text); background: var(--panel-2) !important; }
+button.instance-svc-tag:hover { background: var(--panel-2); }
+button.instance-svc-tag:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button.instance-svc-tag.is-static { cursor: default; }
+button.instance-svc-tag.is-static:hover { background: transparent; }
 
-/* 顶栏「刷新」下拉菜单（内嵌模式）：与实例卡 ⋯ 菜单风格一致 */
+/* 顶栏「刷新」下拉菜单（内嵌模式）：沿用同一套菜单风格 */
 .header-refresh-menu { position: relative; flex: none; }
 .header-refresh-pop {
   position: absolute; right: 0; top: calc(100% + 6px);
@@ -740,35 +847,6 @@ body.reordering { cursor: grabbing; user-select: none; }
   background: var(--border-soft);
 }
 
-.inst-menu-pop {
-  position: absolute; right: 0; top: calc(100% + 4px);
-  min-width: 170px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: var(--shadow-pop);
-  padding: 4px;
-  z-index: 30;
-  display: flex; flex-direction: column;
-}
-.inst-menu-item {
-  display: block; width: 100%; text-align: left;
-  padding: 7px 10px;
-  font-size: 12.5px;
-  background: transparent; border: 0; border-radius: 6px;
-  color: var(--text); cursor: pointer;
-}
-.inst-menu-item:hover:not(:disabled) { background: var(--panel-2); }
-.inst-menu-item:disabled { opacity: .5; cursor: not-allowed; }
-.inst-menu-item.active { color: var(--accent); background: var(--accent-soft); }
-.inst-menu-item.accent { color: var(--accent); font-weight: 600; }
-.inst-menu-item.danger { color: var(--red); }
-.inst-menu-item.danger:hover:not(:disabled) { background: var(--red-soft); }
-.inst-menu-sep {
-  height: 1px; margin: 4px 6px;
-  background: var(--border-soft);
-}
-
 .instance-url-row {
   display: flex; align-items: center; gap: 6px;
   padding: 5px 8px;
@@ -784,7 +862,7 @@ body.reordering { cursor: grabbing; user-select: none; }
 }
 .url-text:hover { text-decoration: underline; color: var(--accent); }
 .url-runtime { color: var(--accent); }
-/* 旧 meta 行 / dir 行 / 旧 actions 行已删除（合并到 tooltip / ⋯ 菜单）；保留选择器以免其他地方引用崩溃 */
+/* 旧 meta 行 / dir 行 / actions 行已删除（合并到 tooltip / 卡片右侧操作区）；保留选择器以免其他地方引用崩溃 */
 .instance-meta, .instance-dir, .instance-actions { display: none; }
 /* 自启开关：紧凑模式下放回第一行 npm pill 后面，缩一点 */
 .autostart-toggle {

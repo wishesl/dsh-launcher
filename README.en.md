@@ -199,7 +199,7 @@ dsh-launcher/
 ├── market_installed.go# 已装插件读取与启用/禁用（写 cordis.patch.yml 补丁层）
 ├── market_update.go   # 插件更新检查与执行（含内置插件）
 ├── favorites.go       # 插件收藏与分享码
-├── service_probe.go   # 独立端口服务探测（驱动「已就绪」+ 打开按钮）
+├── service_probe.go   # standalone port-service probe (drives the "ready" tag: click to open DSH web)
 ├── proxy.go           # 网络代理（npm/pnpm/git/registry）
 ├── env.go             # 前置环境检测（npm/pnpm）与 pnpm 安装
 ├── settings.go        # 设置持久化（布局、三栏宽度、托盘行为等）
