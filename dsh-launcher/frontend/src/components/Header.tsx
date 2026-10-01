@@ -166,6 +166,27 @@ export default function Header({
       )}
 
       <div className="header-right">
+        {/* npm 版本胶囊放最前：扫顶栏第一眼是"有没有新版本可升"。 */}
+        <div className="latest-chip" title={`npm 最新版本（来源: ${registry?.source ?? '-'}）`}>
+          <span className={`dot ${registry ? 'dot-live' : ''}`} />
+          {registryLoading ? (
+            <span className="chip-label">查询中…</span>
+          ) : registry ? (
+            <>
+              <span className="chip-label">npm latest</span>
+              <span className="chip-version">{registry.latest}</span>
+              {registry.next && registry.next !== registry.latest && (
+                <>
+                  <span className="chip-label">next</span>
+                  <span className="chip-version chip-muted">{registry.next}</span>
+                </>
+              )}
+            </>
+          ) : (
+            <span className="chip-label">无法获取版本</span>
+          )}
+        </div>
+
         {/* DSH 快捷状态 + 重启 */}
         <div
           className="dsh-chip"
@@ -213,25 +234,6 @@ export default function Header({
           </div>
         )}
 
-        <div className="latest-chip" title={`npm 最新版本（来源: ${registry?.source ?? '-'}）`}>
-          <span className={`dot ${registry ? 'dot-live' : ''}`} />
-          {registryLoading ? (
-            <span className="chip-label">查询中…</span>
-          ) : registry ? (
-            <>
-              <span className="chip-label">npm latest</span>
-              <span className="chip-version">{registry.latest}</span>
-              {registry.next && registry.next !== registry.latest && (
-                <>
-                  <span className="chip-label">next</span>
-                  <span className="chip-version chip-muted">{registry.next}</span>
-                </>
-              )}
-            </>
-          ) : (
-            <span className="chip-label">无法获取版本</span>
-          )}
-        </div>
         {/* 操作按钮组：靠右，紧邻窗口按钮（见 CSS 的 .header-actions） */}
         <div className="header-actions">
         {/* 常驻主题开关：唯一一个不受 embedMode 影响的按钮 —— 内嵌着 DSH 网页时也
