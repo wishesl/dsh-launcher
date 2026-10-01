@@ -280,6 +280,25 @@ export interface CapabilityReport {
   items: CapabilityItem[];
 }
 
+// ---------- 顶栏「内置插件连接状态」胶囊 ----------
+
+/**
+ * 胶囊的视觉档位。只有 `alert` 是确定的坏消息，其余都是「中性 / 还没结论」：
+ * 把「没握手」画成红色等于误报，用户会学会无视它（见 AGENTS.md §9.2）。
+ */
+export type BridgeTone = 'ok' | 'unknown' | 'stale' | 'alert';
+
+/** 顶栏胶囊要显示的一句话结论（推导规则见 util.ts 的 bridgeStatusOf）。 */
+export interface BridgeStatus {
+  tone: BridgeTone;
+  /** 主文案（短，能塞进胶囊）。 */
+  label: string;
+  /** 右侧强调字段：版本号或告警计数，'' 表示没有。 */
+  value: string;
+  /** 悬停详情：点名哪台实例 + 原因原文 + 点下去会发生什么。 */
+  title: string;
+}
+
 // ---------- 主题同步（dsh-launcher-plugin → launcher，见《dsh-launcher-plugin实现方案.md》） ----------
 
 /**

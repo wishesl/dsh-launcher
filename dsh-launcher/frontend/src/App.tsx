@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react';
 import { api, errMsg } from './api';
 import { BrowserOpenURL, Environment } from '../wailsjs/runtime/runtime';
 import type { CapabilityReport, ExitChoice, Instance, LauncherRelease, LayoutMode, LogEvent, LogTab, MarketOpState, RegistryInfo, ServiceState, UpdateOpState, UpdateSettings } from './types';
-import { clamp, capsAlert, embedGateReason, maskUrlSecrets } from './util';
+import { bridgeStatusOf, clamp, capsAlert, embedGateReason, maskUrlSecrets } from './util';
 import { applyThemePreference, bootstrapTheme } from './theme';
 import type { ThemePreference } from './theme';
 import Header from './components/Header';
@@ -767,6 +767,11 @@ export default function App() {
   // 内嵌目标：只有启动器自己拉起的实例，启动日志里才有带 token 的地址。
   const embedInstance = dshLive;
 
+  // 顶栏「插件连接状态」胶囊描述哪台实例：跟「DSH 已就绪」同一套上下文（优先探测到端口的
+  // 实例，没有就退到启动器托管的那台）。两者都没有时胶囊整块不渲染。
+  const bridgeTarget = serviceLive ?? dshLive;
+  const bridgeId = bridgeTarget?.id ?? null;
+
   // 进入内嵌模式（或实例状态变化）时自动解析带 token 的地址并加载。
   // 启动日志那行可能要等一两秒才出现，所以轮询几次。
   useEffect(() => {
@@ -863,6 +868,16 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveCapsKey, loadCaps]);
 
+  // 顶栏胶囊要的是**现在**的握手结论，所以给当前实例单独加一个轻量轮询：插件的 hello 帧
+  // 可能比实例翻 ready 晚一步（也可能桥重连后才有），只靠状态指纹那一次探测会一直停在
+  // "未连接"。GetCapabilities 是纯本地读取（后端不发网络请求），5s 一次可以忽略。
+  useEffect(() => {
+    if (!bridgeId) return;
+    void loadCaps(bridgeId);
+    const timer = window.setInterval(() => void loadCaps(bridgeId), 5_000);
+    return () => window.clearInterval(timer);
+  }, [bridgeId, loadCaps]);
+
   // 按钮上的计数：哪些实例有需要处理的能力问题（判定规则见 util.ts 的 capsAlert）。
   const capsAlertIds = instances.filter((i) => capsAlert(capsById[i.id], i)).map((i) => i.id);
   const capsAlertKey = capsAlertIds.join(',');
@@ -872,6 +887,15 @@ export default function App() {
     if (first) setActiveLogId(first);
     openLogs('compat');
   }, [capsAlertKey, openLogs]);
+
+  // 顶栏胶囊的结论（判定规则与"绝不因为没报告就标红"的理由都写在 util.ts 里）。
+  const bridgeStatus = bridgeTarget ? bridgeStatusOf(capsById[bridgeTarget.id], bridgeTarget) : null;
+  // 点胶囊：右栏「兼容性」落到胶囊描述的那台实例。跟上面「兼容性检查」的区别是那个优先
+  // 落在第一台出问题的实例，这个落在用户正在看的那台。
+  const openBridgePanel = useCallback(() => {
+    if (bridgeId) setActiveLogId(bridgeId);
+    openLogs('compat');
+  }, [bridgeId, openLogs]);
 
   // 稳定引用：Header 是子组件，回调不 useCallback 会每次渲染都换新引用（见 AGENTS.md）。
   const toggleEmbed = useCallback(() => setEmbedMode((v) => !v), []);
@@ -945,6 +969,8 @@ export default function App() {
         launcherVersion={launcherVersion}
         serviceLive={serviceLive}
         dshLive={dshLive}
+        bridgeStatus={bridgeStatus}
+        onOpenBridge={openBridgePanel}
         onRestartDsh={restartDsh}
         onOpenWeb={openWeb}
         logsOpen={logsOpen}

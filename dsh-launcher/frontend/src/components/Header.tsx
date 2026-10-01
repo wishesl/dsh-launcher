@@ -1,9 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Instance, RegistryInfo } from '../types';
+import type { BridgeStatus, Instance, RegistryInfo } from '../types';
 import type { ThemePreference } from '../theme';
 import { RotateCw, ChevronsLeft, ChevronsRight, Terminal, Monitor, LogOut, Sun, Moon } from 'lucide-react';
 import WinControls from './WinControls';
 import dshLogo from '../assets/logo.png';
+
+// 「内置插件连接状态」胶囊的状态点：只有 alert 是红的；unknown 借中性的 --dot（灰），
+// 不占红/琥珀 —— 别把"没有报告"画成故障（AGENTS.md §9.2）。
+const BRIDGE_DOT: Record<BridgeStatus['tone'], string> = {
+  ok: 'dot-live',
+  unknown: '',
+  stale: 'dot-warn',
+  alert: 'dot-danger',
+};
 
 interface Props {
   registry: RegistryInfo | null;
@@ -46,6 +55,11 @@ interface Props {
   themeDark: boolean;
   themePending: ThemePreference | null;
   onToggleTheme: () => void;
+  // 顶栏「内置插件连接状态」胶囊：跨进程功能（内嵌 / 主题反向同步 / 重启投递）全都压在
+  // 桥接握手上，握没握上一眼要能看见。null = 当前没有实例，整块不渲染。
+  bridgeStatus: BridgeStatus | null;
+  /** 点胶囊 → 右栏「兼容性」落到胶囊描述的那台实例。 */
+  onOpenBridge: () => void;
 }
 
 export default function Header({
@@ -74,6 +88,8 @@ export default function Header({
   themeDark,
   themePending,
   onToggleTheme,
+  bridgeStatus,
+  onOpenBridge,
 }: Props) {
   // Ready = the configured port actually serves DSH (service state), NOT the
   // launcher's process status — so an externally-started DSH on the same port
@@ -166,6 +182,36 @@ export default function Header({
             <span className="chip-label">DSH 未运行</span>
           )}
         </div>
+
+        {/* 内置插件连接状态：跨进程功能（内嵌 / 主题反向同步 / 重启投递）全压在桥接握手上，
+            所以"握没握上"要一眼可见。灰 / 琥珀 / 红三档严格照 AGENTS.md §9.2 —— 没握手
+            都是良性原因（未安装 / 桥没起来 / 副本是旧版），后端已把分诊写进 title，这里
+            绝不因为"还没报告"就标红。内嵌态右栏没渲染，那时只留悬停说明，不做成点了
+            没反应的按钮。窗口窄时只留状态点（见 CSS 的 .bridge-chip-text）。 */}
+        {bridgeStatus && (
+          <div
+            className={`bridge-chip${embedMode ? ' is-static' : ''}`}
+            title={
+              embedMode
+                ? `${bridgeStatus.title}（退出内嵌后可在右栏「兼容性」看明细）`
+                : `${bridgeStatus.title} 点击打开右栏「兼容性」。`
+            }
+          >
+            <span className={`dot ${BRIDGE_DOT[bridgeStatus.tone]}`} />
+            {embedMode ? (
+              <span className="chip-label bridge-chip-text">{bridgeStatus.label}</span>
+            ) : (
+              <button type="button" className="bridge-chip-open bridge-chip-text" onClick={onOpenBridge}>
+                {bridgeStatus.label}
+                {bridgeStatus.value && (
+                  <span className={`chip-version${bridgeStatus.tone === 'alert' ? ' chip-alert' : ''}`}>
+                    {bridgeStatus.value}
+                  </span>
+                )}
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="latest-chip" title={`npm 最新版本（来源: ${registry?.source ?? '-'}）`}>
           <span className={`dot ${registry ? 'dot-live' : ''}`} />
