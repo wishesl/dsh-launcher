@@ -11,7 +11,7 @@ import {
   Terminal,
   Trash2,
 } from 'lucide-react';
-import { getWebUrl } from '../util';
+import { getWebUrl, shortDir } from '../util';
 import Switch from './Switch';
 
 interface Props {
@@ -65,15 +65,6 @@ function GripDots() {
       {rows.map((cy) => cols.map((cx) => <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="1.35" />))}
     </svg>
   );
-}
-
-/** 目录只显示"尾巴"（…\父\当前）：一眼看出跑的是哪个目录，又不把第二行撑爆。 */
-function shortDir(dir: string): string {
-  const trimmed = dir.replace(/[\\/]+$/, '');
-  const sep = trimmed.includes('\\') ? '\\' : '/';
-  const parts = trimmed.split(/[\\/]/).filter(Boolean);
-  if (parts.length <= 2) return trimmed;
-  return `…${sep}${parts.slice(-2).join(sep)}`;
 }
 
 export default function InstanceCard({

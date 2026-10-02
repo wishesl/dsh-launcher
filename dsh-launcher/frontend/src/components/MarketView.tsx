@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api, errMsg } from '../api';
-import { BUILTIN_PLUGIN_NAME, githubRepoOf, githubURLFromSpec, specRepoOf } from '../util';
+import { BUILTIN_PLUGIN_NAME, githubRepoOf, githubURLFromSpec, shortDir, specRepoOf } from '../util';
 import type {
   FavoriteDraft,
   FavoritePlugin,
@@ -719,16 +719,23 @@ export default function MarketView({
       <div className="market-bar">
         <h2>插件市场</h2>
         <div className="market-bar-right">
+          {/* 目标实例下拉：路径只显示尾巴（shortDir）。原生 select 收起时是从**左边**截断的，
+              而区分两台实例的信息（父目录）恰在最右边 —— 铺完整路径的话几台实例看着一模一样。
+              完整路径放在 select 的 title 里。 */}
           <select
             className="market-instance-select"
             value={targetId}
             onChange={(e) => setTargetId(e.target.value)}
-            title="安装/卸载目标实例（profile: web）"
+            title={
+              targetInstance
+                ? `安装/卸载目标实例：${targetInstance.name}\n目录：${targetInstance.directory}\nprofile: web`
+                : '安装/卸载目标实例（profile: web）'
+            }
           >
             {instances.length === 0 && <option value="">（无实例）</option>}
             {instances.map((i) => (
               <option key={i.id} value={i.id}>
-                {i.name} · {i.directory}
+                {i.name} · {shortDir(i.directory)}
               </option>
             ))}
           </select>

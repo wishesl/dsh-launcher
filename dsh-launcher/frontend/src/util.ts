@@ -88,6 +88,21 @@ export function githubURLFromSpec(spec: string): string {
   return repo ? `https://github.com/${repo}` : '';
 }
 
+/**
+ * 目录只保留"尾巴"（…\父\当前）。
+ *
+ * 完整路径一律从左边开始被截断，而**一眼能区分两台实例的信息恰恰在右边**（同一批实例
+ * 往往共享 `E:\…\dsh-vsn\` 这一长串前缀）。所以凡是"一行里放路径"的地方都走这里，
+ * 完整路径交给 tooltip。⭐ 别在调用点各写各的截断 —— 卡片和市场的写法必须一致。
+ */
+export function shortDir(dir: string): string {
+  const trimmed = (dir || '').replace(/[\\/]+$/, '');
+  const sep = trimmed.includes('\\') ? '\\' : '/';
+  const parts = trimmed.split(/[\\/]/).filter(Boolean);
+  if (parts.length <= 2) return trimmed;
+  return `…${sep}${parts.slice(-2).join(sep)}`;
+}
+
 // ---- 能力门控 ----
 
 /** 面板里某一项的结论（取不到返回 undefined）。 */
