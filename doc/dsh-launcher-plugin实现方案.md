@@ -32,6 +32,13 @@
 >    未接入 + 桥接地址 + launch + 注入的插件版本 + 本页主题 + 重新连接按钮）与一份**静态**功能清单。
 >    **没有新帧、没有 Go 改动**：服务端半边那条连接的在线状态与能力探测结论页面读不到（只在 node 进程与启动器内存里），
 >    面板因此不显示它们、也不猜。注册走 `ctx.slots.inject("settings.section", …)`，槽不在就只是"没有面板"。
+> 8. **0.2.12 · 导航行换成启动器 logo（仍是纯客户端半边）。** 官方 `settings.section` **没有图标位**
+>    （只投影 `id`/`order`/`label`，导航图标按 section id 硬编码，未知 id 一律兜底齿轮），所以改走
+>    **认领 DOM 行**：`[role="dialog"] nav button` 里挑文本等于我们 label 的那颗 → 打
+>    `data-dsh-launcher-nav-icon` → 注入 CSS 藏掉 `> svg`、用 `::before` + 内联 base64 logo 画图标；
+>    `MutationObserver` 覆盖重渲染/切语言，marker 与 `<style>` 随 fiber 清理。做法与 dshmarket
+>    （`src/client/settings-nav-icon.ts`）一致，社区同款还有 `dsh-better-sidebar` / `dsh-skill-mcp-panel`。
+>    官方结构变了只会**退回齿轮**；官方哪天长出 `icon` 字段就把这段删掉。
 >
 > 兼容性面板：插件上报项 `pluginCapOrder` 现为
 > `[pluginLoaded, restartTool, themeReport, themeSet, embedRelax, restartDelivery]`，另有启动器侧探针 `pageChannel`

@@ -52,6 +52,24 @@ window.__ModuleLoader__.load({
 		const SECTION_ID = "dsh-launcher";
 		/** 设置分区顺序：官方 general(0) / models(10) / plugins(15) 之后。 */
 		const SECTION_ORDER = 30;
+		/** 设置导航行的认领标记：官方 nav 图标按 section id 硬编码（未知 id 一律通用齿轮），
+		 *  第三方**没有图标位**可用 —— 只能自己认领那一行（见 installNavIcon）。 */
+		const NAV_ICON_MARKER = "data-dsh-launcher-nav-icon";
+		/** 设置面板里的导航行：`[role="dialog"]` 是设置对话框，`nav` 是左侧导航列。 */
+		const NAV_ROW_SELECTOR = '[role="dialog"] nav button';
+		/** 导航图标尺寸：与官方 nav 图标同尺寸（16px），行距节奏不变。 */
+		const NAV_ICON_SIZE = 16;
+		/**
+		 * 启动器 logo（设置导航行 + 面板页头共用）。
+		 *
+		 * 源：`dsh-launcher/frontend/src/assets/logo.png`（256×256，黑底，与启动器窗口品牌区 /
+		 * 任务栏图标同一张）。这里内联 64×64 HighQualityBicubic 缩放后的 PNG：DSH 页面读不到插件包
+		 * 内的文件、bundle 也只能 require 模块，data URI 是唯一自洽的做法（约 12KB）。
+		 * 重生成：`Add-Type -AssemblyName System.Drawing` → Graphics 用 HighQualityBicubic 缩到
+		 * 64×64 → `[Convert]::ToBase64String` → 拼成 `data:image/png;base64,…`。
+		 * ⚠️ 它是**黑底彩色**图，不跟随主题色（要跟随就得另画一版单色剪影走 CSS mask）。
+		 */
+		const NAV_LOGO_DATA_URI = "data:image/png;base64,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";
 
 		function log(line) {
 			try {
@@ -91,8 +109,26 @@ window.__ModuleLoader__.load({
 .dshl-card-title{font-size:13px;font-weight:600;line-height:20px}
 .dshl-card-desc{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
 .dshl-card-need{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}
+.dshl-head{display:flex;align-items:center;gap:10px}
+.dshl-panel-logo{width:24px;height:24px;flex:none;display:block;object-fit:cover;border-radius:6px}
 `;
 		const CSS_TAG_ID = "dsh-launcher-plugin/section.css";
+		/** 导航图标那段 CSS 单独一个标签：它随认领它的 effect 一起装卸（见 installNavIcon）。 */
+		const NAV_CSS_TAG_ID = "dsh-launcher-plugin/nav-icon.css";
+
+		/**
+		 * 导航行的样式：藏掉官方那个兜底齿轮，用 `::before` 画我们自己的 logo。
+		 * 只对带认领标记的那一颗按钮生效 —— 不依赖 CSS module 的哈希类名，也不碰其它导航行。
+		 */
+		function navIconCss() {
+			return [
+				"[" + NAV_ICON_MARKER + "] > svg{display:none}",
+				"[" + NAV_ICON_MARKER + "]::before{content:\"\";flex:none;width:" + NAV_ICON_SIZE
+					+ "px;height:" + NAV_ICON_SIZE + "px;border-radius:4px;background-image:url(\""
+					+ NAV_LOGO_DATA_URI + "\");background-repeat:no-repeat;background-position:center;background-size:"
+					+ NAV_ICON_SIZE + "px " + NAV_ICON_SIZE + "px}",
+			].join("\n");
+		}
 
 		/** 插一次面板样式（按 tag 去重；node 环境下没有 document 就直接跳过）。 */
 		function installStyles() {
@@ -438,7 +474,10 @@ window.__ModuleLoader__.load({
 			const hints = statusHints(status, t);
 			const cannotReconnect = reconnectDisabled(status);
 			return h("div", { className: "dshl-section" }, [
-				h("h2", { className: "dshl-title", key: "title" }, t("title")),
+				h("div", { className: "dshl-head", key: "head" }, [
+					h("img", { className: "dshl-panel-logo", key: "logo", src: NAV_LOGO_DATA_URI, alt: "", draggable: false }),
+					h("h2", { className: "dshl-title", key: "title" }, t("title")),
+				]),
 				h("p", { className: "dshl-intro", key: "intro" }, t("intro")),
 				h("div", { className: "dshl-group", key: "status" }, [
 					h("div", { className: "dshl-group-head", key: "head" }, [
@@ -498,7 +537,71 @@ window.__ModuleLoader__.load({
 				locale: NS,
 				inject: () => ({ readStatus, subscribeStatus, reconnect }),
 			}, LauncherSection)), "dsh-launcher-plugin: 设置分区");
+			// 导航行那一格：官方没有图标位，只能自己认领（传的 label 必须与注册时那个一致）。
+			installNavIcon(ctx, () => t("nav"));
 			log("设置面板已注册（settings.section → " + SECTION_ID + "，order " + SECTION_ORDER + "）");
+		}
+
+		/**
+		 * 认领「设置」里我们那一行导航，把官方兜底的通用齿轮换成启动器 logo。
+		 *
+		 * 为什么必须自己认领：`settings.section` 只投影 `id / order / label`，而官方 nav 图标是按
+		 * section id 硬编码的（`navIcon(id)`），未知 id 一律通用齿轮 —— 第三方**没有图标位**。
+		 * 做法与 dshmarket 一致（见其 `src/client/settings-nav-icon.ts`）：按**行文本 = 我们的
+		 * label** 认领那一颗按钮，打上标记，再用注入的 CSS 藏掉 `> svg`、用 `::before` 画自己的
+		 * 图标。社区同款还有 dsh-better-sidebar / dsh-skill-mcp-panel。
+		 *
+		 * 刻意做窄：只动带标记的那一行，不碰任何官方结构；marker 与观察者随 fiber 一起清理；
+		 * MutationObserver 覆盖重渲染与切语言（行文本会跟着 label 变）。
+		 *
+		 * ⚠️ 官方哪天改了设置面板结构（`[role="dialog"] nav button` 不成立），这里就是零命中 ——
+		 * 结果是**退回通用齿轮**，不报错、不影响面板与主题通道。
+		 * ⚠️ 官方哪天给 `settings.section` 长出 `icon` 字段，这段整个删掉（dshmarket 也这么定的）。
+		 */
+		function installNavIcon(ctx, resolveLabel) {
+			if (typeof document === "undefined") return;
+			ctx.effect(() => {
+				const tag = document.createElement("style");
+				tag.dataset.plugin = "dsh-launcher-plugin";
+				tag.dataset.pluginCss = NAV_CSS_TAG_ID;
+				tag.textContent = navIconCss();
+				document.head.appendChild(tag);
+
+				let disposed = false;
+				let scheduled = false;
+				const sync = () => {
+					scheduled = false;
+					if (disposed) return;
+					const wanted = String(resolveLabel() ?? "").trim();
+					// 空 label 一条都不标：语言还没解析出来时不能把整个 nav 认成自己的。
+					for (const row of document.querySelectorAll(NAV_ROW_SELECTOR)) {
+						if (wanted !== "" && String(row.textContent ?? "").trim() === wanted) {
+							row.setAttribute(NAV_ICON_MARKER, "");
+						} else {
+							row.removeAttribute(NAV_ICON_MARKER);
+						}
+					}
+				};
+				// 一串 DOM 变更合并成一次 sync，并赶在下一帧之前落地（别让用户先看到齿轮）。
+				const schedule = () => {
+					if (scheduled || disposed) return;
+					scheduled = true;
+					queueMicrotask(sync);
+				};
+				sync();
+				const observer = typeof MutationObserver === "function" ? new MutationObserver(schedule) : null;
+				if (observer !== null && document.body !== void 0 && document.body !== null) {
+					observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+				}
+				return () => {
+					disposed = true;
+					observer?.disconnect();
+					for (const row of document.querySelectorAll("[" + NAV_ICON_MARKER + "]")) {
+						row.removeAttribute(NAV_ICON_MARKER);
+					}
+					tag.remove();
+				};
+			}, "dsh-launcher-plugin: 设置导航图标");
 		}
 		//#endregion
 
