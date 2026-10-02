@@ -2,7 +2,7 @@
 
 > **⚠️ 本文是初版设计记录 —— 以下内容勿当作现状读。权威契约以
 > [`dsh-launcher/embed/dsh-launcher-plugin/README.md`](../dsh-launcher/embed/dsh-launcher-plugin/README.md) 的帧表为准。**
-> 落地后的演进（插件当前版本 **0.2.8**）：
+> 落地后的演进（插件当前版本 **0.2.11**）：
 >
 > 1. **0.2.0 · REST → 一条 WebSocket。** 「一条 loopback HTTP 线 + 5 个 REST 端点」收敛成**一条 loopback WebSocket**
 >    （用户要求「只保留 ws，旧接口全搬过来，不做降级」）：`dsh-launcher/launcher_http.go` 已删除，改为
@@ -25,6 +25,13 @@
 >    修法：定时器回调全部 try/catch + 自己持有 disposer 并随 fiber 销毁取消 + `apply()` 幂等（第二次装载先收掉旧会话）。
 > 5. **0.2.8 · 续跑交付跨装载会话补交。** 「重启完成」消息常落在被拆掉的装载会话 #1 里而静默丢失（2026-10-02 01:27 真机）；
 >    负载改为**进程级**、重试绑当时存活的会话、新会话装载时补做，交付链改走可见痕迹（`console.error` + `command-result` 帧）。
+> 6. **0.2.9 / 0.2.10 · 交付等 `sessionController` 就绪 + 去掉主题逐次打点。** 前者不再把"服务还没装配好"当失败烧重试
+>    （文案也只写确证的事实）；后者把 0.2.5 那批延迟诊断全部删掉 —— 每次点击/事件刷一行，实测把实例日志刷满。
+> 7. **0.2.11 · DSH 设置里的「启动器」面板（纯客户端半边）。** 网页端半边多注册一个 `settings.section` 分区
+>    （`id: dsh-launcher`，`order: 30`），展示**本页那条 WebSocket 通道自己的状态**（连通/连接中/离线重连/被拒/
+>    未接入 + 桥接地址 + launch + 注入的插件版本 + 本页主题 + 重新连接按钮）与一份**静态**功能清单。
+>    **没有新帧、没有 Go 改动**：服务端半边那条连接的在线状态与能力探测结论页面读不到（只在 node 进程与启动器内存里），
+>    面板因此不显示它们、也不猜。注册走 `ctx.slots.inject("settings.section", …)`，槽不在就只是"没有面板"。
 >
 > 兼容性面板：插件上报项 `pluginCapOrder` 现为
 > `[pluginLoaded, restartTool, themeReport, themeSet, embedRelax, restartDelivery]`，另有启动器侧探针 `pageChannel`

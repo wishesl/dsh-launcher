@@ -8,7 +8,7 @@
 0.2.6 起同一条线多接一个角色：**网页端即时通道**（见下），让"点启动器换主题"从
 "等 DSH 写完配置再采纳（约 300ms）"变成**页面当场变色（毫秒级）**。
 
-## 版本速览（当前 0.2.10）
+## 版本速览（当前 0.2.11）
 
 | 版本 | 变更 | 提交 |
 |---|---|---|
@@ -21,6 +21,7 @@
 | 0.2.8 | **续跑交付跨装载会话补交** + 交付链改走可见痕迹 | `1c860c8` |
 | 0.2.9 | **交付等 `sessionController` 就绪**：不再把"服务还没装配好"当失败烧重试，删掉误导文案 | `b63ddf1` |
 | 0.2.10 | **去掉主题逐次打点**（0.2.5 的延迟诊断把实例日志刷满），只在写入失败时留痕 | `9d863be` |
+| 0.2.11 | **DSH 设置里的「启动器」面板**：客户端半边注册 `settings.section`，展示本页通道状态 + 静态功能清单 | 本次 |
 
 > 能力或行为变更**必须** bump `package.json` 版本（启动器用「内置 vs 已装」版本比对分诊，见文末开发须知）。
 
@@ -87,6 +88,43 @@ launcher /ws  ◄── page-hello ──────  dsh-launcher-plugin 客�
 | 启动器 → 页面 | `page-set-theme` | 让页面当场换主题 `{id, preference}`（写盘由 DSH 自己后台跑） |
 | 页面 → 启动器 | `page-theme` | 页面里自己换的主题 `{preference}`，启动器当场采纳 |
 | 页面 → 启动器 | `page-result` | `page-set-theme` 的结果 `{id, ok, error?, preference?}`；`ok:false` 时启动器退回服务端写入路径 |
+
+## DSH 设置里的「启动器」面板（0.2.11+）
+
+网页端半边往 DSH 的设置里注册一个分区：**设置 → 启动器**（`settings.section` 槽，
+`id: dsh-launcher`，`order: 30`，排在官方 general / models / plugins 之后）。面板只有两块：
+
+1. **链接状态** —— 本页这条 WebSocket 通道自己的状态：已连接 / 连接中 / 离线（第 N 次自动重连）/
+   已关闭（被拒原因）/ 未接入（本实例不是启动器拉起的），外加桥接地址（只到 `host:port`，
+   token 不进展示）、实例与 launch、注入时的插件版本、本页主题、连接与收帧时刻；离线重连 ≥3 次时
+   提示"启动器可能已重启（端口与 token 会变），重启本实例即可恢复"。还有一个**重新连接**按钮：
+   跳过退避（最长 40s）立即重试一次。
+2. **功能展示** —— **静态**清单：主题即时同步 / 主题变化上报 / 主题写入 / `dsh-restart` /
+   重启完成续跑 / 内嵌视图授权放宽 / 能力探测上报，每条写清"做什么"和"前提是什么"。
+
+### 为什么面板里没有"插件在不在线"和各项能力结论
+
+那些结论（`themeReport` / `restartTool` / `embedRelax`…）产生在**服务端半边**那条连接上，
+只存在于 DSH 的 node 进程和启动器的内存里；页面（浏览器）读不到。要显示它们只有两条路：
+启动器推一条状态帧，或服务端半边在注入坐标时顺手带一份快照 —— **本版都不做**。
+所以面板**只**说自己看得见的东西，缺证据就不显示，绝不猜（同 AGENTS.md §9 的三态纪律）。
+
+### fail-open 纪律（改这块务必保留）
+
+- 依赖面：客户端半边的 `inject` = `["theme","slots","locale"]`。`theme` 由 dsh-client-ui-theme
+  提供，而它自己的 inject 就含 slots/locale ⇒ 只要本插件跑得起来，这两项必然已就绪。
+- `package.json` 的 `dsh.client.inject` **故意不**加 `@deepseek-ai/dsh-client-ui-settings-general`：
+  注册走 `ctx.slots.inject("settings.section", …)`（槽声明提交后回调），不依赖任何加载顺序；
+  将来某个 DSH 少了那个包，后果只是"没有面板"，而不会把整条主题即时通道一起卡死。
+- `installSettingsSection` 先查服务形状，外面还包了一层 `try/catch`；`react` 是懒取的，
+  取不到就返回 `null`。面板永远不该有能力把主题通道搞挂。
+- 面板是**只读视图**：状态存在客户端半边自己的模块级快照里（`publish` 每次换新对象，
+  React 靠引用变化重渲染），不落盘、不注册任何设置命名空间。
+
+### 生效方式
+
+客户端半边在 **DSH 启动时**装载：改完面板要么在启动器里对该实例「安装·重装」内置插件、
+再重启 DSH；要么在 `pnpm run dev:web` 的 HMR 下换装。改能力/行为记得 bump `package.json` 版本。
 
 ## 主题双向同步
 
@@ -268,4 +306,8 @@ launcher /ws  ◄── page-hello ──────  dsh-launcher-plugin 客�
 - 改了能力或行为：**bump `package.json` 版本号**（启动器用 内置 vs 已装 版本比对分诊）。
 - Go：`cd dsh-launcher && go test ./...`（`launcher_bridge_test.go` 有真 socket 协议测试，
   `launcher_bridge_plugin_test.go` 用 node 跑本插件的真代码做端到端契约测试，没有 node 自动跳过）。
+  网页端半边的契约在 `testdata/plugin-client-harness.mjs`：模块形状 + 设置分区注册形态 +
+  fail-open 三例（无坐标 / `slots.inject` 不回调 / 没有 slots 服务）+ 真 WS 主题通道；
+  还借前端 node_modules 的 **真 react/react-dom** 做一次 SSR 冒烟（取不到就跳过，打印
+  `HARNESS SSR SKIPPED`，不为此造依赖）。
 - 构建：`wails build`（AGENTS.md 强制项）。
