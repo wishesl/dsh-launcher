@@ -27,6 +27,20 @@
  *   页面读不到。要显示它们，得由启动器推一条状态帧、或由服务端半边在注入坐标时带一份快照 ——
  *   本版都不做。面板不猜、不假装，缺证据就不显示。
  *
+ * 1.2 起加一道**内嵌门禁**：只有**启动器内嵌视图**（启动器前端里的 `<iframe>`）那个页面接这条
+ * 通道，外部浏览器标签页**不接**（见 isEmbeddedView 与 doc/网页端即时通道实现方案.md）。
+ *
+ *   为什么：这条通道天生是"每页一条"，而它省下的 330ms 只对"用户正看着启动器点主题"那个页面有
+ *   意义 —— 也就是内嵌视图。外部标签页晚 300ms 跟随完全可接受。而启动器侧的 `pages` 是**每实例
+ *   一个槽**（新连接踢掉旧连接），一旦有两个页面同时接进来就会互踢：被踢的那页按契约 500ms 重连
+ *   （退避在每次握手成功时清零），于是 2 次/秒无限振荡（真机日志：连续十几分钟、每秒恰好 2 条
+ *   「网页端已接入」、段内「已断开」为 0）。
+ *
+ *   ⚠️ 不能用 URL 标记区分：内嵌那条带 token 的地址，DSH 回 `303 → location: ./`，token 换成会话、
+ *   **query 被整个丢掉**；外部那条落地也是 `/`。两者最终 URL 完全相同，只能按"本页是否被 iframe
+ *   内嵌"判断。也别改回"每实例单值 + 踢旧"或去做页面侧选举 —— 门禁之下启动器的单槽语义重新
+ *   正确，够用。
+ *
  * 装载方式：DSH 启动时扫 host Loader 的 entries，按 package.json 的 `dsh.client` + `exports["./client"]`
  * 自动发现本文件（模块 id 必须是 package.json 的 name），所以**升级插件后要重启一次 DSH** 才会
  * 加载到它。注入给页面的 `window.__DSH_LAUNCHER_BRIDGE__` 由服务端插件写入。
@@ -150,7 +164,8 @@ window.__ModuleLoader__.load({
 		/**
 		 * 面板读到的**只读快照**。形状：
 		 *   { transport: "absent"|"connecting"|"online"|"offline"|"disabled",
-		 *     reason, retry, connectedAt, lastFrameAt, bridgeHost, theme, coord }
+		 *     reason, retry, connectedAt, lastFrameAt, bridgeHost, theme, coord,
+		 *     external }  // external = 本页是外部标签页（门禁不放行），不是故障
 		 * publish 每次都换一个新对象 —— React 靠引用变化重渲染，原地改字段会被它跳过。
 		 */
 		let snapshot = {
@@ -162,6 +177,7 @@ window.__ModuleLoader__.load({
 			bridgeHost: "",
 			theme: "",
 			coord: null,
+			external: false,
 		};
 		const statusListeners = new Set();
 
@@ -244,6 +260,30 @@ window.__ModuleLoader__.load({
 			if (typeof c.launchId !== "string" || c.launchId === "") return null;
 			return c;
 		}
+
+		/**
+		 * 本页是不是**启动器内嵌视图**（启动器前端里的 `<iframe>`）打开的？—— 这条通道的门禁。
+		 *
+		 * 只有内嵌视图接，外部浏览器标签页不接：启动器侧的 `pages` 是**每实例一个槽**、新连接踢掉
+		 * 旧连接，两个页面同时接进来就会互踢成 2 次/秒的振荡（被踢的那页按契约重连，而退避在每次
+		 * 握手成功时清零，永远停在 500ms）。外部页面本来也不需要这 330ms —— 用户点启动器主题时看
+		 * 的是内嵌视图。
+		 *
+		 * 判据只能是 `self !== top`（内嵌 = 有父窗口），**不能用 URL 标记**：内嵌那条带 token 的地址
+		 * 会被 DSH 用 `303 → ./` 换成会话、query 整个丢掉，与外部页面最终 URL 完全相同。
+		 *
+		 * 取不到 `top`、或比较抛异常时一律返回 false（= 不接）。不接是安全方向：主题仍会同步，只是
+		 * 走服务端写入那条慢路（约 300ms），功能不会坏。
+		 */
+		function isEmbeddedView() {
+			try {
+				if (window.self === void 0 || window.top === void 0) return false;
+				return window.self !== window.top;
+			} catch {
+				// 跨源隔离等场景下读 top 可能抛：当作"不是内嵌"，不猜。
+				return false;
+			}
+		}
 		//#endregion
 
 		//#region 面板文案与功能清单
@@ -275,11 +315,12 @@ window.__ModuleLoader__.load({
 			"channel.absent": "未接入",
 			"hint.launcherRestarted": "启动器可能已重启（桥接端口与 token 会变）：重启本实例即可恢复。",
 			"hint.refreshPage": "本页记录的 launch 与当前进程不一致（旧标签页）：刷新页面即可恢复。",
+			"hint.externalPage": "外部标签页不接即时通道（设计如此，只有启动器内嵌视图接）：主题照旧同步，只是每次约 300ms。要看即时换肤请用启动器的内嵌视图。",
 			"features.title": "功能展示",
 			"features.need": "前提",
 			"feat.pageTheme.title": "主题即时同步",
 			"feat.pageTheme.desc": "在启动器里点主题，本页当场换肤；写盘交给 DSH 自己在后台完成。",
-			"feat.pageTheme.need": "插件 0.2.6+，且 DSH 重启过一次（客户端半边在启动时装载）",
+			"feat.pageTheme.need": "插件 0.2.13+，且从启动器内嵌视图打开（外部标签页不接入）",
 			"feat.themeReport.title": "主题变化上报",
 			"feat.themeReport.desc": "在本页或 DSH 里改主题，启动器立刻跟上，不必等配置写完。",
 			"feat.themeReport.need": "由启动器拉起的实例",
@@ -323,11 +364,12 @@ window.__ModuleLoader__.load({
 			"channel.absent": "Not attached",
 			"hint.launcherRestarted": "The launcher may have restarted (its bridge port and token change): restart this instance to recover.",
 			"hint.refreshPage": "This page carries a launch id that no longer matches the running process (stale tab): refresh the page to recover.",
+			"hint.externalPage": "External tabs do not join the instant channel (by design: only the launcher's embedded view does). Theming still syncs, just with the usual ~300ms. Use the launcher's embedded view for instant repaint.",
 			"features.title": "Features",
 			"features.need": "Requires",
 			"feat.pageTheme.title": "Instant theme sync",
 			"feat.pageTheme.desc": "Pick a theme in the launcher and this page repaints immediately; writing the setting is left to DSH in the background.",
-			"feat.pageTheme.need": "plugin 0.2.6+, and one DSH restart (the client half loads at startup)",
+			"feat.pageTheme.need": "plugin 0.2.13+, opened from the launcher's embedded view (external tabs do not join)",
 			"feat.themeReport.title": "Theme change reporting",
 			"feat.themeReport.desc": "Switch the theme here or in DSH and the launcher follows at once, without waiting for the write.",
 			"feat.themeReport.need": "an instance started by the launcher",
@@ -445,6 +487,7 @@ window.__ModuleLoader__.load({
 		/** 状态 → 提示行（只在有事要说的时候出现）。 */
 		function statusHints(status, t) {
 			const hints = [];
+			if (status.external === true) hints.push(t("hint.externalPage"));
 			if (status.transport === "offline" && status.retry >= 3) hints.push(t("hint.launcherRestarted"));
 			if (status.transport === "disabled") hints.push(t("hint.refreshPage"));
 			return hints;
@@ -625,6 +668,20 @@ window.__ModuleLoader__.load({
 
 			const coordinates = readCoordinates();
 			if (coordinates !== null) {
+				// 门禁（0.2.13）：只有启动器内嵌视图接这条通道，外部标签页不接 —— 启动器的 page 槽是
+				// 每实例一个，两个页面同时接进来会互踢成 2 次/秒的振荡；而外部页面本来也不需要这
+				// 330ms（用户点启动器主题时看的是内嵌视图）。不接不是故障：主题照旧同步，只是走服务端
+				// 写入那条慢路。这里不排任何重连 —— 页面是不是内嵌的，刷新也不会变。
+				if (!isEmbeddedView()) {
+					publish({
+						transport: "absent",
+						external: true,
+						reason: "本页是外部标签页，不接即时通道（只有启动器内嵌视图接）：主题照旧同步，只是要等 DSH 把配置写一遍（实测约 300ms）",
+						bridgeHost: bridgeHostOf(coordinates.url),
+						coord: coordOf(coordinates),
+					});
+					return;
+				}
 				start(ctx, coordinates);
 				return;
 			}

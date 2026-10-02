@@ -2,7 +2,7 @@
 
 > **⚠️ 本文是初版设计记录 —— 以下内容勿当作现状读。权威契约以
 > [`dsh-launcher/embed/dsh-launcher-plugin/README.md`](../dsh-launcher/embed/dsh-launcher-plugin/README.md) 的帧表为准。**
-> 落地后的演进（插件当前版本 **0.2.11**）：
+> 落地后的演进（插件当前版本 **0.2.13**）：
 >
 > 1. **0.2.0 · REST → 一条 WebSocket。** 「一条 loopback HTTP 线 + 5 个 REST 端点」收敛成**一条 loopback WebSocket**
 >    （用户要求「只保留 ws，旧接口全搬过来，不做降级」）：`dsh-launcher/launcher_http.go` 已删除，改为
@@ -39,6 +39,12 @@
 >    `MutationObserver` 覆盖重渲染/切语言，marker 与 `<style>` 随 fiber 清理。做法与 dshmarket
 >    （`src/client/settings-nav-icon.ts`）一致，社区同款还有 `dsh-better-sidebar` / `dsh-skill-mcp-panel`。
 >    官方结构变了只会**退回齿轮**；官方哪天长出 `icon` 字段就把这段删掉。
+> 9. **0.2.13 · 网页端即时通道加「内嵌门禁」（仍是纯客户端半边）。** 只有**启动器内嵌视图**（启动器前端里的
+>    `<iframe>`）那个页面连桥接，外部浏览器标签页不接（主题照旧同步，走服务端写入 + DSH 广播约 300ms）。
+>    起因：多开网页时启动器右栏「网页通道一直闪烁重连」—— `pages` 是每实例一个槽、新连接踢旧连接，被踢那页
+>    按契约 500ms 重连（退避在握手成功时清零）⇒ 2 次/秒无限振荡。判据用 `self !== top`（**不能用 URL 标记**：
+>    内嵌那条带 token 的地址被 DSH 用 `303 → ./` 换成会话、query 整个丢掉）。**没有新帧、没有 Go 改动。**
+>    完整推导见 [`doc/网页端即时通道实现方案.md`](./网页端即时通道实现方案.md)。
 >
 > 兼容性面板：插件上报项 `pluginCapOrder` 现为
 > `[pluginLoaded, restartTool, themeReport, themeSet, embedRelax, restartDelivery]`，另有启动器侧探针 `pageChannel`

@@ -18,6 +18,8 @@ import { createRequire } from "node:module";
 
 const CODE = readFileSync(new URL("../embed/dsh-launcher-plugin/lib/client.js", import.meta.url), "utf8");
 const bridge = JSON.parse(process.env.CLIENT_HARNESS_BRIDGE ?? "{}");
+/** "gate" = 只跑内嵌门禁那一段（见该段末尾的 process.exit）。 */
+const ONLY = process.env.CLIENT_HARNESS_ONLY ?? "";
 
 function fail(message) {
 	console.log(`HARNESS FAIL: ${message}`);
@@ -31,10 +33,16 @@ function ok(message) {
 /**
  * 载入一份**独立的** client.js 模块实例（每次调用都是一套新的模块级状态）。
  * @param bridgeCoordinates - 注入页面的桥接坐标（缺省 = 没有即时通道）。
+ * @param options - `framed: true` = 模拟"被启动器内嵌视图的 iframe 打开"（`self !== top`）。
+ *                  **缺省 = 顶层窗口**（外部标签页）—— 0.2.13 的内嵌门禁会拦住它，所以需要
+ *                  真连桥接的用例必须显式写 `{ framed: true }`，忘了写就是连不上（安全方向）。
  * @returns factory（模块导出工厂）。
  */
-function loadModule(bridgeCoordinates) {
+function loadModule(bridgeCoordinates, options = {}) {
 	const win = {};
+	// 内嵌门禁按 `self !== top` 判断：顶层窗口两者是同一个对象，iframe 里 top 是父窗口。
+	win.self = win;
+	win.top = options.framed === true ? {} : win;
 	if (bridgeCoordinates !== void 0) win.__DSH_LAUNCHER_BRIDGE__ = bridgeCoordinates;
 	let captured = null;
 	win.__ModuleLoader__ = {
@@ -320,11 +328,58 @@ function assertPanelRegistration(registrations) {
 }
 
 // ---------------------------------------------------------------------------
+// 2.5) 内嵌门禁（0.2.13）：外部标签页（顶层窗口）即使拿到坐标也不连桥接
+// ---------------------------------------------------------------------------
+{
+	const exports = loadModule(bridge)((name) => {
+		throw new Error(`客户端半边不该 require 计划外的包：${name}`);
+	});
+	// 断言"到底有没有建 socket"最直接：把 WebSocket 换成一个只记数的桩。
+	const RealWebSocket = globalThis.WebSocket;
+	let constructed = 0;
+	globalThis.WebSocket = class {
+		constructor() {
+			constructed += 1;
+		}
+	};
+	try {
+		const { ctx, registrations } = makeCtx("panel");
+		try {
+			exports.apply(ctx);
+		} catch (error) {
+			fail(`EXTERNAL：apply 抛错了 ${error?.message ?? error}`);
+		}
+		const face = assertPanelRegistration(registrations);
+		const status = face.readStatus();
+		if (status.transport !== "absent") fail(`外部标签页该停在 absent，得到 ${status.transport}`);
+		if (status.external !== true) fail("外部标签页必须在状态里标出 external");
+		if (typeof status.reason !== "string" || status.reason === "") fail("外部标签页必须给一句原因");
+		// 坐标仍是注入过的：证明是**门禁**拦下的，不是"没有坐标"那条路。
+		if (status.coord === null || status.coord.instanceId !== bridge.instanceId) {
+			fail("外部标签页仍该展示注入的坐标");
+		}
+		if (constructed !== 0) fail(`外部标签页不该建 WebSocket，却建了 ${constructed} 个`);
+		// 门禁不是"先连上再断开"：没有重连定时器，等一会儿也不该冒出连接。
+		await new Promise((resolve) => setTimeout(resolve, 700));
+		if (face.readStatus().transport !== "absent") fail("外部标签页过一会儿也不该转成 connecting/online");
+		if (constructed !== 0) fail(`外部标签页不该重连，却建了 ${constructed} 个 WebSocket`);
+		ok("EXTERNAL SKIPPED OK");
+		// gate 模式：只跑这一段就收工（Go 侧用它单独盯"桥接上从头到尾没有 page 连接"）。
+		if (ONLY === "gate") {
+			ok("OK");
+			process.exit(0);
+		}
+	} finally {
+		globalThis.WebSocket = RealWebSocket;
+	}
+}
+
+// ---------------------------------------------------------------------------
 // 3) 真桥接：面板注册 + 组件渲染 + 主题即时通道
 // ---------------------------------------------------------------------------
 let face = null;
 {
-	const exports = loadModule(bridge)((name) => {
+	const exports = loadModule(bridge, { framed: true })((name) => {
 		if (name === "react") {
 			if (reactEnv === null) throw new Error("harness 里没有可用的 react");
 			return reactEnv.react;
@@ -382,6 +437,16 @@ let face = null;
 			reconnect: () => false,
 		}));
 		if (!onlineHtml.includes("is-ok")) fail("在线时通道该是绿色档");
+		// 外部标签页的快照：该出 external 提示，且仍是中性档（不是故障、不标红）。
+		const external = { ...synthetic, transport: "absent", reason: "外部标签页", retry: 0, external: true };
+		const externalHtml = reactEnv.renderToStaticMarkup(reactEnv.react.createElement(registrations[0].component, {
+			t: (key) => `T(${key})`,
+			readStatus: () => external,
+			subscribeStatus: () => () => {},
+			reconnect: () => false,
+		}));
+		if (!externalHtml.includes("T(hint.externalPage)")) fail("外部标签页快照该给出提示");
+		if (externalHtml.includes("is-bad")) fail("外部标签页不接通道是设计，不该标红");
 		ok("SSR OK");
 	}
 

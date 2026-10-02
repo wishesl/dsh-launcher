@@ -283,6 +283,10 @@ func TestBridgePageChannelEndToEndWithRealClient(t *testing.T) {
 	if !strings.Contains(out, "HARNESS REPORTED light") || !strings.Contains(out, "HARNESS OK") {
 		t.Fatalf("页面侧的回报流程没走完\nstdout=%s\nstderr=%s", out, errOut)
 	}
+	// 同一趟里还跑了内嵌门禁那一段（外部标签页拿到坐标也不该建 WebSocket）。
+	if !strings.Contains(out, "HARNESS EXTERNAL SKIPPED OK") {
+		t.Fatalf("内嵌门禁用例没跑过\nstdout=%s\nstderr=%s", out, errOut)
+	}
 
 	// 3) 页面里换的主题（page-theme）被启动器当场采纳 —— 不等 DSH 自己写一遍配置。
 	if got := app.settings.get().Theme; got != "light" {
@@ -291,6 +295,102 @@ func TestBridgePageChannelEndToEndWithRealClient(t *testing.T) {
 	// 4) 页面在场时服务端插件不该被重复下发（同一次点击只写一遍配置）。
 	if _, pluginCount := app.bridge.sendThemeCommand("probe", "light"); pluginCount != 0 {
 		t.Fatalf("有网页端即时通道时不该再给服务端插件下发（pluginCount=%d）", pluginCount)
+	}
+}
+
+// 内嵌门禁（0.2.13）：**外部标签页（顶层窗口）拿到坐标也不连桥接** —— 用真 lib/client.js 跑
+// testdata/plugin-client-harness.mjs 的 gate 模式，Go 侧全程盯"桥接上有没有出现 page 连接"。
+//
+// 为什么要有这条：多开网页时启动器的 `pages` 是每实例一个槽、新连接踢旧连接，被踢那页按契约
+// 500ms 重连（退避在握手成功时清零）⇒ 2 次/秒无限振荡（真机：连续十几分钟、每秒恰好 2 条
+// 「网页端已接入」、段内「已断开」为 0）。门禁就是这条振荡的解药，所以它必须被端到端锁住。
+//
+// 反向验证：把 lib/client.js 的 isEmbeddedView() 门禁去掉（直接 start），这里会看到 hasPage
+// 变 true、测试失败。
+func TestBridgePageChannelSkipsTopLevelPage(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("没有 node，跳过真客户端半边门禁测试")
+	}
+	harness := filepath.Join("testdata", "plugin-client-harness.mjs")
+	if _, err := os.Stat(harness); err != nil {
+		t.Fatalf("找不到 harness: %v", err)
+	}
+
+	app, _ := newSelfRestartTestApp(t)
+	app.settings = newSettingsStore()
+	app.bridge.start()
+	t.Cleanup(app.bridge.stop)
+	if app.bridge.url == "" {
+		t.Fatal("桥接必须监听成功")
+	}
+	app.mu.Lock()
+	app.processes["inst-a"] = &managedProcess{instanceID: "inst-a", launchID: "L1"}
+	app.mu.Unlock()
+
+	coordinates, err := json.Marshal(map[string]string{
+		"url":           "ws" + strings.TrimPrefix(app.bridge.url, "http") + "/ws",
+		"token":         app.bridge.token,
+		"instanceId":    "inst-a",
+		"launchId":      "L1",
+		"plugin":        selfRestartPluginName,
+		"pluginVersion": "0.2.13",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	outFile, err := os.CreateTemp(t.TempDir(), "client-gate-out-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer outFile.Close()
+	errFile, err := os.CreateTemp(t.TempDir(), "client-gate-err-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer errFile.Close()
+
+	cmd := exec.Command(node, harness)
+	cmd.Env = append(os.Environ(),
+		"CLIENT_HARNESS_BRIDGE="+string(coordinates),
+		"CLIENT_HARNESS_ONLY=gate",
+	)
+	cmd.Stdout = outFile
+	cmd.Stderr = errFile
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("启动 harness 失败: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	deadline := time.After(20 * time.Second)
+	for {
+		if app.bridge.hasPage("inst-a") {
+			_ = cmd.Process.Kill()
+			t.Fatal("外部标签页（顶层窗口）不该在桥接上出现 page 连接")
+		}
+		select {
+		case werr := <-done:
+			out := readFileString(outFile.Name())
+			errOut := readFileString(errFile.Name())
+			if werr != nil {
+				t.Fatalf("harness 退出码非 0: %v\nstdout=%s\nstderr=%s", werr, out, errOut)
+			}
+			if !strings.Contains(out, "HARNESS EXTERNAL SKIPPED OK") || !strings.Contains(out, "HARNESS OK") {
+				t.Fatalf("门禁用例没跑完\nstdout=%s\nstderr=%s", out, errOut)
+			}
+			// 收尾再确认一次：整趟跑完桥接上也没有 page 连接。
+			if app.bridge.hasPage("inst-a") {
+				t.Fatal("外部标签页不该在桥接上出现 page 连接")
+			}
+			return
+		case <-deadline:
+			_ = cmd.Process.Kill()
+			t.Fatalf("harness 20s 没结束\nstdout=%s\nstderr=%s",
+				readFileString(outFile.Name()), readFileString(errFile.Name()))
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 }
 
