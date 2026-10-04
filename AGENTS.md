@@ -269,3 +269,35 @@ cd dsh-launcher && wails build
 点击后打开右栏「兼容性」标签并落到第一台出问题的实例。判定规则集中在 `util.ts` 的 `capsAlert()`。
 注意 `.instances-toolbar` 是 `VersionView` 共用的，实例页的布局微调要用 `.instances-toolbar-main` 修饰类收窄。
 
+---
+
+## 10. 图形会话的环境继承（Linux / macOS）—— 双击启动找不到 npm
+
+桌面环境里双击启动的进程继承的是**会话环境**（systemd `--user` → 显示管理器 → 文件管理器 / D-Bus 激活 /
+gnome-shell），这条链**从不读 `~/.bashrc`**；而 nvm / fnm / volta / asdf / pnpm 恰好都把「追加 PATH」写进交互式 rc。
+于是双击启动时启动器里 `npx/npm/pnpm` 全部 not found，终端里 `./dsh-launcher` 却一切正常。
+引导逻辑全在 `env_boot.go`（`main()` 里、建任何子进程之前跑一次；结论落 app.log，用户可见出口是
+「设置 → 前置环境」的版本复核）。四条**别改回去**的结论：
+
+1. **只在真缺工具时才动手**：三个 CLI 都能解析就一个字节都不改 PATH（终端启动路径行为完全不变）；
+   文件系统探测完还缺才去问登录 shell，全程 fail-open。
+2. **`-ic` 优先，不是 `-lic`**：Linux 终端起的是"交互式非登录"shell，直接读 `~/.bashrc` —— nvm/fnm 的安装脚本
+   正写在那儿；登录 shell 只有在 `~/.profile` 里 source 了 `~/.bashrc` 时才读得到它
+   （真机实测：只有 `~/.bashrc` 时 `bash -lic` 拿不到 nvm 的 PATH，`bash -ic` 能）。macOS 终端默认登录 shell，
+   顺序反过来；dash/ksh 的 `-i` 读 `$ENV`，所以 `-lc` 在前。
+3. **探针必须开自己的会话（`SysProcAttr = newSysProcAttr()`，unix 即 `Setsid`）**：GUI 启动没有控制终端，
+   交互式 shell 会卡在作业控制握手上一去不回（实测 `bash -ic … </dev/null` 永不返回，`setsid bash -ic …` 正常）。
+   不开会话 = 这个兜底在它唯一要解决的场景里恒失败。
+4. **超时必须具备 SIGKILL 语义**：交互式 bash **忽略 SIGTERM**，`timeout`（默认 TERM）杀不掉它；
+   Go 的 `CommandContext` 用 SIGKILL 才有效，再加 `cmd.WaitDelay` 防止孙进程攥着管道不放。
+   预算按"整个探测阶段"封顶（`loginShellBudget`），单个 shell 另有 `loginShellAttemptCap`，
+   rc 里的 `sleep` / `read` 都拖不住启动。
+
+⚠️ 不要为了"少起一个进程"把探测推迟到首次用到 npm 时：`applyProxyToCmd` 是用 `os.Environ()` 重建子进程 env 的
+（`proxy.go`），只有**改进程自身环境**（`os.Setenv("PATH", …)`）才能一次覆盖 `shellCommand` / `exec.LookPath` /
+`os.Environ` 三条路径；晚做还会让自动启动的实例抢在引导之前。<br>
+⚠️ 打包成 deb/rpm/AppImage 都不改变这个结论（Flatpak/snap 反而更糟：沙箱里 PATH 固定、`$HOME` 也不是真实家目录）；
+   决定因素只有"启动器进程自己的 PATH"。纯逻辑（PATH 合并、nvm 版本挑选、`env -0` 解析）刻意不加 build tag，
+   在 Windows 上也能 `go test` 覆盖。
+
+

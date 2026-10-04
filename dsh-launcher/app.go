@@ -80,6 +80,11 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	_ = a.EnsureConfigDir()
+	// 环境引导（main 里做的那一次，见 env_boot.go）必须留痕：双击启动补全了 PATH、
+	// 或者补全失败，事后都要能从 app.log 里查到结论。
+	for _, line := range envBootstrapNotes {
+		a.logs.note(line)
+	}
 	// Reconcile persisted instances against live processes on cold start.
 	// resetRuntime mutates the store directly — iterating list()'s copies
 	// would not touch the stored instances (the old leak: a persisted "ready"

@@ -22,6 +22,11 @@ func main() {
 	// 上一次自更新留下的 .old / 半截 .part：启动时清掉（best-effort，删不掉不算错）。
 	cleanupUpdateLeftovers()
 
+	// Linux/macOS 图形会话里双击启动不会读 ~/.bashrc，nvm/fnm/pnpm 装的 node
+	// 全都不在 PATH 里：在**创建任何子进程之前**把 PATH 引导一次（env_boot.go）。
+	// 结论由 startup() 落到 app.log，用户可见的出口是「设置 → 前置环境」。
+	envBootstrapNotes = bootstrapProcessEnv()
+
 	// Create an instance of the app structure
 	app := NewApp()
 
