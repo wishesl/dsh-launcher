@@ -103,6 +103,111 @@ func TestBridgeEndToEndWithRealPlugin(t *testing.T) {
 	}
 }
 
+// 会话通知的端到端契约测试：跑真插件代码（testdata/plugin-notify-harness.mjs 提供最小 ctx +
+// 假会话事件源 + 假 sessionTitle 服务），按真实事件顺序喂 DSH 的 session/event，验证 launcher
+// 真的收到并弹出了**内容正确**的通知，且该发的一条不少、不该发的一条不多。
+//
+// 断言全部在 Go 侧（stub 掉系统通知后端）：帧形状、标题来源（服务 / 首条真人消息 / session/title
+// 事件）、50 码点截断、aborted 与子代理会话不通知。
+func TestBridgeNotifyEndToEndWithRealPlugin(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("没有 node，跳过真插件端到端测试")
+	}
+	harness := filepath.Join("testdata", "plugin-notify-harness.mjs")
+	if _, err := os.Stat(harness); err != nil {
+		t.Fatalf("找不到 harness: %v", err)
+	}
+
+	app, _ := newSelfRestartTestApp(t)
+	app.settings = &settingsStore{path: filepath.Join(t.TempDir(), "settings.json")}
+	app.logs = &logStore{dir: filepath.Join(t.TempDir(), "logs"), files: map[string]*os.File{}, sizes: map[string]int64{}}
+	app.bridge.start()
+	t.Cleanup(app.bridge.stop)
+	if app.bridge.url == "" {
+		t.Fatal("桥接必须监听成功")
+	}
+	app.mu.Lock()
+	app.processes["inst-a"] = &managedProcess{instanceID: "inst-a", launchID: "L1"}
+	app.mu.Unlock()
+
+	calls := stubNotify(t, nil)
+
+	outFile, err := os.CreateTemp(t.TempDir(), "notify-harness-out-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer outFile.Close()
+	errFile, err := os.CreateTemp(t.TempDir(), "notify-harness-err-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer errFile.Close()
+
+	cmd := exec.Command(node, "--import", "./testdata/plugin-test-register.mjs", harness)
+	cmd.Env = append(os.Environ(),
+		"DSH_LAUNCHER=1",
+		"DSH_LAUNCHER_EVENTS="+app.bridge.url,
+		"DSH_LAUNCHER_TOKEN="+app.bridge.token,
+		"DSH_INSTANCE_ID=inst-a",
+		"DSH_LAUNCH_ID=L1",
+	)
+	cmd.Stdout = outFile
+	cmd.Stderr = errFile
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("启动 harness 失败: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	// 真插件必须把会话通知能力随握手上报（注册监听成功 = 这一项 ok）。
+	report := waitHandshake(t, app.bridge, "inst-a", "L1")
+	if !hasCapability(report, "sessionNotify") {
+		t.Fatalf("真插件应上报 sessionNotify: %+v", report.Capabilities)
+	}
+
+	// S1/S2/S5/S6/S7 各一条，共 5 条；S3（aborted）与 S4（子代理）不该发。
+	want := []notifyCall{
+		{title: "会话标题", body: "回答正文 第二行"},
+		{title: "会话标题", body: "我有一些问题"},
+		{title: "会话标题", body: strings.Repeat("A", 50) + "…"},
+		{title: "FALLBACK-USER-TEXT-0…", body: "兜底正文"},
+		{title: "事件标题", body: "缓存正文"},
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for len(*calls) < len(want) && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	// 再等一拍：多出来的（本该被过滤的）帧才有机会到达并被发现。
+	time.Sleep(300 * time.Millisecond)
+
+	select {
+	case werr := <-done:
+		if werr != nil {
+			t.Fatalf("harness 退出码非 0: %v\nstdout=%s\nstderr=%s",
+				werr, readFileString(outFile.Name()), readFileString(errFile.Name()))
+		}
+	case <-time.After(20 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatalf("harness 20s 没结束\nstdout=%s\nstderr=%s",
+			readFileString(outFile.Name()), readFileString(errFile.Name()))
+	}
+	out := readFileString(outFile.Name())
+	if !strings.Contains(out, "HARNESS SENT") {
+		t.Fatalf("harness 没有走完事件序列\nstdout=%s\nstderr=%s", out, readFileString(errFile.Name()))
+	}
+
+	if len(*calls) != len(want) {
+		t.Fatalf("通知条数不对（aborted / 子代理会话都不该通知）：实际 %d 条 %+v\nstdout=%s",
+			len(*calls), *calls, out)
+	}
+	for i, w := range want {
+		if (*calls)[i] != w {
+			t.Fatalf("第 %d 条通知不对：实际 %+v，想要 %+v", i+1, (*calls)[i], w)
+		}
+	}
+}
+
 // 端到端契约测试（最要命的一条）：插件侧**取不到 appExit** 时，dsh-restart 也必须真的
 // 把进程退掉。testdata/plugin-restart-harness.mjs 故意让三条取法全失败，复现并锁死
 // 2026-10-01 的"点了重启没反应"事故：launcher ack 了、插件静默 no-op、进程一直活着。

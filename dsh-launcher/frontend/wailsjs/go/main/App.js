@@ -90,6 +90,10 @@ export function GetMarketSettings() {
   return window['go']['main']['App']['GetMarketSettings']();
 }
 
+export function GetNotifySettings() {
+  return window['go']['main']['App']['GetNotifySettings']();
+}
+
 export function GetProxySettings() {
   return window['go']['main']['App']['GetProxySettings']();
 }
@@ -220,6 +224,10 @@ export function SetLayout(arg1) {
 
 export function SetMarketRegistryURL(arg1) {
   return window['go']['main']['App']['SetMarketRegistryURL'](arg1);
+}
+
+export function SetNotifySettings(arg1) {
+  return window['go']['main']['App']['SetNotifySettings'](arg1);
 }
 
 export function SetProxy(arg1) {

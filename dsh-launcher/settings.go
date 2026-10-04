@@ -41,6 +41,12 @@ type settings struct {
 	UpdateIncludePrerelease bool   `json:"updateIncludePrerelease"`
 	UpdateSkippedVersion    string `json:"updateSkippedVersion"`
 	UpdateSourceRepo        string `json:"updateSourceRepo"`
+
+	// ---- 会话通知偏好（见 notify.go）----
+	// 两个都是 nil = 用户没表态 → 默认开启；用户一旦表态就写显式值。
+	// 开关决定"插件推来的通知帧要不要弹系统通知"，与插件是否推帧无关。
+	NotifyTurnComplete *bool `json:"notifyTurnComplete,omitempty"`
+	NotifyQuestion     *bool `json:"notifyQuestion,omitempty"`
 }
 
 // settingsStore persists launcher preferences next to instances.json.
@@ -159,6 +165,17 @@ func (s *settingsStore) setUpdateSettings(auto, includePrerelease bool, skipped,
 	s.data.UpdateIncludePrerelease = includePrerelease
 	s.data.UpdateSkippedVersion = skipped
 	s.data.UpdateSourceRepo = repo
+	s.saveLocked()
+	s.mu.Unlock()
+}
+
+// setNotifySettings persists the two session-notification switches (see notify.go).
+// Both are written as explicit values: once the user has an opinion, the
+// "unset → default on" fallback no longer applies.
+func (s *settingsStore) setNotifySettings(turnComplete, question bool) {
+	s.mu.Lock()
+	s.data.NotifyTurnComplete = &turnComplete
+	s.data.NotifyQuestion = &question
 	s.saveLocked()
 	s.mu.Unlock()
 }

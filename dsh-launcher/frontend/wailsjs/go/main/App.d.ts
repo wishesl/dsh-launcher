@@ -46,6 +46,8 @@ export function GetLayout():Promise<string>;
 
 export function GetMarketSettings():Promise<main.MarketSettings>;
 
+export function GetNotifySettings():Promise<main.NotifySettings>;
+
 export function GetProxySettings():Promise<main.ProxySettings>;
 
 export function GetUIWidths():Promise<main.UIWidths>;
@@ -111,6 +113,8 @@ export function SetInstanceMasks(arg1:string,arg2:Array<string>):Promise<Array<s
 export function SetLayout(arg1:string):Promise<void>;
 
 export function SetMarketRegistryURL(arg1:string):Promise<void>;
+
+export function SetNotifySettings(arg1:main.NotifySettings):Promise<void>;
 
 export function SetProxy(arg1:string):Promise<void>;
 

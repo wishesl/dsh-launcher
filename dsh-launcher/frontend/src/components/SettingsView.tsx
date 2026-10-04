@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, errMsg } from '../api';
 import type { ThemePreference } from '../theme';
-import type { EnvReport, LayoutMode, MarketSettings, ToolStatus } from '../types';
+import type { EnvReport, LayoutMode, MarketSettings, NotifySettings, ToolStatus } from '../types';
+import Switch from './Switch';
 
 interface Props {
   showToast: (msg: string, kind?: 'ok' | 'error') => void;
@@ -66,11 +67,18 @@ export default function SettingsView({
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(layout);
   const [savingLayout, setSavingLayout] = useState(false);
   const [savingTheme, setSavingTheme] = useState(false);
+  // null = 还没读到（开关按"默认开启"渲染但禁用，避免读到之前误点）。
+  const [notify, setNotify] = useState<NotifySettings | null>(null);
+  const [savingNotify, setSavingNotify] = useState(false);
 
   // Sync local selection when the app-wide preference changes (e.g. after save).
   useEffect(() => {
     setLayoutMode(layout);
   }, [layout]);
+
+  useEffect(() => {
+    api.getNotifySettings().then((n) => setNotify(n)).catch(() => undefined);
+  }, []);
 
   const check = useCallback(async () => {
     setChecking(true);
@@ -174,6 +182,21 @@ export default function SettingsView({
       showToast('切换主题失败: ' + errMsg(e), 'error');
     } finally {
       setSavingTheme(false);
+    }
+  };
+
+  // 通知开关：乐观更新 + 失败回滚（后端只是写 settings.json，失败基本只有绑定层异常）。
+  const applyNotify = async (next: NotifySettings) => {
+    const prev = notify;
+    setNotify(next);
+    setSavingNotify(true);
+    try {
+      await api.setNotifySettings(next);
+    } catch (e) {
+      setNotify(prev);
+      showToast('保存通知设置失败: ' + errMsg(e), 'error');
+    } finally {
+      setSavingNotify(false);
     }
   };
 
@@ -295,6 +318,36 @@ export default function SettingsView({
         <p className="desc">
           当前：<b className="mono">{themeLabel(themePreference)}</b>
           {themePending ? `（已下发「${themeLabel(themePending)}」，等待实例确认…）` : null}
+        </p>
+      </div>
+
+      <div className="settings-section">
+        <h3>通知</h3>
+        <p className="desc">
+          会话里 AI 回答完成、或用提问工具等你回答时，弹一条系统通知：标题是会话标题，正文是最终回复的
+          前 50 字（提问时为「我有一些问题」）。Windows 走系统 Toast，macOS / Linux 走各自的通知后端。
+        </p>
+        <div className="row notify-row">
+          <span>回答完成后通知我</span>
+          <Switch
+            checked={notify?.turnComplete ?? true}
+            disabled={notify === null || savingNotify}
+            onChange={(v) => applyNotify({ turnComplete: v, question: notify?.question ?? true })}
+            title="AI 回答正常结束时弹系统通知"
+          />
+        </div>
+        <div className="row notify-row">
+          <span>AI 提问时通知我</span>
+          <Switch
+            checked={notify?.question ?? true}
+            disabled={notify === null || savingNotify}
+            onChange={(v) => applyNotify({ turnComplete: notify?.turnComplete ?? true, question: v })}
+            title="AI 用提问工具等你回答时弹系统通知"
+          />
+        </div>
+        <p className="desc">
+          通知由实例里的内置插件推送：插件需为内置 <b className="mono">v0.2.14+</b> 且该实例重启过 DSH
+          一次（旧副本不推帧，属已知良性原因；在实例卡片上「安装·重装」即可升级）。
         </p>
       </div>
 

@@ -81,10 +81,14 @@ var pluginCapabilityMeta = map[string]struct{ label, hint string }{
 		"重启完成走 plugin/notice 通道",
 		"回退到 prompt() 时，重启完成消息会显示成用户气泡",
 	},
+	"sessionNotify": {
+		"会话通知已上报（回答完成 / AI 提问）",
+		"失败时启动器收不到通知；旧版插件不推帧（重装内置插件即可）",
+	},
 }
 
 // pluginCapOrder 固定插件能力在面板里的顺序：不看 DSH 版本，只看探测结论。
-var pluginCapOrder = []string{"pluginLoaded", "restartTool", "themeReport", "themeSet", "embedRelax", "restartDelivery"}
+var pluginCapOrder = []string{"pluginLoaded", "restartTool", "themeReport", "themeSet", "embedRelax", "restartDelivery", "sessionNotify"}
 
 // stripURLQuery 去掉 URL 的 query。启动日志里的地址可能带 launch token
 // （`?token=...`），面板只展示"哪台机器哪个端口"，不把凭据带到界面上。

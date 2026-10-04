@@ -1272,6 +1272,8 @@ body.resizing .log-drawer { transition: none; }
 }
 .row { display: flex; gap: 8px; align-items: center; }
 .row input[type="text"] { flex: 1; }
+/* 设置页的通知开关行：标签靠左、开关靠右（复用 .row 的 flex 布局）。 */
+.notify-row { justify-content: space-between; font-size: 12.5px; color: var(--text-2); }
 
 /* settings inputs: consistent, non-native look */
 .settings-section input[type="text"] {

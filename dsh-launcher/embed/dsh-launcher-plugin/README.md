@@ -1,14 +1,14 @@
 # dsh-launcher-plugin — launcher ↔ 实例桥接插件
 
 一个插件一条线：把 launcher 与实例之间的实时通信收敛为**一条 loopback WebSocket**，
-同时承载 **主题双向同步、dsh-restart（自重启）、能力握手** 三个能力。
+同时承载 **主题双向同步、dsh-restart（自重启）、会话通知、能力握手** 四个能力。
 `dsh-self-mcp` 随之退役，文件通道（`restart-request.json` / `pending.json` /
 `capabilities.json`）全部删除 —— 本插件**零文件、零落盘**。
 
 0.2.6 起同一条线多接一个角色：**网页端即时通道**（见下），让"点启动器换主题"从
 "等 DSH 写完配置再采纳（约 300ms）"变成**页面当场变色（毫秒级）**。
 
-## 版本速览（当前 0.2.13）
+## 版本速览（当前 0.2.15）
 
 | 版本 | 变更 | 提交 |
 |---|---|---|
@@ -24,6 +24,8 @@
 | 0.2.11 | **DSH 设置里的「启动器」面板**：客户端半边注册 `settings.section`，展示本页通道状态 + 静态功能清单 | 本次 |
 | 0.2.12 | **导航行换成启动器 logo**：官方没有图标位，改为「认领 DOM 行 + 注入 CSS」（与 dshmarket 同款），面板页头同款 logo | 本次 |
 | 0.2.13 | **内嵌门禁**：只有启动器内嵌视图那个页面接即时通道，外部标签页不接（修掉多开网页时「网页通道一直闪烁重连」） | 本次 |
+| 0.2.14 | **会话通知**：回答正常结束 / 模型提问时推 `notify` 帧，由启动器弹系统通知（开关在启动器「设置 → 通知」） | 本次 |
+| 0.2.15 | **网页端面板的功能清单补上会话通知**（0.2.14 只改了服务端半边，DSH 设置里的「功能展示」看不到这项） | 本次 |
 
 > 能力或行为变更**必须** bump `package.json` 版本（启动器用「内置 vs 已装」版本比对分诊，见文末开发须知）。
 
@@ -37,6 +39,7 @@ launcher (Go)                                  dsh-launcher-plugin (实例内)
 │  握手头 Bearer token 鉴权   │      WS       │ 之后能力/主题增量重发 hello   │
 │  收到 theme 帧 → dsh:theme  │               │ 断线按 RETRY_DELAYS_MS 退避   │
 │  收到 set-theme → 广播命令  │               │ set-theme → 写 ui-theme       │
+│  收到 notify → 系统通知     │               │ 会话事件 → notify 帧          │
 └─────────────────────────────┘               └──────────────────────────────┘
         │                                            ▲ env 注入
         ▼ 订阅 dsh:theme                         DSH_LAUNCHER_EVENTS / DSH_LAUNCHER_TOKEN
@@ -71,6 +74,7 @@ launcher /ws  ◄── page-hello ──────  dsh-launcher-plugin 客�
 | `restart` | 请求自重启 `{id, reason, pending}` |
 | `pending-consumed` | 续跑负载已注入成功，launcher 可以清掉 |
 | `command-result` | 启动器命令的应答 `{id, ok, error, detail?}`（`set-theme` 用；`detail` 是插件侧要说给 launcher 日志的自由文本） |
+| `notify` | 会话通知 `{id, kind, sessionId, title, text}`：`kind=turn-complete`（回答正常结束）或 `question`（模型用 `ask_user_question` 等你回答）。见下节 |
 
 启动器 → 插件：
 
@@ -184,6 +188,41 @@ unregister 先到，那样内嵌页会被自己的刷新拒掉、客户端 `disa
 + token + launch 校验。
 
 完整推导与实测证据见 `doc/网页端即时通道实现方案.md`。
+
+## 会话通知（0.2.14+）
+
+一次 AI 回答**正常结束**、或模型**在等你回答**时，插件推一帧 `notify`，启动器按当前系统弹一条
+系统通知（Windows Toast / macOS `osascript` / Linux `notify-send`）。开关在启动器
+**「设置 → 通知」**（两个开关，默认开启，改完立即生效，**不需要**重启 DSH）。
+
+| 触发 | 条件 | 通知内容 |
+| --- | --- | --- |
+| 回答完成 | `turn/end` 且 `reason.kind === "completed"`，且该回合有文本 | 标题 = 会话标题，正文 = 最终回复前 50 字（超出补 `…`） |
+| AI 提问 | `tool/call` 且 `name === "ask_user_question"` | 标题 = 会话标题，正文 = `我有一些问题` |
+
+**不发**的场合：子代理 / 工作流子会话；`aborted` / `error` / `interrupted` / `forked` / `blocked` /
+`max-tokens` 结束的回合；最终文本为空的回合（只有工具调用的中间步骤）；桥接离线（**不排队不重试** ——
+过期的通知比没有更糟）。
+
+标题取值顺序：`sessionTitle` 服务（`get(session)`）→ 本进程见过的 `session/title` 事件 →
+**首条真人消息前 20 字**（`source.kind === "user"`，注入的上下文不算）→ `未命名会话`。
+首轮回答时标题可能还在生成，所以有这层兜底。
+
+其余纪律：
+
+- **双半包**：监听器只在**当前装载会话**里生效（`session !== s` 直接返回），同一事件只推一帧；
+  逐会话状态（本回合文本 / 首条真人消息 / 见过的标题）放**进程级**，装载会话被拆也不丢。
+- **启动器侧去重**：帧里的 `id`（`turn-<sessionId>-<turn>` / `q-<callId>-<turn>`）在 10 分钟窗口内只放行一次。
+- **启动器侧截断**：标题 120 字、正文 200 字，并把多行文本压成一行（控制字符丢弃）。
+- **留痕**：每弹一条写一行右栏日志（`通知（回答完成）：实例 X「标题」正文`）；系统通知后端返回错误时
+  追加错误文本，但**不断言"没弹出来"** —— Windows 上 COM 失败 + PowerShell 兜底成功同样返回非 nil 错误。
+- 能力项 `sessionNotify` 随握手上报（`ctx.on("session/event")` 注册失败时为 fail + 原因）。
+
+⚠️ 生效方式：装的是**旧副本**就不会推帧。在实例卡片上「安装·重装」内置插件（覆盖为 v0.2.15+），
+**再重启该实例一次** —— 插件两半都在 DSH 启动时装载，不重启的话进程里跑的还是旧代码
+（DSH 设置 → 启动器 里的「插件版本」是启动那一刻注入的，重装后不重启仍显示旧版本号）。
+重启后那个面板的「功能展示」里会出现「回答完成 / 提问通知」这一项；能力面板在没有该项时只作
+中性展示，不标红（旧插件属已知良性原因）。
 
 ## 主题双向同步
 
@@ -353,7 +392,7 @@ unregister 先到，那样内嵌页会被自己的刷新拒掉、客户端 `disa
 
 ## 能力握手
 
-`pluginLoaded / restartTool / themeReport / themeSet / embedRelax / restartDelivery`
+`pluginLoaded / restartTool / themeReport / themeSet / embedRelax / restartDelivery / sessionNotify`
 随 `hello` 快照上报 —— 握手即"本次启动"，陈旧判定（launchId 比对）整个消失。
 
 另有一个**启动器侧**的项 `pageChannel`（不在上面的快照里，由启动器自己看"这个实例有没有

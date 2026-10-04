@@ -290,12 +290,12 @@ window.__ModuleLoader__.load({
 		/** 功能展示清单（静态）：只说插件与启动器之间提供了什么、各自的前提是什么。
 		 *  ⚠️ 这里刻意不带实时状态：网页半边看不到服务端半边的探测结论，而"没有证据"不能当"失败"
 		 *  也不能当"正常"（见 AGENTS.md §9 的三态纪律）。 */
-		const FEATURES = ["pageTheme", "themeReport", "themeSet", "restartTool", "restartDelivery", "embedRelax", "capsReport"];
+		const FEATURES = ["pageTheme", "themeReport", "themeSet", "restartTool", "restartDelivery", "sessionNotify", "embedRelax", "capsReport"];
 
 		const zh = {
 			nav: "启动器",
 			title: "DSH 启动器桥接",
-			intro: "本实例通过一条本机 WebSocket（127.0.0.1 的临时端口）与 DSH 启动器通信：换主题、自重启、重启后继续原来的会话都走它。下面显示这个网页与该通道的连接状态，以及插件提供的功能。",
+			intro: "本实例通过一条本机 WebSocket（127.0.0.1 的临时端口）与 DSH 启动器通信：换主题、自重启、重启后继续原来的会话、回答完成与提问的系统通知都走它。下面显示这个网页与该通道的连接状态，以及插件提供的功能。",
 			"status.title": "链接状态",
 			"status.reconnect": "重新连接",
 			"status.reconnectIdle": "通道已连接，无需重连",
@@ -333,6 +333,9 @@ window.__ModuleLoader__.load({
 			"feat.restartDelivery.title": "重启完成续跑",
 			"feat.restartDelivery.desc": "重启完成后向原来的会话注入「重启完成」消息，接着做没做完的事。",
 			"feat.restartDelivery.need": "走 plugin/notice 通道，不会显示成用户气泡",
+			"feat.sessionNotify.title": "回答完成 / 提问通知",
+			"feat.sessionNotify.desc": "会话里 AI 回答完成（正文 = 最终回复前 50 字）、或用提问工具等你回答（正文 = 我有一些问题）时，由启动器弹一条系统通知，标题是会话标题。",
+			"feat.sessionNotify.need": "插件 0.2.14+，且启动器「设置 → 通知」里的对应开关是开着的（默认开）",
 			"feat.embedRelax.title": "内嵌视图授权放宽",
 			"feat.embedRelax.desc": "DSH 被启动器内嵌打开时不再 401 / 一直「自动重连中」。",
 			"feat.embedRelax.need": "从启动器的内嵌视图入口打开",
@@ -344,7 +347,7 @@ window.__ModuleLoader__.load({
 		const en = {
 			nav: "Launcher",
 			title: "DSH launcher bridge",
-			intro: "This instance talks to the DSH launcher over one loopback WebSocket (a temporary port on 127.0.0.1): theme switching, self-restart and restart hand-off all ride on it. Below is this page's link state and the features the plugin provides.",
+			intro: "This instance talks to the DSH launcher over one loopback WebSocket (a temporary port on 127.0.0.1): theme switching, self-restart, restart hand-off and the answer/question notifications all ride on it. Below is this page's link state and the features the plugin provides.",
 			"status.title": "Link status",
 			"status.reconnect": "Reconnect",
 			"status.reconnectIdle": "Channel is connected; nothing to reconnect",
@@ -382,6 +385,9 @@ window.__ModuleLoader__.load({
 			"feat.restartDelivery.title": "Restart hand-off",
 			"feat.restartDelivery.desc": "After a restart it injects a \"restart complete\" message into the original session so work continues.",
 			"feat.restartDelivery.need": "delivered over the plugin/notice channel, not as a user bubble",
+			"feat.sessionNotify.title": "Answer / question notifications",
+			"feat.sessionNotify.desc": "When an answer finishes (body = first 50 characters of the reply) or the model asks you something (body = \"I have some questions\"), the launcher shows an OS notification titled with the session title.",
+			"feat.sessionNotify.need": "plugin 0.2.14+ and the matching switch under the launcher's Settings → Notifications (on by default)",
 			"feat.embedRelax.title": "Embedded-view auth relax",
 			"feat.embedRelax.desc": "DSH no longer answers 401 / endless \"reconnecting\" when opened inside the launcher.",
 			"feat.embedRelax.need": "open it from the launcher's embedded view",

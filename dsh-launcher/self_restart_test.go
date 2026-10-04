@@ -23,7 +23,9 @@ func newSelfRestartTestApp(t *testing.T) (*App, string) {
 	dir := t.TempDir()
 	store := &instanceStore{path: filepath.Join(dir, "instances.json")}
 	store.add(Instance{ID: "inst-a", Name: "A", Directory: dir})
-	app := &App{store: store, masks: newInstanceMaskStore(), processes: make(map[string]*managedProcess)}
+	// notifySeen 与 NewApp 保持一致：通知去重是 App 级状态，测试用的 App 也得有
+	// （没有它 first() 会 fail-open 放行一切，去重用例就测不出来）。
+	app := &App{store: store, masks: newInstanceMaskStore(), processes: make(map[string]*managedProcess), notifySeen: newNotifySeenSet()}
 	app.bridge = newLauncherBridge(app)
 	return app, dir
 }

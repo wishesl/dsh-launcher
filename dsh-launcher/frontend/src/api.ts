@@ -21,6 +21,7 @@ import {
   GetLayout,
   GetUIWidths,
   GetMarketSettings,
+  GetNotifySettings,
   GetProxySettings,
   GetUpdateSettings,
   HideToTray,
@@ -52,6 +53,7 @@ import {
   SetInstanceMasks,
   SetLayout,
   SetMarketRegistryURL,
+  SetNotifySettings,
   SetProxy,
   SetThemePreference,
   SetUpdateSettings,
@@ -83,6 +85,7 @@ import type {
   MarketSettings,
   MarketStatusEvent,
   NoticeEvent,
+  NotifySettings,
   ProxySettings,
   RegistryInfo,
   ServiceState,
@@ -186,6 +189,10 @@ export const api = {
   updateAppliedVersion: (): Promise<string> => UpdateAppliedVersion(),
   getUpdateSettings: (): Promise<UpdateSettings> => GetUpdateSettings() as any,
   setUpdateSettings: (s: UpdateSettings): Promise<void> => SetUpdateSettings(s as any),
+
+  // 会话通知（设置 → 通知）：开关决定"插件推来的通知帧要不要弹系统通知"，改完立即生效。
+  getNotifySettings: (): Promise<NotifySettings> => GetNotifySettings() as any,
+  setNotifySettings: (s: NotifySettings): Promise<void> => SetNotifySettings(s as any),
 
   // 兼容性探测：这台实例上各项能力"到底能不能用"（本地读取，不发网络请求）
   getCapabilities: (instanceId: string): Promise<CapabilityReport> => GetCapabilities(instanceId),

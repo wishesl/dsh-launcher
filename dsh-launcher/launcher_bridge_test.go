@@ -333,6 +333,74 @@ func waitHandshakeGone(t *testing.T, b *launcherBridge, id string) {
 	t.Fatalf("%s 的握手快照该在断开后消失", id)
 }
 
+// 会话通知：插件推 notify 帧 → 启动器弹系统通知（stub 掉后端，验协议与门控）。
+func TestBridgeNotifyFrameDeliversAndIsRoleGated(t *testing.T) {
+	app, _ := newSelfRestartTestApp(t)
+	app.settings = &settingsStore{path: filepath.Join(t.TempDir(), "settings.json")}
+	app.logs = &logStore{dir: filepath.Join(t.TempDir(), "logs"), files: map[string]*os.File{}, sizes: map[string]int64{}}
+	app.bridge.start()
+	t.Cleanup(app.bridge.stop)
+	app.processes["inst-a"] = &managedProcess{instanceID: "inst-a", launchID: "L1"}
+
+	calls := stubNotify(t, nil)
+
+	plugin, _, err := dialBridge(t, app, app.bridge.token, nil)
+	if err != nil {
+		t.Fatalf("插件连接失败: %v", err)
+	}
+	defer plugin.Close()
+	sendBridgeFrame(t, plugin, helloFrame("L1", "light"))
+	waitHandshake(t, app.bridge, "inst-a", "L1")
+
+	notifyPayload, _ := json.Marshal(bridgeNotifyPayload{
+		ID: "turn-s1-7", Kind: notifyKindTurnComplete, SessionID: "s1",
+		Title: "会话标题", Text: "最终回复前 50 字",
+	})
+	sendBridgeFrame(t, plugin, bridgeEnvelope{
+		Type: frameNotify, InstanceID: "inst-a", LaunchID: "L1", Payload: notifyPayload,
+	})
+
+	deadline := time.Now().Add(3 * time.Second)
+	for len(*calls) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("插件推的 notify 帧应弹一条系统通知，实际 %d 条", len(*calls))
+	}
+	if (*calls)[0].title != "会话标题" || (*calls)[0].body != "最终回复前 50 字" {
+		t.Fatalf("系统通知内容不对: %+v", (*calls)[0])
+	}
+
+	// 同一 ID 重发：去重（帧本身合法，只是不该弹第二次）。
+	sendBridgeFrame(t, plugin, bridgeEnvelope{
+		Type: frameNotify, InstanceID: "inst-a", LaunchID: "L1", Payload: notifyPayload,
+	})
+	time.Sleep(150 * time.Millisecond)
+	if len(*calls) != 1 {
+		t.Fatalf("重复 ID 必须去重，实际 %d 条", len(*calls))
+	}
+
+	// 网页端角色（page）即使发 notify 也拿不到通知能力：角色门控只认主题帧。
+	page, _, err := dialPageBridge(t, app, "http://127.0.0.1:3080")
+	if err != nil {
+		t.Fatalf("网页端应该能连上: %v", err)
+	}
+	defer page.Close()
+	sendBridgeFrame(t, page, pageHelloFrame("inst-a", "L1"))
+	waitPage(t, app.bridge, "inst-a")
+	pagePayload, _ := json.Marshal(bridgeNotifyPayload{
+		ID: "turn-s1-8", Kind: notifyKindQuestion, SessionID: "s1",
+		Title: "会话标题", Text: "我有一些问题",
+	})
+	sendBridgeFrame(t, page, bridgeEnvelope{
+		Type: frameNotify, InstanceID: "inst-a", LaunchID: "L1", Payload: pagePayload,
+	})
+	time.Sleep(150 * time.Millisecond)
+	if len(*calls) != 1 {
+		t.Fatalf("网页端角色不该能触发系统通知，实际 %d 条", len(*calls))
+	}
+}
+
 // dialPageBridge 连桥接（模拟 DSH 网页端：浏览器的 WebSocket 不能自定义握手头，token 只能
 // 放 query；Origin 由浏览器强制带上，页面自己改不了）。
 func dialPageBridge(t *testing.T, app *App, origin string) (*websocket.Conn, *http.Response, error) {

@@ -17,7 +17,10 @@
  *      全局 setTimeout）同时挂上，先 ctx.appExit(0) 优雅退出（DSH 自己还有 5s 强制退出上限），
  *      3s 内进程还在就 process.exit / reallyExit / 进程信号逐个兜底，全程留痕、绝不静默卡死；
  *   3. 能力握手：连上后第一帧 hello 是全量快照（能力 + 主题），之后能力变化增量重发；
- *      断线按 RETRY_DELAYS_MS 退避重连，重连成功即重发快照（自愈）。
+ *      断线按 RETRY_DELAYS_MS 退避重连，重连成功即重发快照（自愈）；
+ *   4. 会话通知：一次回答正常结束（turn/end 且 reason.kind==="completed"）推一帧 notify
+ *      （标题 + 最终回复前 50 字），模型用 ask_user_question 提问时也推一帧（标题 +「我有一些问题」）；
+ *      由 launcher 决定是否弹系统通知（开关在启动器「设置 → 通知」，默认开启）。
  *
  * 重启完成的续跑负载也不落盘：重启前随 restart 帧提交，新进程连上后 launcher 主动下发
  * pending 帧，注入「重启完成」成功后回 pending-consumed 确认（确认前负载留在 launcher，
@@ -866,6 +869,174 @@ function watchTheme(settingsCtx, settings) {
 }
 //#endregion
 
+//#region 会话通知（回答完成 / AI 提问 → launcher 弹系统通知）
+/**
+ * 会话通知：DSH 会话事件 → 一帧 notify → 启动器弹系统通知（开关在启动器「设置 → 通知」）。
+ *
+ * 只有两条触发条件，别的都不发：
+ *   1. `turn/end` 且 `reason.kind === "completed"` —— 一次回答正常结束，正文 = 最终回复前 50 字；
+ *   2. `tool/call` 且 `name === "ask_user_question"` —— 模型在**等你回答**（回合被阻塞，不会有
+ *      turn/end），正文固定「我有一些问题」。
+ *
+ * 不发的场合：子代理 / 工作流子会话（用户看的是顶层会话）；被取消（aborted）或出错
+ * （error / interrupted / forked / blocked / max-tokens）的回合；最终文本为空的回合（例如只有
+ * 工具调用的中间步骤）；桥接离线（**不排队不重试** —— 过期的通知比没有更糟）。
+ *
+ * 状态放在**进程级**（与 pendingDelivery 同理）：0.2.6 起 `dsh.client` 让每次启动都出现
+ * 「装载会话 #1 → 拆掉 → #2」，状态若落在会话里，拆一次就丢。
+ */
+const NOTIFY_PREVIEW_CHARS = 50;
+const NOTIFY_TITLE_FALLBACK_CHARS = 20;
+/** 逐会话跟踪状态的上限（超出按插入序淘汰最旧的）。 */
+const NOTIFY_STATE_MAX = 32;
+/** sessionTitle 服务（标题的权威来源；未就绪为 null，走兜底）。 */
+let titleService = null;
+/** sessionId → { turn, text, firstUserText, title }（进程级）。 */
+const notifyState = new Map();
+
+/** 压成一行：会话文本可能带换行/制表符，系统通知里只该有一行。 */
+function oneLine(text) {
+	return typeof text === "string" ? text.replace(/\s+/g, " ").trim() : "";
+}
+
+/** 按**码点**截断（中文 / emoji 安全），超出补省略号。 */
+function preview(text, max) {
+	const chars = Array.from(oneLine(text));
+	return chars.length <= max ? chars.join("") : `${chars.slice(0, max).join("")}…`;
+}
+
+/** 一条消息里模型/用户说给人看的文本（只取 text 块，忽略 reasoning / tool-call）。 */
+function messageText(message) {
+	const blocks = message?.content;
+	if (!Array.isArray(blocks)) return "";
+	const parts = [];
+	for (const block of blocks) {
+		if (block?.type === "text" && typeof block.text === "string") parts.push(block.text);
+	}
+	return oneLine(parts.join(" "));
+}
+
+/** 子代理 / 工作流子会话：回合结束不通知。 */
+function isChildSession(subject) {
+	const header = subject?.header;
+	return header?.origin === "subagent" || (header?.delegationDepth ?? 0) > 0;
+}
+
+/** 会话标题：sessionTitle 服务 → 本进程见过的 session/title → 首条真人消息 → 占位。 */
+function sessionTitleOf(subject) {
+	const id = typeof subject?.id === "string" ? subject.id : "";
+	const state = notifyState.get(id);
+	if (titleService !== null && typeof titleService.get === "function") {
+		try {
+			const snapshot = titleService.get(subject);
+			if (typeof snapshot?.title === "string" && snapshot.title !== "") return oneLine(snapshot.title);
+		} catch (error) {
+			guardTrace(`读取会话标题失败（改用兜底标题）：${error?.message ?? String(error)}`);
+		}
+	}
+	if (typeof state?.title === "string" && state.title !== "") return state.title;
+	if (typeof state?.firstUserText === "string" && state.firstUserText !== "") {
+		return preview(state.firstUserText, NOTIFY_TITLE_FALLBACK_CHARS);
+	}
+	return "未命名会话";
+}
+
+/** 取（必要时建）一条会话状态，并维持条数上限。 */
+function notifyStateFor(id) {
+	let state = notifyState.get(id);
+	if (state === undefined) {
+		state = { turn: null, text: "", firstUserText: "", title: "" };
+		notifyState.set(id, state);
+		if (notifyState.size > NOTIFY_STATE_MAX) {
+			// Map 保持插入序：淘汰最旧的一条（刚 set 过的这条排在最后，不会是自己）。
+			notifyState.delete(notifyState.keys().next().value);
+		}
+	}
+	return state;
+}
+
+/** 推一帧通知给 launcher。未连接就丢弃（见本 region 顶部说明），只留一行痕迹。 */
+function sendNotify(kind, id, sessionId, title, text) {
+	if (!sendFrame("notify", { id, kind, sessionId, title, text })) {
+		ctxRef?.logger?.debug?.(`[dsh-launcher-plugin] 桥接未连接，${kind} 通知未推送（不排队）`);
+	}
+}
+
+/** 会话事件分发（只处理本 region 关心的几种，其余直接返回）。 */
+function handleSessionEvent(subject, event) {
+	const id = typeof subject?.id === "string" ? subject.id : "";
+	if (id === "" || isChildSession(subject)) return;
+	const data = event?.data;
+	switch (event?.type) {
+		case "assistant/message": {
+			const text = messageText(data?.message);
+			if (text === "") return;
+			const state = notifyStateFor(id);
+			state.text = text;
+			state.turn = data?.turn ?? null;
+			return;
+		}
+		case "user/message": {
+			// 标题还没生成时的兜底：只认真人输入（source.kind === "user"），注入的上下文不算。
+			if (data?.source?.kind !== "user") return;
+			const state = notifyStateFor(id);
+			if (state.firstUserText !== "") return;
+			const text = messageText(data);
+			if (text !== "") state.firstUserText = text;
+			return;
+		}
+		case "session/title": {
+			const title = oneLine(data?.title);
+			if (title !== "") notifyStateFor(id).title = title;
+			return;
+		}
+		case "turn/end": {
+			const state = notifyState.get(id);
+			if (state === undefined || state.turn !== (data?.turn ?? null)) return;
+			const text = state.text;
+			// 标题要在删状态之前算（兜底标题就在这条状态里）。
+			const title = sessionTitleOf(subject);
+			notifyState.delete(id);
+			if (data?.reason?.kind !== "completed" || text === "") return;
+			sendNotify("turn-complete", `turn-${id}-${data.turn}`, id, title, preview(text, NOTIFY_PREVIEW_CHARS));
+			return;
+		}
+		case "tool/call": {
+			if (data?.name !== "ask_user_question") return;
+			const callId = typeof data?.callId === "string" && data.callId !== "" ? data.callId : id;
+			sendNotify("question", `q-${callId}-${data?.turn ?? 0}`, id, sessionTitleOf(subject), "我有一些问题");
+			return;
+		}
+		default:
+			return;
+	}
+}
+
+/**
+ * 挂会话监听（只在 launcher 拉起的实例里）。两道守卫：
+ *   ① `session !== s` —— 双半包装载下只有**当前**装载会话的监听器生效（与 armTimeout 同一纪律）；
+ *   ② 回调整体 try/catch —— 事件回调跑在 DSH 的会话追加路径里，异常绝不能外逃。
+ * 注册失败（该 DSH 没有 session/event？）只记能力，不影响主题同步与 dsh-restart。
+ */
+function attachSessionNotify(ctx, s) {
+	try {
+		ctx.on("session/event", (subject, event) => {
+			if (session !== s) return;
+			try {
+				handleSessionEvent(subject, event);
+			} catch (error) {
+				guardTrace(`会话通知回调异常（已吞掉，不影响 DSH）：${error?.message ?? String(error)}`);
+			}
+		});
+		setCapability("sessionNotify", true);
+	} catch (error) {
+		const message = error?.message ?? String(error);
+		setCapability("sessionNotify", false, `注册会话监听失败：${message}`);
+		guardTrace(`注册会话监听失败（已忽略，不影响主题同步）：${message}`);
+	}
+}
+//#endregion
+
 //#region 内嵌支持（embed）：放宽 DSH 的浏览器会话校验，供启动器跨源 iframe 内嵌
 /** 允许内嵌的来源（跨源 iframe 请求里的 `Origin`）。默认只放行启动器页面源
  *  `http://wails.localhost`（Wails v2 在 Windows 上固定用它承载前端）。要换源改这里。 */
@@ -1320,6 +1491,16 @@ function apply(ctx) {
 		})), "dsh-launcher-plugin.tool");
 	} else {
 		ctx.logger.info("[dsh-launcher-plugin] 未由 dsh-launcher 拉起，跳过 dsh-restart 注册（静默降级）");
+	}
+
+	// 2.5) 会话通知：回答完成 / AI 提问 → launcher 弹系统通知（见「会话通知」region）。
+	//      标题来自 sessionTitle 服务（就绪回调驱动，不用重试次数等）；没有它只影响标题兜底。
+	if (supervised) {
+		ctx.inject(["sessionTitle"], (titleCtx) => {
+			const service = titleCtx.get("sessionTitle");
+			if (service !== void 0 && typeof service.get === "function") titleService = service;
+		});
+		attachSessionNotify(ctx, s);
 	}
 
 	// 3) 连接桥接（首连 + 快照；续跑负载由 launcher 主动下发）；断线由退避重连接管

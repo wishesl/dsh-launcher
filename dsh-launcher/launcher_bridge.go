@@ -19,7 +19,8 @@ import (
 // launcherBridge —— dsh-launcher 的 loopback 桥接服务（实现方案 §2）。
 //
 // 一条 WebSocket 线承载全部功能：能力握手、主题同步（双向）、dsh-restart、
-// 重启完成的续跑负载。127.0.0.1 临时端口 + 随机 Bearer token，随实例启动注入 env：
+// 重启完成的续跑负载、会话通知（回答完成 / AI 提问）。127.0.0.1 临时端口 + 随机 Bearer token，
+// 随实例启动注入 env：
 //
 //	DSH_LAUNCHER_EVENTS = 桥接基地址 http://127.0.0.1:<port>（插件自己换成 ws://…/ws）
 //	DSH_LAUNCHER_TOKEN  = Bearer token（握手请求头带它，不进 URL、不进日志）
@@ -58,7 +59,7 @@ var bridgeRestartGrace = 20 * time.Second
 
 // 帧类型（信封里的 type）。
 //
-//	插件 → launcher：hello / theme / restart / pending-consumed / command-result
+//	插件 → launcher：hello / theme / restart / pending-consumed / command-result / notify
 //	launcher → 插件：pending / set-theme / restart-result
 //	网页端 → launcher：page-hello / page-theme / page-result
 //	launcher → 网页端：page-set-theme
@@ -70,6 +71,9 @@ const (
 	frameRestart         = "restart"
 	framePendingConsumed = "pending-consumed"
 	frameCommandResult   = "command-result"
+	// frameNotify —— 插件推来的会话通知（回答完成 / AI 提问）。是否弹系统通知由启动器的
+	// 「设置 → 通知」开关决定，见 notify.go；载荷形状见 bridgeNotifyPayload。
+	frameNotify = "notify"
 
 	framePending       = "pending"
 	frameSetTheme      = "set-theme"
@@ -170,6 +174,19 @@ type bridgeRestartResult struct {
 	ID    string `json:"id,omitempty"`
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
+}
+
+// bridgeNotifyPayload —— 插件 → launcher：一条会话通知（回答完成 / AI 提问）。
+//
+// ID 是插件生成的稳定标识（`turn-<sessionId>-<turn>` / `q-<callId>-<turn>`），launcher 用它去重；
+// Kind 只认 turn-complete / question（未知一律忽略，协议只增不改）。Title 是会话标题，
+// Text 是通知正文（回答完成为最终回复前 50 字，提问为固定文案）。
+type bridgeNotifyPayload struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	SessionID string `json:"sessionId"`
+	Title     string `json:"title"`
+	Text      string `json:"text"`
 }
 
 // bridgePageHelloPayload —— 网页端（客户端半边）的握手：只报身份，不带能力快照。
@@ -405,6 +422,13 @@ func (b *launcherBridge) handleFrame(c *bridgeClient, env bridgeEnvelope) {
 		b.emitTheme(c.instanceID, payload.Preference)
 	case frameRestart:
 		b.handleRestartFrame(c, env)
+	case frameNotify:
+		// 会话通知：是否弹系统通知由启动器设置决定（见 notify.go 的 handleNotifyFrame）。
+		var payload bridgeNotifyPayload
+		if len(env.Payload) > 0 {
+			_ = json.Unmarshal(env.Payload, &payload)
+		}
+		b.app.handleNotifyFrame(c, payload)
 	case framePendingConsumed:
 		b.consumePending(c)
 	case frameCommandResult:

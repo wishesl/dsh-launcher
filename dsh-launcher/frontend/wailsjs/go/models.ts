@@ -472,6 +472,20 @@ export namespace main {
 	        this.profile = source["profile"];
 	    }
 	}
+	export class NotifySettings {
+	    turnComplete: boolean;
+	    question: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new NotifySettings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.turnComplete = source["turnComplete"];
+	        this.question = source["question"];
+	    }
+	}
 	export class ProxySettings {
 	    proxy: string;
 	

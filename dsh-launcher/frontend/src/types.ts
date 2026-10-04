@@ -351,6 +351,14 @@ export interface UpdateSettings {
   sourceRepo: string;
 }
 
+/** 会话通知开关（设置 → 通知；见后端 notify.go，两个开关默认开启）。 */
+export interface NotifySettings {
+  /** AI 回答正常结束时弹系统通知（正文 = 最终回复前 50 字）。 */
+  turnComplete: boolean;
+  /** AI 用提问工具等你回答时弹系统通知（正文 = 「我有一些问题」）。 */
+  question: boolean;
+}
+
 /** dsh:update-status 的载荷（阶段 + 进度）。 */
 export interface UpdateStatusEvent {
   state: string; // running | done | failed | cancelled

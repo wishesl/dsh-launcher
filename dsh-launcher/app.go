@@ -33,9 +33,15 @@ type App struct {
 	// talks to (launcher_bridge.go): hello = capability + theme snapshot,
 	// theme = theme push, restart = self-restart ack, pending = restart payload
 	// hand-back, set-theme = launcher → plugin command (writes the shared
-	// profile's ui-theme). No HTTP REST endpoints are left.
+	// profile's ui-theme), notify = session notifications (回答完成 / AI 提问,
+	// rendered as OS notifications when enabled — see notify.go). No HTTP REST
+	// endpoints are left.
 	// Created in NewApp so a.bridge is never nil; listening starts in startup().
 	bridge *launcherBridge
+
+	// notifySeen dedupes plugin notify frames by their stable id (see notify.go).
+	// App-scoped (not package-level) so tests never share state.
+	notifySeen *notifySeenSet
 
 	// inFlight tracks launch/install attempts that have not yet registered
 	// their process in a.processes (including the auto-start stagger sleep).
@@ -63,6 +69,7 @@ func NewApp() *App {
 		processes:  make(map[string]*managedProcess),
 		svcKnown:   make(map[string]ServiceState),
 		svcTrigger: make(chan struct{}, 1),
+		notifySeen: newNotifySeenSet(),
 	}
 	a.bridge = newLauncherBridge(a)
 	return a

@@ -424,6 +424,10 @@ let face = null;
 		if (!html.includes("dshl-panel-logo")) fail("面板页头该有启动器 logo");
 		if (!html.includes("data:image/png;base64,")) fail("面板页头 logo 该走内联 data URI");
 		if (!html.includes("T(feat.pageTheme.title)")) fail("渲染结果里没有功能卡片");
+		// 回归锁：0.2.14 新增的会话通知必须出现在「功能展示」清单里（曾经只改了服务端半边，
+		// 面板是静态清单，于是用户在 DSH 设置里看不到这项）。
+		if (!html.includes("T(feat.sessionNotify.title)")) fail("功能清单里没有「回答完成 / 提问通知」");
+		if (!html.includes("T(feat.sessionNotify.need)")) fail("会话通知卡片缺「前提」文案");
 		if (!html.includes("127.0.0.1:1234")) fail("渲染结果里没有桥接地址");
 		if (!html.includes("T(hint.launcherRestarted)")) fail("离线重连≥3 次时该提示重启实例");
 		if (html.includes("disabled")) fail("离线时「重新连接」按钮不该禁用");
