@@ -129,6 +129,9 @@ const inflight = new Map();
 let session = null;
 /** 会话序号，只用于留痕对账。 */
 let sessionSeq = 0;
+/** 「尝试交付续跑负载」是否已经留过痕：双半包会让 sessionController 注入回调跑两次，
+ *  同一句话不该打两遍（交付动作本身每次都照做，只有日志去重）。 */
+let resumeAttemptTraced = false;
 
 /** 记一条能力结论。reason 只在 ok=false 时有意义，写人话（原样显示在面板上）。
  *  结论随 hello 快照发给 launcher —— 握手即报告，没有文件、没有陈旧判定。 */
@@ -222,7 +225,8 @@ function beginSession() {
 	endSession("重新装载");
 	const s = { id: ++sessionSeq, disposed: false, timers: new Set() };
 	session = s;
-	guardTrace(`装载会话 #${s.id} 开始（第 ${s.id} 次 apply，pid ${process.pid}）`);
+	// 这里**故意不打点**：双半包（dsh.client）每次启动本来就会 #1 → 拆掉 → #2，
+	// 逐条打印只会把实例日志刷满（见 apply 里的「已装载」+ endSession 的收尾痕迹）。
 	return s;
 }
 
@@ -1077,6 +1081,49 @@ function hasValidLaunchToken(req, launchToken) {
 	return actual.byteLength === expected.byteLength && timingSafeEqual(actual, expected);
 }
 
+/** 探测用的合成 authority：Host 门只认 loopback 主机名（不看端口），同源比较用同一个值即可。 */
+const EMBED_PROBE_AUTHORITY = "127.0.0.1:1";
+
+/**
+ * 哪些请求可以免掉"会话 cookie"这一步（**只免认证**，不放宽其它语义）：
+ *   ① 启动器页面自身发起的请求 → `Origin` 命中白名单（跨源，必然没有 cookie）；
+ *   ② 内嵌文档自身发起的请求 → `Origin`（或 `Referer`）与请求 `Host` 同源。
+ *      DSH 的 `SameSite=Strict` 会话 cookie 在跨站 iframe 里永远不发，而这两类请求
+ *      在 DSH 眼里就是"本机文档自己在调自己"。
+ * 陌生 Origin、没有 Origin 的裸请求一律维持原判（DNS rebinding / 跨站页面拿不到这个放行）。
+ */
+function embedRelaxApplies(req) {
+	const host = headerValue(req?.headers, "host");
+	const origin = headerValue(req?.headers, "origin");
+	const referer = headerValue(req?.headers, "referer");
+	if (typeof origin === "string" && EMBED_ALLOWED_ORIGINS.has(origin.toLowerCase())) return true;
+	// 流式端点 /api/remote.mux 只带 Origin、没有 Referer，所以两条都要看。
+	return sameHost(origin, host) || sameHost(referer, host);
+}
+
+/**
+ * **行为探测**：拿一个"不带 cookie、Origin 与 Host 同源"的合成请求走一遍真正的准入链，
+ * 看结果是 peer 还是 rejection —— 而不是"方法在不在"。
+ *
+ * 为什么必须行为探测：0.2.1-rc.1 里 `authorizeIndex` / `requestRejection` 都还在，
+ * 形状探测一律通过，但 `/api` 已经不走 `requestRejection` 了；那样会误报
+ * `embedRelax=true`（入口不置灰），用户只能撞 401。形状在、语义变，就得真跑一遍。
+ */
+function probeEmbedRelax(conn) {
+	if (typeof conn.admit !== "function") return false;
+	const probe = {
+		method: "POST",
+		url: "/api",
+		headers: { host: EMBED_PROBE_AUTHORITY, origin: `http://${EMBED_PROBE_AUTHORITY}` },
+	};
+	try {
+		const admission = conn.admit(probe);
+		return admission !== void 0 && !("rejection" in admission);
+	} catch {
+		return false;
+	}
+}
+
 /**
  * 放宽 DSH 的浏览器会话校验，让启动器能把界面嵌进自己的跨源 iframe。
  *
@@ -1084,11 +1131,20 @@ function hasValidLaunchToken(req, launchToken) {
  * sessionCookie），跨站 iframe 里的请求一律不带它。于是 `/?token=…` 虽然能过，
  * 但它返回的 303→`/` 那一步拿不到 cookie，直接 401 —— 界面永远打不开。
  *
- * 只做两处**最小**放宽，其余请求（其它站点、没带 token 的）行为完全不变：
+ * 三处**最小**放宽，其余请求（其它站点、没带 token 的）行为完全不变：
  *   1) `authorizeIndex`：`GET /?token=<有效 launch token>` 直接返回 true（渲染 index）；
- *   2) `requestRejection`：只对 `Origin` 命中白名单的请求跳过 cookie 校验。
+ *   2) `requestRejection`：放宽判据命中时不报 rejection（inspect / open-in-app 还在走它）；
+ *   3) `admit`：同样命中判据时把「没有会话 cookie」的 rejection 换成浏览器 peer。
  *
- * 两处都是「通过 service 对象、每请求现查」的方法，替换实例上的方法即生效。
+ * ⚠️ 第 3 处是**上游改了调用方向**之后必须补的：DSH ≤ 0.2.1-alpha.2 是
+ * `admit()` 内部调 `requestRejection()`（覆盖后者即生效）；0.2.1-alpha.5 起反了过来 ——
+ * `requestRejection()` 只是 `admit()` 的包装，而 `/api` 路由直接调 `this.admit(req)`，
+ * 于是只覆盖 `requestRejection` 对 `/api` 就是死代码：内嵌视图每条 `/api` 都 401
+ * （web boot 读不到 Cordis 清单 → 报 `1 entry did not activate`）。
+ * 证据见 0.2.1-rc.1 `dsh-client-connection/lib/index.js` 的 `requestRejection` / `admit`
+ * 以及 `register()` 里的 `const admission = this.admit(req)`。
+ *
+ * 放宽只解决**认证**这一步：Host/Origin 门的结果、以及不命中判据的来源一律原样透传。
  * 结论写进能力（embedRelax）随握手上报：内嵌入口按它置灰，而不是让用户撞 401。
  */
 function relaxEmbedAuth(ctx) {
@@ -1126,23 +1182,42 @@ function relaxEmbedAuth(ctx) {
 	conn.requestRejection = (req) => {
 		const rejection = originalRequestRejection(req);
 		if (rejection === void 0) return void 0;
-		const host = headerValue(req?.headers, "host");
+		if (!embedRelaxApplies(req)) return rejection;
+		// ① 启动器页面直接发起的请求（跨源 → 带 Origin，命中白名单）：不常见，留一行日志。
 		const origin = headerValue(req?.headers, "origin");
-		const referer = headerValue(req?.headers, "referer");
-		// ① 启动器页面直接发起的请求（跨源 → 带 Origin，命中白名单）
 		if (typeof origin === "string" && EMBED_ALLOWED_ORIGINS.has(origin.toLowerCase())) {
 			ctx.logger.info(`[dsh-launcher-plugin] embed: 放行 ${origin} 的 ${req.method} ${req.url}`);
-			return void 0;
 		}
-		// ② 内嵌文档自身发起的请求：Origin（或 Referer）与请求 Host 同源。
-		//    流式端点 /api/remote.mux 只带 Origin、没有 Referer，所以必须用 Origin 判定。
-		if (sameHost(origin, host) || sameHost(referer, host)) {
-			return void 0;
-		}
-		return rejection;
+		// ② 内嵌文档自身发起的请求：Origin（或 Referer）与请求 Host 同源（判据在
+		//    embedRelaxApplies 里；流式端点 /api/remote.mux 只带 Origin、没有 Referer）。
+		return void 0;
 	};
 
+	// 上游把 `/api` 的准入改成直接调 admit()（见上面「调用方向」那段）：这里再包一层，
+	// 把"没有会话 cookie"的 rejection 换成浏览器 peer。**只放宽认证**——admit 判定的
+	// Host/Origin 门如果是 403（陌生来源）就原样透传；命中判据但拿不到 peer 也不放宽。
+	if (typeof conn.admit === "function") {
+		const originalAdmit = conn.admit.bind(conn);
+		conn.admit = (req) => {
+			const admission = originalAdmit(req);
+			if (admission === void 0 || !("rejection" in admission)) return admission;
+			if (!embedRelaxApplies(req)) return admission;
+			const peer = conn.browserPeer;
+			if (peer === void 0) return admission;
+			return { peer };
+		};
+		conn.__dshLauncherPluginAdmitPatched = true;
+	}
+
 	conn.__dshLauncherPluginEmbedPatched = true;
+	// 打完补丁再**实测**一次：形状全在但语义变了（上游反转调用方向）时必须报 false，
+	// 否则内嵌入口不置灰，用户只会看到 401 / 一直「自动重连中」。
+	if (!probeEmbedRelax(conn)) {
+		const why = "DSH 的 /api 准入没有采纳放宽（上游改了内部实现？）";
+		ctx.logger.warn(`[dsh-launcher-plugin] embed: 行为探测未通过（${why}）`);
+		setCapability("embedRelax", false, `${why}：内嵌视图会一直 401 / 自动重连中`);
+		return;
+	}
 	setCapability("embedRelax", true);
 	ctx.logger.info(
 		`[dsh-launcher-plugin] embed: 已放宽浏览器会话校验（白名单来源: ${[...EMBED_ALLOWED_ORIGINS].join(", ")}）`
@@ -1244,15 +1319,6 @@ function forceExit(reason) {
 	}
 }
 
-/** 读一个可能被 cordis 属性拦截器挡下来的成员类型（自身不抛错）。 */
-function memberKind(target, prop) {
-	try {
-		return typeof target?.[prop];
-	} catch (error) {
-		return `抛错：${error?.message ?? String(error)}`;
-	}
-}
-
 /**
  * 安排一次延时动作 —— **三条通道全都挂上**，谁先响算谁（回调必须幂等）。
  *
@@ -1318,8 +1384,9 @@ function apply(ctx) {
 	// 能执行到这里就说明插件确实装载了 —— 随握手上报，是面板的第一条。
 	setCapability("pluginLoaded", true);
 	ctx.logger.info(`[dsh-launcher-plugin] 已装载：桥接=${supervised ? bridgeURL : "未配置"}（launcher=${process.env.DSH_LAUNCHER === "1" ? "是" : "否"}）`);
-	// 装载打点：apply 可能被调用多次（真机上出现过 2~3 次 hello），pid 便于和进程树对账。
-	restartTrace(`已装载（plugin ${pluginVersion() || "?"}，pid ${process.pid}）`);
+	// 装载打点：apply 可能被调用多次（双半包 → 每次启动 2 次），所以把 apply 序号并进
+	// 这一行，而不是每条路径各打一行 —— 启动日志只留「已装载 / 会话收尾 / 撞名」三类痕迹。
+	restartTrace(`已装载（plugin ${pluginVersion() || "?"}，pid ${process.pid}，第 ${s.id} 次 apply）`);
 
 	// 0) 内嵌支持：connection service 就绪后放宽浏览器会话校验（只有 web 组合才有它）
 	ctx.inject(["connection"], (connectionCtx) => {
@@ -1328,11 +1395,11 @@ function apply(ctx) {
 
 	// 0.5) 退出入口：DSH 的 appExit 由 dsh-cmdline 在 host ctx 上 provide（web 组合里
 	//      排在插件挂载之后）。服务就绪就拿一份缓存起来，dsh-restart 用。
+	//      拿到是常态，不再打点；拿不到才留痕（重启会走硬退兜底）。
 	ctx.inject(["appExit"], (exitCtx) => {
-		const { exit, via } = resolveAppExit(exitCtx);
+		const { exit } = resolveAppExit(exitCtx);
 		if (typeof exit === "function") {
 			appExitRef = exit;
-			restartTrace(`已取得 appExit（来源：${via}），重启走优雅退出`);
 		} else {
 			restartTrace("拿不到 appExit（重启时走硬退兜底）");
 		}
@@ -1343,7 +1410,11 @@ function apply(ctx) {
 	//       并把重试预算白烧在必然失败的尝试上。
 	ctx.inject(["sessionController"], (scCtx) => {
 		sessionControllerCtx = scCtx;
-		deliveryTrace("sessionController 已就绪，尝试交付续跑负载");
+		// 双半包会让这个回调跑两次：只在第一次留痕，别把同一句话说两遍。
+		if (!resumeAttemptTraced) {
+			resumeAttemptTraced = true;
+			deliveryTrace("sessionController 已就绪，尝试交付续跑负载");
+		}
 		attemptDelivery();
 		scCtx.effect(() => () => {
 			if (sessionControllerCtx === scCtx) sessionControllerCtx = null;
@@ -1352,9 +1423,9 @@ function apply(ctx) {
 
 	// 0.6) 计时器：退出与交付都靠它延时。timer 注入后的 ctx 才保证 `timeout` 可调用
 	//      （真机在工具里用 apply 的 ctx 调会抛 `cannot get property "timeout" without inject`）。
+	//      注入成功是常态、不打点；真正需要留痕的是"排不了"（见 armTimeout/scheduleExit）。
 	ctx.inject(["timer"], (timerCtx) => {
 		timerCtxRef = timerCtx;
-		restartTrace(`已取得 timer（timerCtx.timeout=${memberKind(timerCtx, "timeout")}，ctx.timeout=${memberKind(ctx, "timeout")}）`);
 	});
 
 	// 1) 主题：settings 就绪 → 初读 + 事件 + 轮询；5s 没就绪给一个可见结论

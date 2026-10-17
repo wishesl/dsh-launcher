@@ -103,6 +103,106 @@ func TestBridgeEndToEndWithRealPlugin(t *testing.T) {
 	}
 }
 
+// 内嵌授权放宽（embedRelax）的契约测试：跑真插件代码（testdata/plugin-embed-harness.mjs
+// 提供假 connection service），把上游两种「调用方向」和一种翻车形状都钉住：
+//
+//	新形状（0.2.1-alpha.5 起：`requestRejection` 只是 `admit` 的包装、/api 直接调 admit）→ true；
+//	老形状（≤0.2.1-alpha.2：`admit` 委托 `requestRejection`，覆盖后者即生效）→ 也必须 true；
+//	翻车形状（`admit` 自带逻辑、又拿不到 browserPeer）→ 必须 false。
+//
+// 为什么要连真桥接：能力是随握手上报的，而**假阳性**（形状在、语义变）会让内嵌入口不置灰，
+// 用户只能撞 401 —— 0.2.1-rc.1 就是这么翻的（内嵌视图每条 /api 401，web boot 报
+// `1 entry did not activate`）。所以这里不只断言值，还断言这一项**必须存在**：
+// 缺席等于 fail-open，前端同样不会置灰。
+func TestEmbedRelaxCapabilityAcrossUpstreamShapes(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("没有 node，跳过真插件端到端测试")
+	}
+	harness := filepath.Join("testdata", "plugin-embed-harness.mjs")
+	if _, err := os.Stat(harness); err != nil {
+		t.Fatalf("找不到 harness: %v", err)
+	}
+
+	for _, tc := range []struct {
+		mode string
+		want bool
+	}{
+		{mode: "new", want: true},     // 0.2.1-rc.1 的调用方向
+		{mode: "old", want: true},     // 0.2.0-rc.2 的调用方向（向后兼容）
+		{mode: "nopeer", want: false}, // 再改一次 → 必须判负
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			app, _ := newSelfRestartTestApp(t)
+			app.bridge.start()
+			t.Cleanup(app.bridge.stop)
+			if app.bridge.url == "" {
+				t.Fatal("桥接必须监听成功")
+			}
+			app.mu.Lock()
+			app.processes["inst-a"] = &managedProcess{instanceID: "inst-a", launchID: "L1"}
+			app.mu.Unlock()
+
+			outFile, err := os.CreateTemp(t.TempDir(), "embed-harness-out-*.log")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer outFile.Close()
+			errFile, err := os.CreateTemp(t.TempDir(), "embed-harness-err-*.log")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer errFile.Close()
+
+			cmd := exec.Command(node, "--import", "./testdata/plugin-test-register.mjs", harness, tc.mode)
+			cmd.Env = append(os.Environ(),
+				"DSH_LAUNCHER=1",
+				"DSH_LAUNCHER_EVENTS="+app.bridge.url,
+				"DSH_LAUNCHER_TOKEN="+app.bridge.token,
+				"DSH_INSTANCE_ID=inst-a",
+				"DSH_LAUNCH_ID=L1",
+			)
+			cmd.Stdout = outFile
+			cmd.Stderr = errFile
+			if err := cmd.Start(); err != nil {
+				t.Fatalf("启动 harness 失败: %v", err)
+			}
+			done := make(chan error, 1)
+			go func() { done <- cmd.Wait() }()
+
+			report := waitHandshake(t, app.bridge, "inst-a", "L1")
+			found := false
+			for _, c := range report.Capabilities {
+				if c.ID != "embedRelax" {
+					continue
+				}
+				found = true
+				if c.OK != tc.want {
+					t.Fatalf("embedRelax=%v，期望 %v（reason=%q）", c.OK, tc.want, c.Reason)
+				}
+			}
+			if !found {
+				t.Fatalf("能力里必须有 embedRelax —— 缺席等于 fail-open，内嵌入口不会置灰: %+v", report.Capabilities)
+			}
+
+			select {
+			case werr := <-done:
+				if werr != nil {
+					t.Fatalf("harness 退出码非 0: %v\nstdout=%s\nstderr=%s",
+						werr, readFileString(outFile.Name()), readFileString(errFile.Name()))
+				}
+			case <-time.After(20 * time.Second):
+				_ = cmd.Process.Kill()
+				t.Fatalf("harness 20s 没结束\nstdout=%s\nstderr=%s",
+					readFileString(outFile.Name()), readFileString(errFile.Name()))
+			}
+			if out := readFileString(outFile.Name()); !strings.Contains(out, "HARNESS OK") {
+				t.Fatalf("harness 没有报告成功\nstdout=%s\nstderr=%s", out, readFileString(errFile.Name()))
+			}
+		})
+	}
+}
+
 // 会话通知的端到端契约测试：跑真插件代码（testdata/plugin-notify-harness.mjs 提供最小 ctx +
 // 假会话事件源 + 假 sessionTitle 服务），按真实事件顺序喂 DSH 的 session/event，验证 launcher
 // 真的收到并弹出了**内容正确**的通知，且该发的一条不少、不该发的一条不多。

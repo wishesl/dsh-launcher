@@ -8,7 +8,7 @@
 0.2.6 起同一条线多接一个角色：**网页端即时通道**（见下），让"点启动器换主题"从
 "等 DSH 写完配置再采纳（约 300ms）"变成**页面当场变色（毫秒级）**。
 
-## 版本速览（当前 0.2.15）
+## 版本速览（当前 0.2.17）
 
 | 版本 | 变更 | 提交 |
 |---|---|---|
@@ -26,6 +26,8 @@
 | 0.2.13 | **内嵌门禁**：只有启动器内嵌视图那个页面接即时通道，外部标签页不接（修掉多开网页时「网页通道一直闪烁重连」） | 本次 |
 | 0.2.14 | **会话通知**：回答正常结束 / 模型提问时推 `notify` 帧，由启动器弹系统通知（开关在启动器「设置 → 通知」） | 本次 |
 | 0.2.15 | **网页端面板的功能清单补上会话通知**（0.2.14 只改了服务端半边，DSH 设置里的「功能展示」看不到这项） | 本次 |
+| 0.2.16 | **修内嵌视图在 0.2.1-alpha.5+ 上的全员 401**：上游把 `/api` 准入从 `admit → requestRejection` 反成 `requestRejection → admit`，只覆盖后者成了死代码；补 `admit` 包装，并把 `embedRelax` 从形状探测改成**行为探测**（见「内嵌授权放宽」） | 本次 |
+| 0.2.17 | **启动日志收敛为三类痕迹**（去掉会话开始 / 已取得 appExit / 已取得 timer / 重复的"尝试交付"），见「启动日志只留三类痕迹」 | 本次 |
 
 > 能力或行为变更**必须** bump `package.json` 版本（启动器用「内置 vs 已装」版本比对分诊，见文末开发须知）。
 
@@ -189,6 +191,33 @@ unregister 先到，那样内嵌页会被自己的刷新拒掉、客户端 `disa
 
 完整推导与实测证据见 `doc/网页端即时通道实现方案.md`。
 
+## 内嵌授权放宽（embedRelax）——上游改过调用方向，别再只看"方法在不在"
+
+启动器把 DSH 界面嵌进自己的跨源 iframe（父页面 `http://wails.localhost`），而 DSH 的会话
+cookie 是 `SameSite=Strict`：跨站 iframe 里的请求**永远不带它**。所以内嵌能打开，靠的是服务端
+半边打的三处补丁（`lib/index.js` 的 `relaxEmbedAuth`）：
+
+1. `authorizeIndex`：跨站 iframe 带有效 launch token → 直接渲染 index（跳过 303+cookie 往返）；
+2. `requestRejection`：放宽判据命中时不再报 rejection；
+3. `admit`：命中判据时把「没有会话 cookie」的 rejection 换成浏览器 peer。
+
+⚠️ **第 3 处是补出来的**，因为上游换过调用方向：
+
+| DSH 版本 | `/api` 的准入链 | 只覆盖 `requestRejection` |
+| --- | --- | --- |
+| ≤ 0.2.1-alpha.2（含 bestFit 0.2.0-rc.2） | `admit()` 内部调 `requestRejection()` | 生效 |
+| ≥ 0.2.1-alpha.5（含 0.2.1-rc.1） | `admit()` 自带逻辑，`requestRejection()` 只是它的包装 | **死代码** |
+
+失效时的症状很好认：**网页端（顶层标签页）一切正常，只有内嵌视图**每条 `/api` 401，web boot
+读不到 Cordis 清单 → 界面弹「Failed to load plugins / `web boot: 1 entry did not activate`」
+（激活时要调 Host API 的那个客户端插件会被标 `failed`）。
+
+**纪律**：这一项的能力结论必须是**行为探测**（拿一个"不带 cookie、Origin 与 Host 同源"的合成
+请求真跑一遍 `admit`），不能是"`authorizeIndex` / `requestRejection` 在不在"——上游改动方向时
+方法两个都还在，形状探测会报 `true`，入口不置灰，用户只能撞 401。回归测试：
+`testdata/plugin-embed-harness.mjs`（三种形状）+ `TestEmbedRelaxCapabilityAcrossUpstreamShapes`
+（连真桥接断言能力上报）。
+
 ## 会话通知（0.2.14+）
 
 一次 AI 回答**正常结束**、或模型**在等你回答**时，插件推一帧 `notify`，启动器按当前系统弹一条
@@ -273,8 +302,8 @@ unregister 先到，那样内嵌页会被自己的刷新拒掉、客户端 `disa
 0.2.7 的修法（两道，缺一不可）：
 
 1. **装载会话**：每次 `apply` 建一个会话，旧会话先收（取消定时器、关连接）；`ctx.effect` 在
-   fiber 销毁时收掉自己的会话（timer 服务不会替我们取消，所以必须自己挂）。留痕：
-   `会话：装载会话 #N 开始 / 结束（…）`。
+   fiber 销毁时收掉自己的会话（timer 服务不会替我们取消，所以必须自己挂）。留痕（0.2.17 起
+   精简，见下）：`会话：装载会话 #N 结束（重新装载 / fiber 销毁）`。
 2. **定时器硬护栏** `armTimeout`：所有 `ctx.timeout` 调用统一走它 —— 整个回调包 try/catch
    （异常绝不外逃）、disposer 记进会话、会话已销毁就不排、ctx 失效时留一行
    `定时器 <名字> 排不了（ctx 已失效？已忽略）`。socket 事件与交付重试同样包了护栏。
@@ -282,6 +311,22 @@ unregister 先到，那样内嵌页会被自己的刷新拒掉、客户端 `disa
 回归锁：`dsh-launcher/testdata/plugin-dispose-harness.mjs` + Go 用例
 `TestPluginTimerGuardSurvivesStaleContext` —— 用假 ctx 复现同一时序（失效后 `timeout` 抛
 真机原文的错）：0.2.6 的代码在这条用例里必崩（exit 1，栈落在 `poll`），0.2.7 必须活着退出。
+
+### 启动日志只留三类痕迹（0.2.17）
+
+双半包让每次启动本来就有「#1 → 拆掉 → #2」两趟，早期把每一步都打点（会话开始、已装载、
+已取得 appExit/timer、尝试交付续跑负载…）→ 一次启动十几行，把实例日志淹了。0.2.17 收敛为
+**只留异常/收尾，不留例行成功**：
+
+| 什么时候打 | 行 |
+|---|---|
+| 每次 `apply` | `已装载（plugin <版本>，pid <pid>，第 N 次 apply）` |
+| 会话被收掉 | `会话：装载会话 #N 结束（重新装载 / fiber 销毁）` |
+| 工具撞名（双半包） | `会话：工具 dsh-restart 已由另一行装载注册（双半包），本次跳过：…` |
+| 真出错时才有 | `拿不到 appExit…` / `定时器 <名字> 排不了…` / `X 不可用：…` 等 |
+
+去掉的是**例行成功**那几句（会话开始、已取得 appExit、已取得 timer、尝试交付续跑负载），
+不变量没变：交付动作照样每次都做，只是「尝试交付」这句话每个进程只说一遍。
 
 **第二处（同日 00:58:33 真机，0.2.7 首跑暴露）**：双半包的第二行装载撞名 ——
 `ctx.tools.register("dsh-restart")` 第二次必然抛
