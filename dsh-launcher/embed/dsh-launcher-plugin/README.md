@@ -205,8 +205,8 @@ cookie 是 `SameSite=Strict`：跨站 iframe 里的请求**永远不带它**。�
 
 | DSH 版本 | `/api` 的准入链 | 只覆盖 `requestRejection` |
 | --- | --- | --- |
-| ≤ 0.2.1-alpha.2（含 bestFit 0.2.0-rc.2） | `admit()` 内部调 `requestRejection()` | 生效 |
-| ≥ 0.2.1-alpha.5（含 0.2.1-rc.1） | `admit()` 自带逻辑，`requestRejection()` 只是它的包装 | **死代码** |
+| ≤ 0.2.1-alpha.2（那时推荐 0.2.0-rc.2） | `admit()` 内部调 `requestRejection()` | 生效 |
+| ≥ 0.2.1-alpha.5（含 0.2.1-rc.1 / rc.2） | `admit()` 自带逻辑，`requestRejection()` 只是它的包装 | **死代码** |
 
 失效时的症状很好认：**网页端（顶层标签页）一切正常，只有内嵌视图**每条 `/api` 401，web boot
 读不到 Cordis 清单 → 界面弹「Failed to load plugins / `web boot: 1 entry did not activate`」
