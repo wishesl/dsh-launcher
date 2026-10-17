@@ -332,3 +332,147 @@ func TestInstalledGithub(t *testing.T) {
 		}
 	}
 }
+
+// --- pnpm minimumReleaseAgeExclude 收敛 / 补齐 ---
+
+const releaseAgeRealWorldYaml = `packages:
+  - .
+
+nodeLinker: hoisted
+minimumReleaseAgeExclude:
+  - dshmarket@1.9.0 || 1.66.7
+  - '@sutong12/dsh-opencode-go-usage@0.1.1'
+  - '@deepseek-ai/dsh-brand@0.2.1-rc.1'
+  - '@deepseek-ai/dsh-subagent-claude-code@0.2.1-rc.1'
+  - '@deepseek-ai/dsh-tool-subagent@0.2.1-rc.1'
+  - '@deepseek-ai/dsh-brand@0.2.1-rc.2'
+  - '@deepseek-ai/dsh-subagent-claude-code@0.2.1-rc.2'
+  - '@deepseek-ai/dsh-tool-subagent@0.2.1-rc.2'
+allowBuilds:
+  koffi: true
+`
+
+// TestNormalizeReleaseAgeExcludes 钉住这次真机故障的根因：
+// pnpm 11 对 minimumReleaseAgeExclude 里「同一个包」**只看第一条**，所以升级过一次
+// （新版本被 pnpm 追加到列表末尾）之后，旧版本排在前面会让新版本永远被拒 ——
+// 任何 pnpm 安装都在「核对 lockfile 供应链策略」这步整体失败。
+func TestNormalizeReleaseAgeExcludes(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "pnpm-workspace.yaml")
+	if err := os.WriteFile(file, []byte(releaseAgeRealWorldYaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	n, err := normalizeReleaseAgeExcludes(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 {
+		t.Fatalf("应合并 3 条重复项，实际 %d", n)
+	}
+	data, _ := os.ReadFile(file)
+	text := string(data)
+
+	// 每个重复包只留一条，且是版本更高的那条。
+	for _, want := range []string{"'@deepseek-ai/dsh-brand@0.2.1-rc.2'"} {
+		if !contains(text, want) {
+			t.Errorf("保留的应是最高版本 %s：\n%s", want, text)
+		}
+	}
+	for _, gone := range []string{"dsh-brand@0.2.1-rc.1", "dsh-subagent-claude-code@0.2.1-rc.1", "dsh-tool-subagent@0.2.1-rc.1"} {
+		if contains(text, gone) {
+			t.Errorf("旧版本条目应被删掉：%s\n%s", gone, text)
+		}
+	}
+	// 含 `||` 的多版本条目、以及别的块必须原样保留。
+	if !contains(text, "dshmarket@1.9.0 || 1.66.7") {
+		t.Errorf("含 || 的条目不该被动：\n%s", text)
+	}
+	if !contains(text, "'@sutong12/dsh-opencode-go-usage@0.1.1'") {
+		t.Errorf("无关条目不该丢：\n%s", text)
+	}
+	if countStr(text, "minimumReleaseAgeExclude:") != 1 {
+		t.Errorf("不该出现重复块：\n%s", text)
+	}
+	if !contains(text, "allowBuilds:\n  koffi: true") {
+		t.Errorf("其它块必须保留：\n%s", text)
+	}
+
+	// 幂等：再来一次应该无事可做。
+	if n2, err := normalizeReleaseAgeExcludes(dir); err != nil || n2 != 0 {
+		t.Errorf("第二次应为 no-op，实际 n=%d err=%v", n2, err)
+	}
+	// 没有该块 / 文件不存在 → no-op，不报错。
+	if n3, err := normalizeReleaseAgeExcludes(t.TempDir()); err != nil || n3 != 0 {
+		t.Errorf("缺文件应为 no-op，实际 n=%d err=%v", n3, err)
+	}
+}
+
+// TestEnsureReleaseAgeExcludes 覆盖"被 pnpm 拒绝后自动补齐并重试"这一步。
+func TestEnsureReleaseAgeExcludes(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "pnpm-workspace.yaml")
+	if err := os.WriteFile(file, []byte("minimumReleaseAgeExclude:\n  - 'x@1.0.0'\nallowBuilds:\n  koffi: true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	n, err := ensureReleaseAgeExcludes(dir, []string{"@deepseek-ai/dsh-brand@0.2.1-rc.2", "x@2.0.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("应写入 2 条，实际 %d", n)
+	}
+	data, _ := os.ReadFile(file)
+	text := string(data)
+	if !contains(text, "'@deepseek-ai/dsh-brand@0.2.1-rc.2'") {
+		t.Errorf("scoped 包要带引号：\n%s", text)
+	}
+	if !contains(text, "- x@2.0.0") || contains(text, "- 'x@1.0.0'") {
+		t.Errorf("同名旧条目应被替换成目标版本：\n%s", text)
+	}
+	if !contains(text, "allowBuilds:\n  koffi: true") {
+		t.Errorf("其它块必须保留：\n%s", text)
+	}
+
+	// 已覆盖目标版本 → no-op（不重复追加）。
+	if n2, err := ensureReleaseAgeExcludes(dir, []string{"x@2.0.0"}); err != nil || n2 != 0 {
+		t.Errorf("已满足时应为 no-op，实际 n=%d err=%v", n2, err)
+	}
+}
+
+// TestReleaseAgeViolationParsing 覆盖从 pnpm 输出里认出这次拒绝、并取出被拒的版本。
+func TestReleaseAgeViolationParsing(t *testing.T) {
+	out := `? Verifying lockfile against supply-chain policies (123 entries)...
+✗ Lockfile failed supply-chain policy check (123 entries in 603ms)
+[ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION] 3 lockfile entries failed verification:
+  @deepseek-ai/dsh-brand@0.2.1-rc.2 was published at 2026-10-17T08:16:09.678Z, within the minimumReleaseAge cutoff (2026-10-16T18:02:00.823Z)
+  @deepseek-ai/dsh-subagent-claude-code@0.2.1-rc.2 was published at 2026-10-17T08:30:25.118Z, within the minimumReleaseAge cutoff (2026-10-16T18:02:00.823Z)
+  @deepseek-ai/dsh-tool-subagent@0.2.1-rc.2 was published at 2026-10-17T08:25:14.755Z, within the minimumReleaseAge cutoff (2026-10-16T18:02:00.823Z)
+`
+	if !isReleaseAgeViolation(out) {
+		t.Fatal("应当认出 minimumReleaseAge 拒绝")
+	}
+	specs := releaseAgeViolationSpecs(out)
+	want := []string{
+		"@deepseek-ai/dsh-brand@0.2.1-rc.2",
+		"@deepseek-ai/dsh-subagent-claude-code@0.2.1-rc.2",
+		"@deepseek-ai/dsh-tool-subagent@0.2.1-rc.2",
+	}
+	if len(specs) != len(want) {
+		t.Fatalf("解析出 %v, want %v", specs, want)
+	}
+	for i := range want {
+		if specs[i] != want[i] {
+			t.Errorf("specs[%d] = %q, want %q", i, specs[i], want[i])
+		}
+	}
+
+	// 别的失败不能被当成发布时效拒绝（否则会去改 profile 的豁免清单）。
+	for _, other := range []string{"", "[ERR_PNPM_NO_MATCHING_VERSION] No matching version", "ERR_PNPM_IGNORED_BUILDS Ignored build scripts: koffi@3.1.1"} {
+		if isReleaseAgeViolation(other) {
+			t.Errorf("不该把 %q 当成发布时效拒绝", other)
+		}
+	}
+	if got := releaseAgeViolationSpecs("no marker here"); got != nil {
+		t.Errorf("没有报错行时应返回 nil，实际 %v", got)
+	}
+}

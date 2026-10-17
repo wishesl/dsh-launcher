@@ -675,3 +675,251 @@ func mergeAllowBuilds(dir string, packages []string) ([]string, error) {
 	}
 	return keys, nil
 }
+
+// --- pnpm-workspace.yaml minimumReleaseAgeExclude dedupe ---
+
+var releaseAgeExcludeBlockRe = regexp.MustCompile(`(?m)^minimumReleaseAgeExclude:[ \t]*\r?\n((?:[ \t]+[^\r\n]*\r?\n?)*)`)
+
+var releaseAgeExcludeItemRe = regexp.MustCompile(`^[ \t]+-[ \t]*(.+?)[ \t]*$`)
+
+// normalizeReleaseAgeExcludes 把 minimumReleaseAgeExclude 里「同一个包的多条记录」
+// 收敛成一条（保留版本最高的），返回删掉的条数；没有重复时不改文件。
+//
+// 为什么必须做：pnpm 11 默认 minimumReleaseAge=24h（拒用 24 小时内发布的版本），并在
+// 用户主动升级时把新版本**追加**进这份排除清单。但 pnpm 解析清单时，同一个包只看
+// **第一条** —— 于是升级过一次之后，旧版本排在前面、新版本被忽略，接下来任何 pnpm
+// 安装都会在「核对 lockfile 的供应链策略」这一步整体失败：
+//
+//	[ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION] 3 lockfile entries failed verification
+//
+// 实测（2026-10-18，pnpm 11.5.0）：rc.1 在前 / rc.2 在后 → 失败；调换顺序或只留 rc.2
+// → 通过。清单只增不减，所以这个坑会随每次升级越来越容易出现，而且报错完全看不出跟
+// 「清单里有一条没用上的旧记录」有关。
+//
+// 只处理「同包多条、且每条都是单一版本」的情况；含 `||` 的多版本条目、解析不出的条目
+// 一律原样保留（不猜）。
+func normalizeReleaseAgeExcludes(dir string) (int, error) {
+	file := filepath.Join(dir, "pnpm-workspace.yaml")
+	data, err := os.ReadFile(file)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	text := string(data)
+	loc := releaseAgeExcludeBlockRe.FindStringSubmatchIndex(text)
+	if loc == nil {
+		return 0, nil
+	}
+	eol := "\n"
+	if strings.Contains(text, "\r\n") {
+		eol = "\r\n"
+	}
+
+	// 逐条解析：line 是原样保留用的整行；name/version 只在"单一版本"时才有效。
+	type entry struct {
+		line    string
+		name    string
+		version string
+		single  bool
+	}
+	entries := make([]entry, 0, 16)
+	for _, raw := range strings.Split(text[loc[2]:loc[3]], "\n") {
+		line := strings.TrimRight(raw, "\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		e := entry{line: line}
+		if m := releaseAgeExcludeItemRe.FindStringSubmatch(line); m != nil {
+			spec := strings.Trim(strings.TrimSpace(m[1]), `'"`)
+			// 只有 `name@x.y.z` 这种单一版本才参与收敛；`name@a || b` 保持原样。
+			if i := strings.LastIndex(spec, "@"); i > 0 && !strings.Contains(spec[i+1:], "|") {
+				if _, verr := parseVersion(spec[i+1:]); verr == nil {
+					e.name, e.version, e.single = spec[:i], spec[i+1:], true
+				}
+			}
+		}
+		entries = append(entries, e)
+	}
+
+	// 组内选版本最高的一条。
+	drop := make(map[int]bool, len(entries))
+	byName := make(map[string][]int, len(entries))
+	for i, e := range entries {
+		if e.single {
+			byName[e.name] = append(byName[e.name], i)
+		}
+	}
+	for _, idxs := range byName {
+		if len(idxs) < 2 {
+			continue
+		}
+		keep := idxs[0]
+		for _, i := range idxs[1:] {
+			if compareSemver(entries[i].version, entries[keep].version) > 0 {
+				keep = i
+			}
+		}
+		for _, i := range idxs {
+			if i != keep {
+				drop[i] = true
+			}
+		}
+	}
+	if len(drop) == 0 {
+		return 0, nil
+	}
+
+	var block strings.Builder
+	block.WriteString("minimumReleaseAgeExclude:")
+	block.WriteString(eol)
+	for i, e := range entries {
+		if drop[i] {
+			continue
+		}
+		block.WriteString(e.line)
+		block.WriteString(eol)
+	}
+	next := text[:loc[0]] + block.String() + text[loc[1]:]
+	if err := os.WriteFile(file, []byte(next), 0o644); err != nil {
+		return 0, err
+	}
+	return len(drop), nil
+}
+
+// releaseAgeViolationMarker 是 pnpm 拒绝装「太新的包」时的稳定片段。
+const releaseAgeViolationMarker = "ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION"
+
+// isReleaseAgeViolation reports whether pnpm refused the run because of its
+// supply-chain release-age policy (see normalizeReleaseAgeExcludes).
+func isReleaseAgeViolation(output string) bool {
+	return strings.Contains(output, releaseAgeViolationMarker)
+}
+
+// releaseAgeViolationEntryRe 匹配 pnpm 报错里逐条列出的「包@版本」。
+var releaseAgeViolationEntryRe = regexp.MustCompile(`(?m)^\s*(\S+@\S+)\s+was published at`)
+
+// releaseAgeViolationSpecs 从 pnpm 的输出里取出被判拒的 `name@version`（去重）。
+func releaseAgeViolationSpecs(output string) []string {
+	matches := releaseAgeViolationEntryRe.FindAllStringSubmatch(output, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(matches))
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		spec := strings.TrimSpace(m[1])
+		if spec == "" || seen[spec] {
+			continue
+		}
+		seen[spec] = true
+		out = append(out, spec)
+	}
+	return out
+}
+
+// ensureReleaseAgeExcludes 保证每个 `name@version` 都在 minimumReleaseAgeExclude 里，
+// 且是**该包的第一条**（pnpm 对同一个包只看第一条）。返回新增/替换的条数。
+//
+// 只在 pnpm 明确拒绝（ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION）且用户主动安装/更新时
+// 调用 —— 等价于 pnpm 自己在 `pnpm add` 时把新版本自动加进豁免清单的行为。
+func ensureReleaseAgeExcludes(dir string, specs []string) (int, error) {
+	if len(specs) == 0 {
+		return 0, nil
+	}
+	file := filepath.Join(dir, "pnpm-workspace.yaml")
+	data, err := os.ReadFile(file)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	text := string(data)
+	eol := "\n"
+	if strings.Contains(text, "\r\n") {
+		eol = "\r\n"
+	}
+
+	lines := make([]string, 0, 16)
+	loc := releaseAgeExcludeBlockRe.FindStringSubmatchIndex(text)
+	if loc != nil {
+		for _, raw := range strings.Split(text[loc[2]:loc[3]], "\n") {
+			if line := strings.TrimRight(raw, "\r"); strings.TrimSpace(line) != "" {
+				lines = append(lines, line)
+			}
+		}
+	}
+
+	nameOf := func(line string) (string, string, bool) {
+		m := releaseAgeExcludeItemRe.FindStringSubmatch(line)
+		if m == nil {
+			return "", "", false
+		}
+		spec := strings.Trim(strings.TrimSpace(m[1]), `'"`)
+		i := strings.LastIndex(spec, "@")
+		if i <= 0 {
+			return "", "", false
+		}
+		return spec[:i], spec[i+1:], true
+	}
+
+	changed := 0
+	for _, wanted := range specs {
+		i := strings.LastIndex(wanted, "@")
+		if i <= 0 {
+			continue
+		}
+		wantName, wantVer := wanted[:i], wanted[i+1:]
+
+		// 该包已有一条覆盖到目标版本（或更新）的条目 → 什么都不用做。
+		satisfied := false
+		for _, line := range lines {
+			if name, ver, ok := nameOf(line); ok && name == wantName && compareSemver(ver, wantVer) >= 0 {
+				satisfied = true
+				break
+			}
+		}
+		if satisfied {
+			continue
+		}
+
+		// 否则丢掉同名的旧记录（pnpm 只看第一条），再追加目标版本。
+		kept := make([]string, 0, len(lines)+1)
+		for _, line := range lines {
+			if name, _, ok := nameOf(line); ok && name == wantName {
+				continue
+			}
+			kept = append(kept, line)
+		}
+		quote := ""
+		if strings.HasPrefix(wantName, "@") {
+			quote = "'"
+		}
+		kept = append(kept, fmt.Sprintf("  - %s%s%s", quote, wanted, quote))
+		lines = kept
+		changed++
+	}
+	if changed == 0 {
+		return 0, nil
+	}
+
+	var block strings.Builder
+	block.WriteString("minimumReleaseAgeExclude:")
+	block.WriteString(eol)
+	for _, line := range lines {
+		block.WriteString(line)
+		block.WriteString(eol)
+	}
+	var next string
+	if loc == nil {
+		next = strings.TrimRight(text, " \t\r\n") + eol + eol + block.String()
+	} else {
+		next = text[:loc[0]] + block.String() + text[loc[1]:]
+	}
+	if err := os.WriteFile(file, []byte(next), 0o644); err != nil {
+		return 0, err
+	}
+	return changed, nil
+}

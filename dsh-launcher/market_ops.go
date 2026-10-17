@@ -180,6 +180,13 @@ type MarketOpResult struct {
 }
 
 func (a *App) emitMarketStatus(s MarketOpStatus) {
+	// 任务成功收尾 = 已装集合/版本可能变了 → 丢掉更新判定的内存快照。
+	// 放在这里而不是每个调用点：四个成功落点（市场安装 / 市场卸载 / 插件更新 /
+	// 内置插件重装）都走这条 done 状态，少写一处就会复现"升级完界面还是旧版本"。
+	// 失败/取消/进行中不动缓存（什么都没改动）。
+	if s.State == "done" {
+		invalidateUpdateCache()
+	}
 	a.emit("dsh:market-status", s)
 }
 
@@ -368,7 +375,27 @@ func (a *App) runInstall(inst *Instance, target string) (*MarketOpResult, error)
 		a.emit("dsh:market-log", map[string]string{"line": pl})
 	}
 
+	// pnpm 11 的发布时效策略会在任何安装开始前核对整份 lockfile；而它对
+	// minimumReleaseAgeExclude 里「同一个包」只看第一条 —— 升级过几次之后清单里旧版本
+	// 排在前面，新版本永远被拒（见 normalizeReleaseAgeExcludes）。装之前先收敛一次。
+	if n, nerr := normalizeReleaseAgeExcludes(marketProfileDir()); nerr == nil && n > 0 {
+		a.emit("dsh:market-log", map[string]string{"line": fmt.Sprintf(
+			"已合并 %d 条重复的 pnpm 发布时效排除项（minimumReleaseAgeExclude）", n)})
+	}
+
 	output, cancelled, runErr := a.runMarketCommand(inst.Directory, cmdStr)
+	// 仍被拒（清单里本来就没有这些包，或 DSH 又追加了旧记录）→ 按 pnpm 报错里点名的
+	// 版本补进豁免清单再重试一次。pnpm 自己在 `pnpm add` 时也是这么做的；这里只是把
+	// 用户主动点下的这次安装做完。
+	if runErr != nil && !cancelled && isReleaseAgeViolation(output) {
+		if specs := releaseAgeViolationSpecs(output); len(specs) > 0 {
+			if n, nerr := ensureReleaseAgeExcludes(marketProfileDir(), specs); nerr == nil && n > 0 {
+				a.emit("dsh:market-log", map[string]string{"line": fmt.Sprintf(
+					"pnpm 拒绝了 24 小时内发布的版本（minimumReleaseAge）：已把 %d 个版本加入豁免清单，重试安装…", n)})
+				output, cancelled, runErr = a.runMarketCommand(inst.Directory, cmdStr)
+			}
+		}
+	}
 	blocked := parseIgnoredBuilds(output)
 	if runErr != nil && !cancelled {
 		if len(blocked) > 0 {
