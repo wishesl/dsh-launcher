@@ -166,17 +166,38 @@ function jumpLabel(jump: string): { text: string; cls: string } {
   }
 }
 
+// dshRuntimeVersions 取当前实例真正在跑的 DSH 版本（去重）。
+// `@deepseek-ai/*` 官方插件必须与内核**同版本**：内核按插件声明的精确版本要求决定
+// 要不要禁用它的插件行（实测：跑 0.2.1-rc.1 的实例上装 0.2.1-rc.2 的
+// dsh-subagent-claude-code → 3 行被禁用、功能静默少一块，见右栏「兼容性」）。
+function dshRuntimeVersions(instances: Instance[]): string[] {
+  const out: string[] = [];
+  for (const inst of instances) {
+    const v = (inst.localVersion || inst.version || '').trim();
+    if (!v || v === 'latest' || out.includes(v)) continue;
+    out.push(v);
+  }
+  return out;
+}
+
 // updateConfirmText explains, per plugin, exactly what the update will do —
 // including whether the user's spec pin gets rewritten. Shown in the dialog
 // before any risky update runs.
-function updateConfirmText(c: UpdateCheck): string {
-  if (c.jump === 'major') {
-    return `${c.name} 从 v${c.current} 升级到 v${c.latest} 是主版本升级，可能包含不兼容变更（插件 API、配置项或 profile 层栈结构都可能变化）。`;
+function updateConfirmText(c: UpdateCheck, dshVersions: string[]): string {
+  const base = c.jump === 'major'
+    ? `${c.name} 从 v${c.current} 升级到 v${c.latest} 是主版本升级，可能包含不兼容变更（插件 API、配置项或 profile 层栈结构都可能变化）。`
+    : c.jump === 'prerelease'
+      ? `${c.name} 将从 v${c.current} 切到预发布版本 v${c.latest}，预发布版本可能不稳定。`
+      : `${c.name} 的目标版本 v${c.latest} 超出 package.json 中声明的版本范围，更新会把它改写为 ^${c.latest}。`;
+
+  // 官方插件与内核是"同一趟发布"：目标版本对不上当前实例的内核时，装完会被内核
+  // 直接禁用（不崩，但功能少一块）。在动手前说清楚，并给出正确顺序。
+  if (c.name.startsWith('@deepseek-ai/') && c.latest && dshVersions.length > 0 && !dshVersions.includes(c.latest)) {
+    return `${base}\n\n⚠️ ${c.name} 是官方插件，内核按「精确版本要求」校验：当前实例在跑 ${dshVersions.join(' / ')}，`
+      + `目标是 v${c.latest}（${c.tag || 'latest'} 通道）。版本对不上时内核会禁用它的插件行 —— 功能静默少一块`
+      + `（可在右栏「兼容性」看到原因）。建议先把该实例的 DSH 升到 v${c.latest}，再升这个插件。`;
   }
-  if (c.jump === 'prerelease') {
-    return `${c.name} 将从 v${c.current} 切到预发布版本 v${c.latest}，预发布版本可能不稳定。`;
-  }
-  return `${c.name} 的目标版本 v${c.latest} 超出 package.json 中声明的版本范围，更新会把它改写为 ^${c.latest}。`;
+  return base;
 }
 
 export default function MarketView({
@@ -290,7 +311,8 @@ export default function MarketView({
   useEffect(() => {
     if (wasRunningRef.current && !marketOp.running) {
       loadInstalled();
-      checkUpdates(false);
+      // 操作刚结束 → 版本可能已经动了，强制重算，别拿操作前的缓存快照渲染。
+      checkUpdates(true);
     }
     wasRunningRef.current = marketOp.running;
   }, [marketOp.running, loadInstalled, checkUpdates]);
@@ -465,7 +487,8 @@ export default function MarketView({
     } finally {
       setBusy(false);
       loadInstalled();
-      checkUpdates(false);
+      // 强制重算：刚更新过，缓存里的判定必然过期（版本号会显示成旧的）。
+      checkUpdates(true);
     }
   };
 
@@ -514,7 +537,9 @@ export default function MarketView({
       setBusy(false);
       loadInstalled();
       // 重装后重新比对「已装副本 vs 内置版本」，让「更新到 vX」按钮及时消失。
-      checkUpdates(false);
+      // 必须强制：这条路径就是"版本刚动过"，非强制会命中操作前算好的缓存快照，
+      // 于是界面继续显示旧版本（用户报的就是这个，重启启动器才刷新）。
+      checkUpdates(true);
     }
   };
 
@@ -966,7 +991,19 @@ export default function MarketView({
             </div>
           </div>
           <div className="market-toolbar">
-            <button className="btn btn-ghost" onClick={loadInstalled}>刷新</button>
+            {/* 刷新 = 已装列表 + 版本判定一起重读。
+              只重读列表的话，内置插件那行的「已装 / 内置」版本（来自判定）还是旧的 ——
+              手工 pnpm 升级过插件时，"刷新"是用户唯一的指望。 */}
+          <button
+            className="btn btn-ghost"
+            onClick={() => {
+              loadInstalled();
+              checkUpdates(true);
+            }}
+            disabled={marketOp.running}
+          >
+            刷新
+          </button>
             <button className="btn btn-ghost" onClick={() => checkUpdates(true)} disabled={checking || marketOp.running}>
               {checking ? '检查中…' : '检查更新'}
             </button>
@@ -1051,9 +1088,17 @@ export default function MarketView({
                     </span>
                     {p.version && <span className="installed-version mono">v{p.version}</span>}
                     {up && up.hasUpdate && up.latest && (
-                      <span className="version-update mono">→ v{up.latest}</span>
+                      <span className="version-update mono">
+                        → v{up.latest}
+                        {up.tag && up.tag !== 'latest' ? `（${up.tag}）` : ''}
+                      </span>
                     )}
                     {up && up.hasUpdate && <span className={jumpLabel(up.jump).cls}>{jumpLabel(up.jump).text}</span>}
+                    {/* registry 只挂着旧 tag（上游把新版放在 next/alpha）时说明一句：
+                        否则用户会把「全部最新」当成真的没有新版。 */}
+                    {up && !up.hasUpdate && up.note && (
+                      <span className="pill pill-soft" title={up.note}>registry 落后</span>
+                    )}
                     {up && up.err && <span className="pill tag-warn" title={up.err}>检查失败</span>}
                     {up && up.kind === 'builtin' && !up.hasUpdate && <span className="pill pill-soft">内置</span>}
                     {p.state === 'disabled' && <span className="pill tag-warn">已停用</span>}
@@ -1188,8 +1233,8 @@ export default function MarketView({
               <h2>确认更新 {pendingUpdate.name}</h2>
             </div>
             <div className="form-body">
-              <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7 }}>
-                {updateConfirmText(pendingUpdate)}
+              <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+                {updateConfirmText(pendingUpdate, dshRuntimeVersions(instances))}
               </p>
               <p className="field-hint">
                 <span className="mono">{pendingUpdate.current}</span>

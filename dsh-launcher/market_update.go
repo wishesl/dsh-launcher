@@ -318,12 +318,33 @@ func resolveNpmName(spec string, fallback ...string) string {
 	if i := strings.Index(s, "@"); i > 0 {
 		s = s[:i]
 	}
+	// 版本 / 区间型 spec（含 `npm:` 之外**不带范围符的精确版本**）：registry 名在 key 里。
+	// ⚠️ 踩过的坑：`"@deepseek-ai/dsh-subagent-claude-code": "0.2.1-rc.1"` 里的 `0.2.1-rc.1`
+	// 恰好也符合包名正则（数字、点、连字符都在允许字符集里），不先拦住就会被当成包名，
+	// 于是启动器跑去查一个叫 `0.2.1-rc.1` 的包 → 404 → 这一行的更新检查整个废掉
+	// （UI 上显示「检查失败」，用户永远看不到这个插件的更新）。
+	if specIsVersionOrRange(s) {
+		return npmNameFallback(fallback)
+	}
 	if npmNameRe.MatchString(s) {
 		return s
 	}
 	// Anything else (range-only spec such as `^1.2.3`, `~1.0.0`, `1.x`, `*`):
 	// the registry name only exists in the dependency key.
 	return npmNameFallback(fallback)
+}
+
+// specIsVersionOrRange reports whether a bare spec is a version / range / dist-tag
+// (⇒ the registry name lives in the dependency key) rather than a package name.
+func specIsVersionOrRange(s string) bool {
+	if _, err := parseVersion(s); err == nil {
+		return true // 1.2.3 / 1.2.3-rc.1 / v1.2.3
+	}
+	switch strings.ToLower(s) {
+	case "*", "x", "latest", "next", "alpha", "beta":
+		return true // dist-tag spec,比如 `"pkg": "next"`
+	}
+	return parseNpmRange(s).parseable // ^1.2.3 / ~1.0.0 / >=1.0.0 / 1.x / 1
 }
 
 // npmNameFallback returns the dependency key when it is a plausible npm name.
@@ -372,61 +393,105 @@ var (
 	marketRegistryMirror = "https://registry.npmmirror.com/"
 )
 
-// fetchDistTagLatest reads dist-tags.latest for one package. Official registry
+// fetchDistTags reads the whole dist-tags map for one package. Official registry
 // first, mirror as fallback (same two-source policy as dsh_query.go).
-func (a *App) fetchDistTagLatest(name string) (string, error) {
+//
+// 读全量 tag 而不是只读 latest：`@deepseek-ai/*` 这批包的 latest 长期停在很早的预发布上
+// （实测 dsh-subagent-claude-code / dsh-spill-local 的 latest 都还是 0.0.1-rc.1，真正的新版
+// 挂在 next），只认 latest 等于永远不提示更新 —— 用户只能靠人肉盯 registry。
+func (a *App) fetchDistTags(name string) (map[string]string, error) {
 	client := a.proxyHTTPClient(15 * time.Second)
 	var lastErr error
 	for _, base := range []string{marketRegistryBase, marketRegistryMirror} {
 		if strings.TrimSpace(base) == "" {
 			continue
 		}
-		latest, err := fetchDistTagFrom(client, base, name)
+		tags, err := fetchDistTagsFrom(client, base, name)
 		if err == nil {
-			return latest, nil
+			return tags, nil
 		}
 		lastErr = err
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("no registry source available")
 	}
-	return "", lastErr
+	return nil, lastErr
 }
 
-func fetchDistTagFrom(client *http.Client, base, name string) (string, error) {
+func fetchDistTagsFrom(client *http.Client, base, name string) (map[string]string, error) {
 	url := strings.TrimRight(base, "/") + "/" + strings.ReplaceAll(name, "/", "%2F")
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "dsh-launcher/1.0")
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return "", fmt.Errorf("包 %s 在 npm 上不存在（可能已下架）", name)
+		return nil, fmt.Errorf("包 %s 在 npm 上不存在（可能已下架）", name)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("registry responded %s", resp.Status)
+		return nil, fmt.Errorf("registry responded %s", resp.Status)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	var doc struct {
 		DistTags map[string]string `json:"dist-tags"`
 	}
 	if err := json.Unmarshal(body, &doc); err != nil {
-		return "", fmt.Errorf("解析 registry 响应失败: %w", err)
+		return nil, fmt.Errorf("解析 registry 响应失败: %w", err)
 	}
-	latest := strings.TrimSpace(doc.DistTags["latest"])
-	if latest == "" {
-		return "", fmt.Errorf("registry 未返回 latest dist-tag")
+	if len(doc.DistTags) == 0 {
+		return nil, fmt.Errorf("registry 未返回 dist-tags")
 	}
-	return latest, nil
+	return doc.DistTags, nil
+}
+
+// npmExtraTags 是 latest 之外还要看的 dist-tag（只对 `@deepseek-ai/*` 生效）。顺序只影响
+// 可读性：取哪一个是按 semver 比出来的，不是按 tag 名字。
+var npmExtraTags = []string{"next", "alpha", "beta"}
+
+// pickUpdateTarget 选出这次展示/安装的升级目标，并说明它来自哪个 tag。
+//
+//   - 一律先看 latest；
+//   - `@deepseek-ai/*` 额外看 next / alpha / beta（上游把预发布挂这几个 tag，latest 常年
+//     不动），取其中 **semver 最大** 的那个 —— 不会因为 tag 叫 next 就无脑选它；
+//   - 绝不选比本地旧的版本：那是降级，启动器不提供降级；
+//   - 挑不出比本地新的版本时，用 note 说明"registry 的 tag 都落后于本地"，免得用户把
+//     "上游没挪 tag"读成"已是最新"。
+func pickUpdateTarget(name string, tags map[string]string, current string) (target, tag, note string) {
+	best, bestTag := "", ""
+	consider := func(candidate, from string) {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			return
+		}
+		if _, err := parseVersion(candidate); err != nil {
+			return
+		}
+		if best == "" || compareSemver(candidate, best) > 0 {
+			best, bestTag = candidate, from
+		}
+	}
+	consider(tags["latest"], "latest")
+	if strings.HasPrefix(name, "@deepseek-ai/") {
+		for _, t := range npmExtraTags {
+			consider(tags[t], t)
+		}
+	}
+	if best == "" {
+		return "", "", "registry 没有可用的 dist-tag"
+	}
+	if current != "" && compareSemver(current, best) > 0 {
+		note = fmt.Sprintf("registry 的 tag 都落后于本地（最高 %s=%s），没有可升级的目标", bestTag, best)
+	}
+	return best, bestTag, note
 }
 
 // embeddedBuiltinVersion reads the version of the plugin bundled in the
@@ -467,8 +532,15 @@ func materializedBuiltinVersion() string {
 type UpdateCheck struct {
 	Name    string `json:"name"`
 	Current string `json:"current"` // installed version (read from node_modules)
-	Latest  string `json:"latest"`  // npm dist-tags.latest / embedded builtin version
-	Kind    string `json:"kind"`    // npm | github | linked | builtin
+	// Latest 是**选出来的升级目标**：默认取 dist-tags.latest；`@deepseek-ai/*` 还会看
+	// next/alpha/beta 并取其中 semver 最大的那个（见 pickUpdateTarget）。builtin 行是
+	// 内置副本的版本。
+	Latest string `json:"latest"`
+	// Tag 说明 Latest 来自哪个 dist-tag（latest / next / alpha / beta）。
+	Tag string `json:"tag"`
+	// Note 是没有升级目标时的解释，例如"registry 的 tag 都落后于本地"。
+	Note string `json:"note"`
+	Kind string `json:"kind"` // npm | github | linked | builtin
 	// HasUpdate means a newer version exists AND this kind can act on it.
 	HasUpdate bool `json:"hasUpdate"`
 	// Runnable is false for kinds this release cannot update (github / builtin).
@@ -500,6 +572,19 @@ var (
 	updateCache   *UpdateCheckResult
 	updateCacheAt time.Time
 )
+
+// invalidateUpdateCache 丢掉"已装插件更新判定"的内存快照，让下一次检查重新算。
+//
+// 任何可能改动已装版本的动作用完都要走到这里（安装 / 更新 / 卸载 / 重装内置插件，
+// 见 emitMarketStatus 的 done 分支）：否则 UI 会拿着**操作前**的判定继续显示旧版本号。
+// 内置插件那一行（dsh-launcher-plugin）的「已装 / 内置」两个版本完全来自这份判定，
+// 实测症状就是"升级完了界面还是旧版本，重启启动器才刷新"。
+func invalidateUpdateCache() {
+	updateCacheMu.Lock()
+	updateCache = nil
+	updateCacheAt = time.Time{}
+	updateCacheMu.Unlock()
+}
 
 // CheckPluginUpdates returns one verdict per installed plugin. force bypasses
 // the 5-minute cache (the UI's explicit 「检查更新」 button).
@@ -587,15 +672,22 @@ func (a *App) CheckPluginUpdates(force bool) (*UpdateCheckResult, error) {
 			go func(idx int, npmName, spec string) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				latest, ferr := a.fetchDistTagLatest(npmName)
+				tags, ferr := a.fetchDistTags(npmName)
 				mu.Lock()
 				defer mu.Unlock()
 				if ferr != nil {
 					rows[idx].Err = ferr.Error()
 					return
 				}
-				rows[idx].Latest = latest
-				fillNpmVerdict(&rows[idx], spec, latest)
+				target, tag, note := pickUpdateTarget(npmName, tags, rows[idx].Current)
+				if target == "" {
+					rows[idx].Err = note
+					return
+				}
+				rows[idx].Latest = target
+				rows[idx].Tag = tag
+				rows[idx].Note = note
+				fillNpmVerdict(&rows[idx], spec, target, tag)
 			}(i, npmName, spec)
 			continue
 		}
@@ -624,21 +716,24 @@ func (a *App) CheckPluginUpdates(force bool) (*UpdateCheckResult, error) {
 // Runnable is false when the registry is BEHIND the local install (a pinned
 // prerelease or a dist-tag rollback) — offering "update" there would be a
 // downgrade in disguise.
-func fillNpmVerdict(row *UpdateCheck, spec, latest string) {
-	row.Jump = jumpType(row.Current, latest)
-	row.HasUpdate = compareSemver(row.Current, latest) < 0
+//
+// tag 是 target 来自哪个 dist-tag：非 latest 通道（next/alpha/beta）本身就是预发布语义，
+// 一律标 Risky 走确认，别让用户以为那是稳定版。
+func fillNpmVerdict(row *UpdateCheck, spec, target, tag string) {
+	row.Jump = jumpType(row.Current, target)
+	row.HasUpdate = compareSemver(row.Current, target) < 0
 	row.Runnable = row.HasUpdate
 	if !row.HasUpdate {
 		return
 	}
-	inR, known := inRange(latest, spec)
+	inR, known := inRange(target, spec)
 	row.InRange = inR
 	// Unknown range shape (aliases, ranges we refuse to guess) is treated as
 	// out-of-range: the update then rewrites the spec, and the UI confirms.
 	if !known {
 		row.InRange = false
 	}
-	row.Risky = !row.InRange || row.Jump == "major" || row.Jump == "prerelease"
+	row.Risky = !row.InRange || row.Jump == "major" || row.Jump == "prerelease" || (tag != "" && tag != "latest")
 }
 
 // reinstallBuiltinSelfRestart refreshes an installed built-in plugin from the

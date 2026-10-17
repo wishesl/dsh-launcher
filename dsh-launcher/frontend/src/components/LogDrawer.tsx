@@ -200,7 +200,9 @@ export default function LogDrawer({
                             <span className="caps-hint">影响：{it.hint}</span>
                           )}
                         </div>
-                        <span className="caps-source">{it.source === 'plugin' ? '插件' : '启动器'}</span>
+                        <span className="caps-source">
+                          {it.source === 'plugin' ? '插件' : it.source === 'dsh' ? 'DSH' : '启动器'}
+                        </span>
                       </div>
                     );
                   })}

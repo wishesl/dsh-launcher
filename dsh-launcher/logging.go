@@ -94,6 +94,38 @@ func (l *logStore) rotateLocked(id string) {
 	delete(l.sizes, id)
 }
 
+const (
+	// runStartMarker 是启动器每次拉起实例前写的那行（见 dsh_process.go）。用它把
+	// "本次运行"从历史日志里切出来：上一轮判过的结论不能算在这一轮头上 —— 否则
+	// 用户修好了问题，面板还一直报红（AGENTS.md §9：误报会让整个面板失去可信度）。
+	runStartMarker = "正在启动 DSH"
+	// logRunScanBytes 把这次扫描限制在日志尾部：单实例日志按 5 MiB 轮转，
+	// 面板会被反复打开，不值得每次把整份读进来。
+	logRunScanBytes = 2 << 20
+)
+
+// currentRunTail 返回该实例日志里属于**本次运行**的那一段文本，以及是否找到了本次
+// 运行的起点。找不到起点（日志刚轮转过、这一轮还没写）时 ok=false —— 调用方必须把
+// 它当"没有结论"处理：宁可不说，也不要把上一轮的结论算进来。
+func (l *logStore) currentRunTail(id string) (string, bool) {
+	if l == nil || id == "" {
+		return "", false
+	}
+	data, err := os.ReadFile(filepath.Join(l.dir, id+".log"))
+	if err != nil {
+		return "", false
+	}
+	if len(data) > logRunScanBytes {
+		data = data[len(data)-logRunScanBytes:]
+	}
+	text := string(data)
+	idx := strings.LastIndex(text, runStartMarker)
+	if idx < 0 {
+		return text, false
+	}
+	return text[idx:], true
+}
+
 // closeAll flushes and closes every open file (called on shutdown).
 func (l *logStore) closeAll() {
 	l.mu.Lock()

@@ -146,7 +146,9 @@ export interface MarketOpResult {
 export interface UpdateCheck {
   name: string;
   current: string;            // installed version
-  latest: string;             // npm dist-tags.latest / embedded builtin version
+  latest: string;             // 选出来的升级目标（默认 dist-tags.latest；@deepseek-ai/* 还会看 next/alpha）
+  tag: string;                // latest | next | alpha | beta —— 上面那个版本来自哪个 dist-tag
+  note: string;               // 没有升级目标时的解释（例如 registry 的 tag 都落后于本地）
   kind: string;               // npm | github | linked | builtin
   hasUpdate: boolean;
   runnable: boolean;          // false for kinds this release cannot update

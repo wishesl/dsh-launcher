@@ -604,6 +604,8 @@ export namespace main {
 	    name: string;
 	    current: string;
 	    latest: string;
+	    tag: string;
+	    note: string;
 	    kind: string;
 	    hasUpdate: boolean;
 	    runnable: boolean;
@@ -623,6 +625,8 @@ export namespace main {
 	        this.name = source["name"];
 	        this.current = source["current"];
 	        this.latest = source["latest"];
+	        this.tag = source["tag"];
+	        this.note = source["note"];
 	        this.kind = source["kind"];
 	        this.hasUpdate = source["hasUpdate"];
 	        this.runnable = source["runnable"];

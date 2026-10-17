@@ -175,3 +175,86 @@ func TestPluginReportAbsentReason(t *testing.T) {
 		t.Errorf("原因要点名插件，实际: %q", reason)
 	}
 }
+
+// disabledRowLine 是 0.2.1-rc.1 真机日志里的原文（只有后半段的建议被裁掉了）。
+const disabledRowLine = `dsh: disabling profile plugin row "tool-subagent": Plugin @deepseek-ai/dsh-tool-subagent@0.2.1-alpha.2 is incompatible with dsh 0.2.1-rc.1: requirements {"@deepseek-ai/dsh-tools":"0.2.1-alpha.2","@deepseek-ai/dsh-llm":"0.2.1-alpha.2"}. Running it may cause crashes or data loss.`
+
+func TestParseDSHDisabledRows(t *testing.T) {
+	text := strings.Join([]string{
+		"2026-10-17T12:33:47+08:00\tstderr\t" + disabledRowLine,
+		"2026-10-17T12:33:47+08:00\tstderr\tdsh: disabling profile plugin row \"tool-subagent-fork\": Plugin @deepseek-ai/dsh-tool-subagent@0.2.1-alpha.2 is incompatible with dsh 0.2.1-rc.1: requirements {\"@deepseek-ai/dsh-tools\":\"0.2.1-alpha.2\"}. Running it may cause crashes or data loss.",
+		// 同一行会被重复判定（DSH 重载会重放）：按行 id 去重，保留最后一条。
+		"2026-10-17T12:33:52+08:00\tstderr\t" + disabledRowLine,
+		// 别的告警不能被当成"不兼容" —— 认不出就不报，是这块面板可信度的前提。
+		"2026-10-17T12:33:53+08:00\tstderr\tdsh: warning: 1 entry did not activate",
+	}, "\n")
+
+	rows := parseDSHDisabledRows(text)
+	if len(rows) != 2 {
+		t.Fatalf("解析出 %d 行, want 2: %+v", len(rows), rows)
+	}
+	if rows[0].Row != "tool-subagent" || rows[0].Pkg != "@deepseek-ai/dsh-tool-subagent@0.2.1-alpha.2" || rows[0].DSH != "0.2.1-rc.1" {
+		t.Errorf("行字段解析不对: %+v", rows[0])
+	}
+	if rows[1].Row != "tool-subagent-fork" {
+		t.Errorf("第二行应是 tool-subagent-fork: %+v", rows[1])
+	}
+	if got := requirementVersions(rows[0].Requirements); len(got) != 1 || got[0] != "0.2.1-alpha.2" {
+		t.Errorf("requirements 版本去重后 = %v, want [0.2.1-alpha.2]", got)
+	}
+	if got := parseDSHDisabledRows("dsh: warning: 1 entry did not activate\n"); got != nil {
+		t.Errorf("无关日志不该解析出任何禁用行，实际: %+v", got)
+	}
+}
+
+func TestDSHDisabledItems(t *testing.T) {
+	rows := parseDSHDisabledRows(disabledRowLine)
+	items := dshDisabledItems(rows)
+	if len(items) != 1 {
+		t.Fatalf("items = %d, want 1", len(items))
+	}
+	it := items[0]
+	if it.ID != "dshProfileRow:tool-subagent" || it.OK || it.Unknown || it.Source != "dsh" {
+		t.Errorf("面板条目形状不对: %+v", it)
+	}
+	// 内核自己下的结论 = 确定结论：Unknown 必须为 false，前端的红灯/计数才算得上
+	// （AGENTS.md §9.2：只有 !ok && !unknown 才计为问题）。
+	if !strings.Contains(it.Reason, "0.2.1-rc.1") || !strings.Contains(it.Reason, "0.2.1-alpha.2") {
+		t.Errorf("原因里要同时给出插件与内核版本: %q", it.Reason)
+	}
+	if !strings.Contains(it.Hint, "allow-version") {
+		t.Errorf("影响说明要给可操作出口（豁免入口）: %q", it.Hint)
+	}
+}
+
+func TestCurrentRunTail(t *testing.T) {
+	dir := t.TempDir()
+	ls := &logStore{dir: dir, files: map[string]*os.File{}, sizes: map[string]int64{}}
+	path := filepath.Join(dir, "inst-a.log")
+
+	// 上一轮判过禁用、这一轮已经修好：只取本轮起点之后的内容，旧结论必须消失。
+	content := "2026-10-17T12:33:47+08:00\tstderr\t" + disabledRowLine + "\n" +
+		"2026-10-17T21:24:45+08:00\tsystem\t正在启动 DSH @0.2.1-rc.1 (目录: X)\n" +
+		"2026-10-17T21:25:20+08:00\tstdout\tdsh web: http://127.0.0.1:3080/?token=t\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	text, ok := ls.currentRunTail("inst-a")
+	if !ok {
+		t.Fatal("日志里有本轮起点，应当 ok=true")
+	}
+	if strings.Contains(text, "disabling profile plugin row") {
+		t.Error("上一轮的禁用行不能算在这一轮头上")
+	}
+
+	// 找不到本轮起点（日志刚轮转 / 这一轮还没写）→ ok=false：调用方必须当"没有结论"。
+	if err := os.WriteFile(path, []byte("2026-10-17T12:33:47+08:00\tstderr\t"+disabledRowLine+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := ls.currentRunTail("inst-a"); ok {
+		t.Error("没有本轮起点时必须 ok=false（宁可不说，也不要把旧结论算进来）")
+	}
+	if _, ok := ls.currentRunTail("不存在的实例"); ok {
+		t.Error("读不到日志时必须 ok=false")
+	}
+}

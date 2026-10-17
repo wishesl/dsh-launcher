@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -151,6 +153,15 @@ func (a *App) GetCapabilities(instanceID string) CapabilityReport {
 		report.PluginAt = pluginReport.ReportedAt
 		report.Stale = stalePluginReport(mpLaunchID(mp), pluginReport.LaunchID)
 		report.Items = append(report.Items, pluginCapabilityItems(pluginReport)...)
+	}
+
+	// ---- DSH 侧判定（内核自己在启动日志里写下的"禁用某行"）----
+	//
+	// 这类问题插件报不了：被禁用的行不是启动器插件，握手快照里没有它；而它恰恰是
+	// 用户最需要看见的（功能静默少了一块）。结论只从**本次运行**那段日志里取，
+	// 取不到起点就当没有结论 —— 上一轮判过的禁用行不能算在这一轮头上。
+	if text, ok := a.logs.currentRunTail(instanceID); ok {
+		report.Items = append(report.Items, dshDisabledItems(parseDSHDisabledRows(text))...)
 	}
 
 	return report
@@ -340,4 +351,104 @@ func pluginCapabilityItem(c pluginCapability) CapabilityItem {
 		Source: "plugin",
 		Hint:   meta.hint,
 	}
+}
+
+// ── DSH 侧禁用行（内核启动时判掉某个 profile 行）───────────────────────────────
+//
+// 上游 DSH 0.2.1 起会对"与运行内核版本不匹配"的插件行直接禁用它，并在 stderr 上写一句
+// （实测原文，0.2.1-rc.1）：
+//
+//	dsh: disabling profile plugin row "tool-subagent": Plugin @deepseek-ai/dsh-tool-subagent@0.2.1-alpha.2
+//	is incompatible with dsh 0.2.1-rc.1: requirements {"@deepseek-ai/dsh-tools":"0.2.1-alpha.2"}.
+//	Running it may cause crashes or data loss. …
+//
+// 这段文案是**与 DSH 之间的耦合点**：只认这一种措辞，认不出就不报（fail-open）——
+// 把别的 warning 误当"不兼容"会立刻毁掉整块面板的可信度（AGENTS.md §9）。
+var dshDisabledRowRe = regexp.MustCompile(
+	`disabling profile plugin row "([^"]+)": Plugin (\S+) is incompatible with dsh (\S+?): requirements (\{[^}]*\})`,
+)
+
+// dshDisabledRow 是内核判掉的一行：行 id、插件名@版本、运行中的 dsh 版本、它要求的那个
+// requirements 对象。
+type dshDisabledRow struct {
+	Row          string
+	Pkg          string
+	DSH          string
+	Requirements string
+}
+
+// parseDSHDisabledRows 从日志文本里抽出所有被禁用的行。同一行可能被判定多次（DSH 重载
+// 会重放），按行 id 去重并保留**最后一条**结论。
+func parseDSHDisabledRows(text string) []dshDisabledRow {
+	matches := dshDisabledRowRe.FindAllStringSubmatch(text, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	out := make([]dshDisabledRow, 0, len(matches))
+	index := make(map[string]int, len(matches))
+	for _, m := range matches {
+		row := dshDisabledRow{Row: m[1], Pkg: m[2], DSH: m[3], Requirements: m[4]}
+		if i, ok := index[row.Row]; ok {
+			out[i] = row
+			continue
+		}
+		index[row.Row] = len(out)
+		out = append(out, row)
+	}
+	return out
+}
+
+// requirementVersions 从 requirements JSON 里抽出出现过的版本（去重、保持出现顺序），
+// 面板上拼成一句人话："要求 0.2.1-alpha.2"。解析不了就返回空 —— 只影响措辞，不影响结论。
+func requirementVersions(raw string) []string {
+	var reqs map[string]string
+	if err := json.Unmarshal([]byte(raw), &reqs); err != nil {
+		return nil
+	}
+	seen := make(map[string]bool, len(reqs))
+	versions := make([]string, 0, len(reqs))
+	for _, v := range reqs {
+		v = strings.TrimSpace(v)
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		versions = append(versions, v)
+	}
+	return versions
+}
+
+// dshDisabledItems 把禁用行转成面板条目。这些是**确定的结论**（内核自己说的），
+// 所以 OK=false 且 Unknown=false：右栏标签会亮红点、实例上的兼容性问题计数也会 +1。
+func dshDisabledItems(rows []dshDisabledRow) []CapabilityItem {
+	if len(rows) == 0 {
+		return nil
+	}
+	items := make([]CapabilityItem, 0, len(rows))
+	for _, r := range rows {
+		req := strings.Join(requirementVersions(r.Requirements), " / ")
+		detail := fmt.Sprintf("DSH 内核判定：%s 要求 %s，运行中的内核是 %s", r.Pkg, orUnknown(req), r.DSH)
+		reason := fmt.Sprintf("插件 %s 与 dsh %s 不匹配，这一行已被 DSH 禁用（功能少一块，但不会崩）", r.Pkg, r.DSH)
+		if req != "" {
+			reason += fmt.Sprintf("；它要求 %s", req)
+		}
+		items = append(items, CapabilityItem{
+			ID:     "dshProfileRow:" + r.Row,
+			Label:  "profile 行已禁用：" + r.Row,
+			OK:     false,
+			Detail: detail,
+			Reason: reason,
+			Source: "dsh",
+			Hint: fmt.Sprintf("把该插件升到与 dsh %s 同版本的发布即可恢复（新版通常不再精确钉死内核版本）；"+
+				"确要冒风险可用 `dsh plugin allow-version` 显式豁免，然后重启 dsh", r.DSH),
+		})
+	}
+	return items
+}
+
+func orUnknown(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "（requirements 未记录）"
+	}
+	return v
 }

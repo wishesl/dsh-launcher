@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCompareSemver(t *testing.T) {
@@ -118,6 +119,33 @@ func TestResolveNpmName(t *testing.T) {
 			t.Errorf("resolveNpmName(%q) = %q, want %q", c.spec, got, c.want)
 		}
 	}
+
+	// 版本 / 区间型 spec（含**不带范围符的精确版本**）：registry 名在依赖 key 里。
+	// 踩过的坑："@deepseek-ai/dsh-subagent-claude-code": "0.2.1-rc.1" 里的 `0.2.1-rc.1`
+	// 也符合包名正则，于是启动器去查一个叫 `0.2.1-rc.1` 的包 → 404 → 这一行的更新检查
+	// 整个废掉（UI 显示「检查失败」，用户永远看不到更新）。
+	withKey := []struct{ spec, key, want string }{
+		{"0.2.1-rc.1", "@deepseek-ai/dsh-subagent-claude-code", "@deepseek-ai/dsh-subagent-claude-code"},
+		{"1.2.3", "dsh-review", "dsh-review"},
+		{"^1.2.3", "dsh-review", "dsh-review"},
+		{"~1.0.0", "dsh-review", "dsh-review"},
+		{">=1.0.0", "dsh-review", "dsh-review"},
+		{"1.x", "dsh-review", "dsh-review"},
+		{"next", "dsh-review", "dsh-review"},
+		{"latest", "dsh-review", "dsh-review"},
+		{"*", "dsh-review", "dsh-review"},
+	}
+	for _, c := range withKey {
+		if got := resolveNpmName(c.spec, c.key); got != c.want {
+			t.Errorf("resolveNpmName(%q, %q) = %q, want %q", c.spec, c.key, got, c.want)
+		}
+	}
+	// 没有 fallback 时，这些 spec 不能凭形状被当成包名。
+	for _, spec := range []string{"0.2.1-rc.1", "1.2.3", "1.x", "next", "*"} {
+		if got := resolveNpmName(spec); got != "" {
+			t.Errorf("resolveNpmName(%q) = %q, want \"\"（版本/区间/dist-tag 不是包名）", spec, got)
+		}
+	}
 }
 
 func TestReadLockedCommit(t *testing.T) {
@@ -164,6 +192,7 @@ func TestFillNpmVerdict(t *testing.T) {
 		name          string
 		row           UpdateCheck
 		spec, latest  string
+		tag           string // 目标来自哪个 dist-tag；"" = latest
 		has, risky    bool
 		inRange, runs bool
 		jump          string
@@ -189,15 +218,127 @@ func TestFillNpmVerdict(t *testing.T) {
 			spec: "^1.3.0-rc.1", latest: "1.2.9",
 			has: false, risky: false, inRange: false, runs: false, jump: "downgrade",
 		},
+		{
+			// 预发布通道（next/alpha）本身就是"需要确认"的语义：即使 spec 是精确版本、
+			// jump 也只算 prerelease，也必须 Risky。
+			name: "exact spec but next-channel target is still risky",
+			row:  UpdateCheck{Current: "0.2.1-alpha.2"},
+			spec: "0.2.1-alpha.2", latest: "0.2.1-rc.1", tag: "next",
+			has: true, risky: true, inRange: false, runs: true, jump: "prerelease",
+		},
 	}
 	for _, c := range cases {
 		row := c.row
-		fillNpmVerdict(&row, c.spec, c.latest)
+		tag := c.tag
+		if tag == "" {
+			tag = "latest"
+		}
+		fillNpmVerdict(&row, c.spec, c.latest, tag)
 		if row.HasUpdate != c.has || row.Risky != c.risky || row.InRange != c.inRange || row.Runnable != c.runs || row.Jump != c.jump {
 			t.Errorf("%s: got has=%v risky=%v inRange=%v runnable=%v jump=%s; want has=%v risky=%v inRange=%v runnable=%v jump=%s",
 				c.name, row.HasUpdate, row.Risky, row.InRange, row.Runnable, row.Jump,
 				c.has, c.risky, c.inRange, c.runs, c.jump)
 		}
+	}
+}
+
+// TestPickUpdateTarget 锁住"从哪些 tag 里挑目标"：这正是 dsh-subagent-claude-code /
+// dsh-spill-local 那类包的坑 —— latest 常年停在 0.0.1-rc.1，新版挂在 next，只看 latest
+// 就永远不提示更新。
+func TestPickUpdateTarget(t *testing.T) {
+	cases := []struct {
+		name            string
+		pkg             string
+		tags            map[string]string
+		current         string
+		wantTarget      string
+		wantTag         string
+		wantNoteContain string
+	}{
+		{
+			name: "普通包只认 latest", pkg: "dshmarket",
+			tags:    map[string]string{"latest": "1.66.15", "next": "1.70.0"},
+			current: "1.66.15", wantTarget: "1.66.15", wantTag: "latest",
+		},
+		{
+			name: "@deepseek-ai 看 next", pkg: "@deepseek-ai/dsh-subagent-claude-code",
+			tags:    map[string]string{"latest": "0.0.1-rc.1", "next": "0.2.1-rc.1", "alpha": "0.2.1-alpha.5"},
+			current: "0.2.1-alpha.2", wantTarget: "0.2.1-rc.1", wantTag: "next",
+		},
+		{
+			name: "@deepseek-ai 取 semver 最大的那个 tag（alpha 比 next 大时选 alpha）",
+			pkg:  "@deepseek-ai/dsh-x",
+			tags: map[string]string{"latest": "0.2.0-rc.2", "next": "0.2.1-rc.1", "alpha": "0.2.2-alpha.1"},
+			// 0.2.2-alpha.1 的 core 更大 → 应选 alpha
+			current: "0.2.1-rc.1", wantTarget: "0.2.2-alpha.1", wantTag: "alpha",
+		},
+		{
+			name: "@deepseek-ai 本地更新时不选旧版（不降级）", pkg: "@deepseek-ai/dsh-y",
+			tags:    map[string]string{"latest": "0.0.1-rc.1", "next": "0.2.0-rc.2"},
+			current: "0.2.1-rc.1", wantTarget: "0.2.0-rc.2", wantTag: "next",
+			wantNoteContain: "落后于本地",
+		},
+		{
+			name: "普通包 registry 全落后 → 给 note 解释为什么没有更新", pkg: "dsh-z",
+			tags:    map[string]string{"latest": "0.0.1-rc.1"},
+			current: "0.2.1-rc.1", wantTarget: "0.0.1-rc.1", wantTag: "latest",
+			wantNoteContain: "落后于本地",
+		},
+		{
+			name: "没有可用 tag", pkg: "dsh-none", tags: map[string]string{}, current: "1.0.0",
+			wantTarget: "", wantTag: "", wantNoteContain: "没有可用的 dist-tag",
+		},
+		{
+			name: "非法 semver 的 tag 被忽略", pkg: "@deepseek-ai/dsh-bad",
+			tags:    map[string]string{"latest": "not-a-version", "next": "1.2.3"},
+			current: "1.0.0", wantTarget: "1.2.3", wantTag: "next",
+		},
+	}
+	for _, c := range cases {
+		target, tag, note := pickUpdateTarget(c.pkg, c.tags, c.current)
+		if target != c.wantTarget || tag != c.wantTag {
+			t.Errorf("%s: got (%q, %q), want (%q, %q)", c.name, target, tag, c.wantTarget, c.wantTag)
+		}
+		if c.wantNoteContain != "" && !strings.Contains(note, c.wantNoteContain) {
+			t.Errorf("%s: note = %q, want it to contain %q", c.name, note, c.wantNoteContain)
+		}
+		if c.wantNoteContain == "" && note != "" {
+			t.Errorf("%s: unexpected note %q", c.name, note)
+		}
+	}
+}
+
+// TestEmitMarketStatusInvalidatesUpdateCache 钉住"操作成功要丢掉更新判定缓存"。
+//
+// 内置插件那一行的「已装 / 内置」版本**完全来自这份判定**；不失效的话，升级完界面还显示旧
+// 版本，只有重启启动器（或耗掉 5 分钟 TTL）才刷新 —— 用户实测报的就是这个。
+// 反过来，running / failed / cancelled 什么都没改动，缓存要留着，别白跑一遍 registry。
+func TestEmitMarketStatusInvalidatesUpdateCache(t *testing.T) {
+	app := &App{}
+	prime := func() {
+		updateCacheMu.Lock()
+		updateCache = &UpdateCheckResult{Checked: "primed", Updatable: 7}
+		updateCacheAt = time.Now()
+		updateCacheMu.Unlock()
+	}
+	cached := func() bool {
+		updateCacheMu.Lock()
+		defer updateCacheMu.Unlock()
+		return updateCache != nil
+	}
+
+	for _, state := range []string{"running", "failed", "cancelled"} {
+		prime()
+		app.emitMarketStatus(MarketOpStatus{State: state})
+		if !cached() {
+			t.Errorf("state=%s 没有改动已装版本，不该失效更新判定缓存", state)
+		}
+	}
+
+	prime()
+	app.emitMarketStatus(MarketOpStatus{State: "done", Kind: "install", Target: "dshmarket"})
+	if cached() {
+		t.Error("done 之后必须丢掉更新判定缓存（否则界面继续显示升级前的版本号）")
 	}
 }
 
@@ -226,19 +367,22 @@ func TestCheckPluginUpdates(t *testing.T) {
 	defer func() { marketProfileDir = restoreDir }()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		latest := map[string]string{
-			"dsh-a":      "1.3.0", // in-range minor
-			"dsh-b":      "2.0.0", // major, out of range
-			"dsh-broken": "",      // 404 → per-row error
+		tags := map[string]map[string]string{
+			"dsh-a": {"latest": "1.3.0"}, // in-range minor
+			"dsh-b": {"latest": "2.0.0"}, // major, out of range
+			// latest 常年不动的 @deepseek-ai/* 包：真正的新版挂在 next（真实案例：
+			// @deepseek-ai/dsh-subagent-claude-code、dsh-spill-local 的 latest 都是 0.0.1-rc.1）。
+			"@deepseek-ai/dsh-staletag": {"latest": "0.0.1-rc.1", "next": "0.2.1-rc.1"},
+			"dsh-broken":                nil, // 404 → per-row error
 		}
 		name := strings.TrimPrefix(r.URL.Path, "/")
 		name = strings.ReplaceAll(name, "%2F", "/")
-		v, ok := latest[name]
-		if !ok || v == "" {
+		v, ok := tags[name]
+		if !ok || len(v) == 0 {
 			http.NotFound(w, r)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"dist-tags": map[string]string{"latest": v}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"dist-tags": v})
 	}))
 	defer srv.Close()
 
@@ -249,16 +393,18 @@ func TestCheckPluginUpdates(t *testing.T) {
 
 	writeProfileJSON(t, profile, "package.json", map[string]any{
 		"dependencies": map[string]string{
-			"dsh-a":              "^1.2.3",
-			"dsh-b":              "^1.2.3",
-			"dsh-broken":         "^1.0.0",
-			"dsh-local":          "file:../dsh-local",
-			selfRestartPluginName: "file:C:/tmp/dsh-launcher-plugin",
+			"dsh-a":                     "^1.2.3",
+			"dsh-b":                     "^1.2.3",
+			"dsh-broken":                "^1.0.0",
+			"@deepseek-ai/dsh-staletag": "^0.2.0",
+			"dsh-local":                 "file:../dsh-local",
+			selfRestartPluginName:       "file:C:/tmp/dsh-launcher-plugin",
 		},
 	})
 	writeProfileJSON(t, profile, filepath.Join("node_modules", "dsh-a", "package.json"), map[string]any{"version": "1.2.3"})
 	writeProfileJSON(t, profile, filepath.Join("node_modules", "dsh-b", "package.json"), map[string]any{"version": "1.2.3"})
 	writeProfileJSON(t, profile, filepath.Join("node_modules", "dsh-broken", "package.json"), map[string]any{"version": "1.0.0"})
+	writeProfileJSON(t, profile, filepath.Join("node_modules", "@deepseek-ai", "dsh-staletag", "package.json"), map[string]any{"version": "0.2.0-rc.2"})
 
 	app := &App{}
 	res, err := app.CheckPluginUpdates(true)
@@ -270,19 +416,24 @@ func TestCheckPluginUpdates(t *testing.T) {
 	for _, p := range res.Plugins {
 		byName[p.Name] = p
 	}
-	// Sorted by name, always 5 rows even when one check fails.
-	if len(res.Plugins) != 5 {
-		t.Fatalf("got %d rows, want 5: %+v", len(res.Plugins), res.Plugins)
+	// Sorted by name, always 6 rows even when one check fails.
+	if len(res.Plugins) != 6 {
+		t.Fatalf("got %d rows, want 6: %+v", len(res.Plugins), res.Plugins)
 	}
-	if names := []string{res.Plugins[0].Name, res.Plugins[1].Name}; names[0] != "dsh-a" || names[1] != "dsh-b" {
+	if names := []string{res.Plugins[0].Name, res.Plugins[1].Name}; names[0] != "@deepseek-ai/dsh-staletag" || names[1] != "dsh-a" {
 		t.Errorf("rows are not name-sorted: %v", names)
 	}
 
-	if a := byName["dsh-a"]; !a.HasUpdate || !a.Runnable || a.Risky || !a.InRange || a.Jump != "minor" || a.Latest != "1.3.0" {
+	if a := byName["dsh-a"]; !a.HasUpdate || !a.Runnable || a.Risky || !a.InRange || a.Jump != "minor" || a.Latest != "1.3.0" || a.Tag != "latest" {
 		t.Errorf("dsh-a: %+v", a)
 	}
 	if b := byName["dsh-b"]; !b.HasUpdate || !b.Risky || b.InRange || b.Jump != "major" {
 		t.Errorf("dsh-b should be a risky major update: %+v", b)
+	}
+	// latest 停在旧预发布、新版挂 next：必须能挑出来，并标明来自 next、标 Risky。
+	// （0.2.0-rc.2 → 0.2.1-rc.1 按 jumpType 的分档是 patch：只有第三段变了。）
+	if st := byName["@deepseek-ai/dsh-staletag"]; !st.HasUpdate || !st.Runnable || !st.Risky || st.Latest != "0.2.1-rc.1" || st.Tag != "next" || st.Jump != "patch" {
+		t.Errorf("@deepseek-ai/dsh-staletag must update from the next tag: %+v", st)
 	}
 	if br := byName["dsh-broken"]; br.Err == "" || br.HasUpdate {
 		t.Errorf("dsh-broken should carry a per-row error and no update: %+v", br)
@@ -293,8 +444,8 @@ func TestCheckPluginUpdates(t *testing.T) {
 	if sb := byName[selfRestartPluginName]; sb.Kind != "builtin" || sb.Runnable || sb.Latest != embeddedBuiltinVersion() {
 		t.Errorf("%s should be a builtin row comparing against the embedded version: %+v", selfRestartPluginName, sb)
 	}
-	if res.Updatable != 2 {
-		t.Errorf("Updatable = %d, want 2", res.Updatable)
+	if res.Updatable != 3 {
+		t.Errorf("Updatable = %d, want 3", res.Updatable)
 	}
 }
 
