@@ -74,13 +74,18 @@ const reactEnv = loadReact();
  * 假 ctx：slots / locale / theme 三个服务 + effect/on/get。
  * @param mode - "panel"（slots.inject 立即回调）/ "silent"（记录但不回调）/ "none"（连 slots 都没有）。
  * @param navLabel - 假 locale 里 `nav` 这条文案（导航行认领按它匹配；传 "" 模拟语言还没解析出来）。
+ * @param iconSlot - 官方图标槽 `settings.section.icon`（0.2.2+）的存在形态：
+ *   `false` = 老 DSH 没有这个槽（只认 `settings.section`）；
+ *   `true` = 槽已声明（注册官方图标，不走 DOM 认领）；
+ *   `"late"` = 槽比我们晚声明（先挂 DOM 认领，flushIcon() 时再拆掉）。
  * @returns 假 ctx、注册记录与 effect disposer。
  */
-function makeCtx(mode, navLabel = "启动器") {
+function makeCtx(mode, navLabel = "启动器", iconSlot = false) {
 	const registrations = [];
 	const listeners = [];
 	const applied = [];
 	const disposers = [];
+	let pendingIcon = null;
 	const theme = {
 		getTheme: () => ({ preference: "dark" }),
 		setTheme(id) {
@@ -107,9 +112,18 @@ function makeCtx(mode, navLabel = "启动器") {
 	};
 	if (mode !== "none") {
 		ctx.slots = {
-			inject(_key, callback) {
-				if (mode === "panel") return callback();
-				return () => {};
+			inject(key, callback) {
+				if (mode !== "panel") return () => {};
+				// 只回调**真实声明过**的槽：0.2.1 及更早没有 settings.section.icon。
+				if (key === "settings.section.icon") {
+					if (iconSlot === true) return callback();
+					if (iconSlot === "late") {
+						pendingIcon = callback;
+						return () => {};
+					}
+					return () => {};
+				}
+				return callback();
 			},
 			register(options, component) {
 				registrations.push({ options, component });
@@ -122,7 +136,7 @@ function makeCtx(mode, navLabel = "启动器") {
 			register: () => () => {},
 		};
 	}
-	return { ctx, registrations, listeners, applied, disposers };
+	return { ctx, registrations, listeners, applied, disposers, flushIcon: () => pendingIcon?.() };
 }
 
 /**
@@ -194,8 +208,9 @@ function makeFakeObserver() {
 
 /** 面板注册的契约断言（两种 ctx 模式共用）。 */
 function assertPanelRegistration(registrations) {
-	if (registrations.length !== 1) fail(`设置分区该注册 1 次，得到 ${registrations.length}`);
-	const { options, component } = registrations[0];
+	const sections = registrations.filter((entry) => entry.options.name === "settings.section");
+	if (sections.length !== 1) fail(`设置分区该注册 1 次，得到 ${sections.length}`);
+	const { options, component } = sections[0];
 	if (options.name !== "settings.section") fail(`注册的槽该是 settings.section，得到 ${options.name}`);
 	if (options.id !== "dsh-launcher") fail(`分区 id 该是 dsh-launcher，得到 ${options.id}`);
 	if (typeof options.order !== "number") fail("分区 order 必须是数字");
@@ -292,7 +307,8 @@ function assertPanelRegistration(registrations) {
 		if (navTag === void 0) fail("没有注入导航图标那段 style");
 		if (panelTag === void 0) fail("没有注入面板那段 style");
 		const css = navTag.textContent;
-		if (!css.includes("[data-dsh-launcher-nav-icon] > svg{display:none}")) fail("CSS 该藏掉官方那个兜底齿轮");
+		// 放宽后的选择器：0.2.2 把齿轮包进 `<span class="navIcon">`，不能再要求直接子 svg。
+		if (!css.includes("[data-dsh-launcher-nav-icon] svg{display:none}")) fail("CSS 该藏掉官方那个兜底齿轮");
 		if (!css.includes('background-image:url("data:image/png;base64,')) fail("CSS 该用内联 logo 做 ::before 背景");
 		if (a.observers.length !== 1) fail(`该挂 1 个 MutationObserver，得到 ${a.observers.length}`);
 		const observer = a.observers[0];
@@ -321,6 +337,51 @@ function assertPanelRegistration(registrations) {
 		const b = install("", ["通用设置", "启动器", "插件市场"]);
 		if (b.rows.some((r) => r.hasAttribute("data-dsh-launcher-nav-icon"))) fail("label 为空时不该认领任何行");
 		ok("NAV EMPTY-LABEL OK");
+	} finally {
+		delete globalThis.document;
+		delete globalThis.MutationObserver;
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 4.5) 官方导航图标槽（0.2.2+ `settings.section.icon`）：有槽就不再 DOM 认领
+// ---------------------------------------------------------------------------
+{
+	const install = (iconSlot) => {
+		const { doc, rows, styleTags } = makeFakeDom(["通用设置", "启动器", "插件市场"]);
+		const { FakeMutationObserver, instances } = makeFakeObserver();
+		globalThis.document = doc;
+		globalThis.MutationObserver = FakeMutationObserver;
+		const exports = loadModule(void 0)((name) => {
+			throw new Error(`客户端半边不该 require 计划外的包：${name}`);
+		});
+		const { ctx, registrations, flushIcon } = makeCtx("panel", "启动器", iconSlot);
+		exports.apply(ctx);
+		return { rows, styleTags, observers: instances, registrations, flushIcon };
+	};
+
+	try {
+		// ① 槽已声明：注册官方图标（id 与分区一致），完全不碰 DOM
+		const a = install(true);
+		assertPanelRegistration(a.registrations);
+		const icons = a.registrations.filter((entry) => entry.options.name === "settings.section.icon");
+		if (icons.length !== 1) fail(`官方图标该注册 1 次，得到 ${icons.length}`);
+		if (icons[0].options.id !== "dsh-launcher") fail(`图标 id 该跟分区一致，得到 ${icons[0].options.id}`);
+		if (typeof icons[0].component !== "function") fail("图标组件必须是个函数");
+		if (a.rows.some((r) => r.hasAttribute("data-dsh-launcher-nav-icon"))) fail("有官方图标槽时不该再认领 DOM 行");
+		if (a.styleTags.some((t) => t.dataset.pluginCss === "dsh-launcher-plugin/nav-icon.css")) fail("有官方图标槽时不该注入导航图标 CSS");
+		if (a.observers.length !== 0) fail("有官方图标槽时不该挂 MutationObserver");
+		ok("NAV ICON SLOT OK");
+
+		// ② 槽晚声明：先挂 DOM 认领，槽声明后立刻拆干净（不能 logo + 齿轮）
+		const b = install("late");
+		if (b.rows.filter((r) => r.hasAttribute("data-dsh-launcher-nav-icon")).length !== 1) fail("槽未声明时该先挂 DOM 认领");
+		b.flushIcon();
+		assertPanelRegistration(b.registrations);
+		const lateIcons = b.registrations.filter((entry) => entry.options.name === "settings.section.icon");
+		if (lateIcons.length !== 1) fail(`槽晚声明时该补注册官方图标，得到 ${lateIcons.length}`);
+		if (b.rows.some((r) => r.hasAttribute("data-dsh-launcher-nav-icon"))) fail("官方图标注册后没拆掉 DOM 认领");
+		ok("NAV ICON SLOT LATE OK");
 	} finally {
 		delete globalThis.document;
 		delete globalThis.MutationObserver;

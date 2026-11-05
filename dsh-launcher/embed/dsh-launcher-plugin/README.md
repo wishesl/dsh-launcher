@@ -8,7 +8,7 @@
 0.2.6 起同一条线多接一个角色：**网页端即时通道**（见下），让"点启动器换主题"从
 "等 DSH 写完配置再采纳（约 300ms）"变成**页面当场变色（毫秒级）**。
 
-## 版本速览（当前 0.2.18）
+## 版本速览（当前 0.2.19）
 
 | 版本 | 变更 | 提交 |
 |---|---|---|
@@ -29,6 +29,7 @@
 | 0.2.16 | **修内嵌视图在 0.2.1-alpha.5+ 上的全员 401**：上游把 `/api` 准入从 `admit → requestRejection` 反成 `requestRejection → admit`，只覆盖后者成了死代码；补 `admit` 包装，并把 `embedRelax` 从形状探测改成**行为探测**（见「内嵌授权放宽」） | 本次 |
 | 0.2.17 | **启动日志收敛为三类痕迹**（去掉会话开始 / 已取得 appExit / 已取得 timer / 重复的"尝试交付"），见「启动日志只留三类痕迹」 | 本次 |
 | 0.2.18 | **修内嵌视图在 0.2.2-rc.1 上的整页 401**：上游把 index 请求改成 Fetch `Request`（头是 `Headers` 实例），插件按普通对象取 `sec-fetch-site` 恒为 undefined → 放宽补丁静默失效；`headerValue` 认 `Headers`，并补 index 行为探测（见「内嵌授权放宽」） | 本次 |
+| 0.2.19 | **设置导航图标改用 0.2.2 的官方槽** `settings.section.icon`：0.2.2 把齿轮包进 `span.navIcon`，老认领 CSS `> svg` 藏不住 → 「logo + 齿轮」两个图标；老 DSH 仍回退 DOM 认领（选择器已放宽） | 本次 |
 
 > 能力或行为变更**必须** bump `package.json` 版本（启动器用「内置 vs 已装」版本比对分诊，见文末开发须知）。
 
@@ -131,30 +132,40 @@ launcher /ws  ◄── page-hello ──────  dsh-launcher-plugin 客�
 - 面板是**只读视图**：状态存在客户端半边自己的模块级快照里（`publish` 每次换新对象，
   React 靠引用变化重渲染），不落盘、不注册任何设置命名空间。
 
-### 导航图标：官方没有图标位，只能自己认领（0.2.12+）
+### 导航图标：0.2.2 起走官方槽，老 DSH 才认领 DOM（0.2.12+ / 0.2.19 换轨）
 
-`settings.section` 的注册项**只有 `id` / `order` / `label`**（见 `dsh-client-ui-slots` 的
-`SlotLabel` 与 runner 的 `CLIENT_SLOT_API` 文档），而设置导航的图标是官方**按 section id 硬编码**
-的（`navIcon(id)`：account / models / agent-presets / plugins / archived-sessions），
-**未知 id 一律兜底通用齿轮** —— 第三方没有图标位可用。
+0.2.2 之前 `settings.section` 的注册项**只有 `id` / `order` / `label`**，而设置导航的图标是官方
+**按 section id 硬编码**的（`navIcon(id)`：account / models / agent-presets / plugins /
+archived-sessions），**未知 id 一律兜底通用齿轮** —— 第三方没有图标位。
 
-所以「启动器」那一行是自己**认领**来的（做法与 dshmarket 的 `src/client/settings-nav-icon.ts`
-一致，社区同款还有 `dsh-better-sidebar` / `dsh-skill-mcp-panel`）：
+所以老版本上「启动器」那一行是自己**认领**来的（做法与 dshmarket 的
+`src/client/settings-nav-icon.ts` 一致，社区同款还有 `dsh-better-sidebar` / `dsh-skill-mcp-panel`）：
 
 1. `document.querySelectorAll('[role="dialog"] nav button')`，挑 `textContent` 等于我们 label
    的那颗按钮，打上 `data-dsh-launcher-nav-icon`；
 2. 注入一段 CSS（独立的 `<style data-plugin-css="dsh-launcher-plugin/nav-icon.css">`）：
-   `[data-dsh-launcher-nav-icon] > svg{display:none}` 藏掉齿轮，`::before` 用
+   `[data-dsh-launcher-nav-icon] svg{display:none}` 藏掉齿轮，`::before` 用
    `background-image:url(<内联 logo>)` 画我们的图标；
 3. `MutationObserver`（body / childList+subtree+characterData）覆盖重渲染与切语言，
    `queueMicrotask` 把一串变更合并成一次同步；marker 与 `<style>` 随 `ctx.effect` 一起清理。
 
+**0.2.2 起官方补了这个缺口**：新增 `settings.section.icon` 槽（`kind: list`、`inline`、owner 是
+`{ size, active }`），按 `settings.section` 的 id 匹配注册；没有匹配注册时才回退到自带齿轮。
+插件现在优先注册这个槽（`LauncherNavIcon`），**官方槽生效时不再认领 DOM**；只有老 DSH（没有
+这个槽）才回退到上面的 DOM 认领。槽如果比我们晚声明，会立刻把已挂上的认领拆掉（否则会出现
+「logo + 齿轮」两个图标）。
+
+⚠️ 0.2.2 同时改了导航行结构：`<button><span class="navIcon"><svg/></span><span>label</span></button>`
+—— 齿轮不再是 button 的直接子节点。所以兜底 CSS 的选择器已放宽为「行内任意 svg」，
+`> svg` 的旧写法在 0.2.2 上会漏掉齿轮（**这正是「两个图标」的成因**）。
+（第三方插件的同款兜底如果还写 `> svg` / 要求直接子 svg，就会表现成「只剩齿轮」或
+「图标 + 齿轮」两种症状，需要它们各自适配。）
+
 两条纪律：
 
 - **空 label 一条都不标**（语言还没解析出来时不能把整个 nav 认成自己的）；
-- ⚠️ 官方哪天改了设置面板结构（`[role="dialog"] nav button` 不成立），认领就是**零命中** ——
-  结果是**退回通用齿轮**，不报错、不影响面板与主题通道。
-  **官方哪天给 `settings.section` 长出 `icon` 字段，这段整块删掉。**
+- ⚠️ 认领只在老 DSH 上跑：官方改了设置面板结构（`[role="dialog"] nav button` 不成立）时是
+  **零命中** —— 结果是**退回通用齿轮**，不报错、不影响面板与主题通道。
 
 logo 是 `frontend/src/assets/logo.png`（256×256，与启动器窗口品牌区/任务栏同一张）缩到 64×64
 后 base64 内联进 `client.js`（约 12KB；页面读不到插件包内文件，data URI 是唯一自洽做法）。

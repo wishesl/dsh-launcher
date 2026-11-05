@@ -133,10 +133,16 @@ window.__ModuleLoader__.load({
 		/**
 		 * 导航行的样式：藏掉官方那个兜底齿轮，用 `::before` 画我们自己的 logo。
 		 * 只对带认领标记的那一颗按钮生效 —— 不依赖 CSS module 的哈希类名，也不碰其它导航行。
+		 *
+		 * ⚠️ 这是 **0.2.1 及更早** 的兜底路径。0.2.2 起官方给了
+		 * `settings.section.icon` 槽（优先走它，见 installSettingsSection），
+		 * 而且导航行改成了 `<button><span class="navIcon"><svg/></span><span>label</span></button>`
+		 * —— 齿轮不再是 button 的直接子节点。所以选择器放宽到行内任意 `svg`：老结构命中
+		 * （直接子 svg），新结构也命中（span 里的 svg），不会出现"logo + 齿轮"两个图标。
 		 */
 		function navIconCss() {
 			return [
-				"[" + NAV_ICON_MARKER + "] > svg{display:none}",
+				"[" + NAV_ICON_MARKER + "] svg{display:none}",
 				"[" + NAV_ICON_MARKER + "]::before{content:\"\";flex:none;width:" + NAV_ICON_SIZE
 					+ "px;height:" + NAV_ICON_SIZE + "px;border-radius:4px;background-image:url(\""
 					+ NAV_LOGO_DATA_URI + "\");background-repeat:no-repeat;background-position:center;background-size:"
@@ -561,6 +567,33 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
+		 * 设置导航图标（0.2.2+ 官方槽 `settings.section.icon`）。
+		 *
+		 * 上游从 0.2.2 起允许按 `settings.section` 的 id 注册导航图标：外壳把图标槽渲染在
+		 * `<span class="navIcon">` 里，没有匹配注册时才回退到自带的齿轮。参数只有
+		 * `size`（px）与 `active`；外壳负责按钮与标签，`label` 不展示。
+		 */
+		function LauncherNavIcon(props) {
+			const React = reactModule();
+			if (React === null || React === void 0) return null;
+			const size = typeof props?.size === "number" && props.size > 0 ? props.size : NAV_ICON_SIZE;
+			return React.createElement("img", {
+				src: NAV_LOGO_DATA_URI,
+				width: size,
+				height: size,
+				alt: "",
+				draggable: false,
+				style: {
+					display: "block",
+					flex: "none",
+					borderRadius: 4,
+					objectFit: "cover",
+					opacity: props?.active === false ? 0.75 : 1,
+				},
+			});
+		}
+
+		/**
 		 * 注册「设置 → 启动器」分区。
 		 *
 		 * 为什么整段 fail-open：`settings.section` 由 dsh-client-ui-settings-general 声明；换一个
@@ -586,30 +619,55 @@ window.__ModuleLoader__.load({
 				locale: NS,
 				inject: () => ({ readStatus, subscribeStatus, reconnect }),
 			}, LauncherSection)), "dsh-launcher-plugin: 设置分区");
-			// 导航行那一格：官方没有图标位，只能自己认领（传的 label 必须与注册时那个一致）。
-			installNavIcon(ctx, () => t("nav"));
+			// 0.2.2 起官方给导航图标开了槽：优先走它，DOM 认领只留给老 DSH 兜底。
+			// （槽不存在时 inject 的回调永远不跑，所以不能用"注册成功与否"做判据 —— 见下。）
+			let officialIcon = false;
+			let stopNavClaim = null;
+			ctx.effect(() => ctx.slots.inject("settings.section.icon", () => {
+				let dispose = () => {};
+				try {
+					dispose = ctx.slots.register({
+						name: "settings.section.icon",
+						id: SECTION_ID,
+						order: SECTION_ORDER,
+					}, LauncherNavIcon);
+					officialIcon = true;
+					// 槽可能比我们晚声明：已经挂上的 DOM 认领要立刻拆掉，否则会 logo + 齿轮。
+					stopNavClaim?.();
+					stopNavClaim = null;
+				} catch (error) {
+					log("settings.section.icon 注册失败，退回 DOM 认领：" + (error?.message ?? error));
+				}
+				return dispose;
+			}), "dsh-launcher-plugin: 设置导航图标（官方槽）");
+			if (!officialIcon) {
+				stopNavClaim = installNavIcon(ctx, () => t("nav"));
+			}
 			log("设置面板已注册（settings.section → " + SECTION_ID + "，order " + SECTION_ORDER + "）");
 		}
 
 		/**
 		 * 认领「设置」里我们那一行导航，把官方兜底的通用齿轮换成启动器 logo。
 		 *
-		 * 为什么必须自己认领：`settings.section` 只投影 `id / order / label`，而官方 nav 图标是按
-		 * section id 硬编码的（`navIcon(id)`），未知 id 一律通用齿轮 —— 第三方**没有图标位**。
-		 * 做法与 dshmarket 一致（见其 `src/client/settings-nav-icon.ts`）：按**行文本 = 我们的
-		 * label** 认领那一颗按钮，打上标记，再用注入的 CSS 藏掉 `> svg`、用 `::before` 画自己的
-		 * 图标。社区同款还有 dsh-better-sidebar / dsh-skill-mcp-panel。
+		 * **这是 0.2.1 及更早的兜底路径**：0.2.2 已经给了官方图标槽
+		 * （`settings.section.icon`，见上面 installSettingsSection），走那个就不再跑这里。
+		 *
+		 * 为什么当年必须自己认领：`settings.section` 只投影 `id / order / label`，而官方 nav
+		 * 图标是按 section id 硬编码的（`navIcon(id)`），未知 id 一律通用齿轮。做法与 dshmarket
+		 * 一致：按**行文本 = 我们的 label** 认领那一颗按钮，打上标记，再用注入的 CSS 藏掉官方
+		 * 图标、用 `::before` 画自己的图标。
 		 *
 		 * 刻意做窄：只动带标记的那一行，不碰任何官方结构；marker 与观察者随 fiber 一起清理；
 		 * MutationObserver 覆盖重渲染与切语言（行文本会跟着 label 变）。
 		 *
-		 * ⚠️ 官方哪天改了设置面板结构（`[role="dialog"] nav button` 不成立），这里就是零命中 ——
+		 * ⚠️ 官方改了设置面板结构（`[role="dialog"] nav button` 不成立）时这里零命中 ——
 		 * 结果是**退回通用齿轮**，不报错、不影响面板与主题通道。
-		 * ⚠️ 官方哪天给 `settings.section` 长出 `icon` 字段，这段整个删掉（dshmarket 也这么定的）。
+		 *
+		 * @returns 这段认领的 disposer（官方图标槽晚声明时用来提前拆掉它）。
 		 */
 		function installNavIcon(ctx, resolveLabel) {
-			if (typeof document === "undefined") return;
-			ctx.effect(() => {
+			if (typeof document === "undefined") return () => {};
+			return ctx.effect(() => {
 				const tag = document.createElement("style");
 				tag.dataset.plugin = "dsh-launcher-plugin";
 				tag.dataset.pluginCss = NAV_CSS_TAG_ID;
@@ -651,8 +709,7 @@ window.__ModuleLoader__.load({
 					tag.remove();
 				};
 			}, "dsh-launcher-plugin: 设置导航图标");
-		}
-		//#endregion
+		}		//#endregion
 
 		function apply(ctx) {
 			// 面板（连同它要的主题展示数据）整段 fail-open：槽不在、slots/locale 行为变了、
