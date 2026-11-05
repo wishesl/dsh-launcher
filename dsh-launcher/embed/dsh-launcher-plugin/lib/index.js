@@ -1046,9 +1046,25 @@ function attachSessionNotify(ctx, s) {
  *  `http://wails.localhost`（Wails v2 在 Windows 上固定用它承载前端）。要换源改这里。 */
 const EMBED_ALLOWED_ORIGINS = new Set(["http://wails.localhost"]);
 
-/** 读取一个请求头（Node 已小写化，这里兼容原始大小写与数组形态）。 */
+/**
+ * 读取一个请求头。两种载体现面都有：
+ *   - `node:http` 的 IncomingMessage.headers：普通对象、键已小写化（值可能是数组）；
+ *   - Fetch 的 `Headers`：**必须走 `.get()`**。属性名索引在它上面恒为 undefined。
+ *
+ * ⚠️ 0.2.2-rc.1 踩过：上游把 index 请求包成 Fetch `Request` 才交给 `authorizeIndex`
+ * （`serveResource` 里 `resource(new Request(target, { headers }))`）。我们仍按老形状用
+ * `headers["sec-fetch-site"]` 取，拿到 undefined → `sec-fetch-site` 判定永远不成立 →
+ * `authorizeIndex` 补丁静默失效 → 跨站 iframe 的 index 走 303+cookie（cookie 带不上）
+ * → 整页 401「dsh web authentication required」。判据要对**两种形状**都成立。
+ */
 function headerValue(headers, name) {
-	const raw = headers?.[name] ?? headers?.[name.toLowerCase()];
+	if (headers === void 0 || headers === null) return void 0;
+	// duck-typing 而不是 `instanceof Headers`：跨 realm / 不同版本的 Headers 也要认。
+	if (typeof headers.get === "function") {
+		const got = headers.get(name);
+		return typeof got === "string" ? got : void 0;
+	}
+	const raw = headers[name] ?? headers[name.toLowerCase()];
 	if (typeof raw === "string") return raw;
 	return Array.isArray(raw) && raw.length > 0 ? raw[0] : void 0;
 }
@@ -1125,6 +1141,39 @@ function probeEmbedRelax(conn) {
 }
 
 /**
+ * **行为探测（index）**：按上游真正的调用形状走一遍 `authorizeIndex`，看跨站 + 有效 token
+ * 能不能直接放行。0.2.2-rc.1 起 index 请求是 Fetch `Request`（headers 为 `Headers`），
+ * 上游还传一个 `{ writeHead, end }` 响应壳；拿老形状（node req + node res）探测等于没探。
+ *
+ * 探测**必须真跑**：头取不到时补丁会静默失效，形状(方法在不在)完全看不出来 —— 这正是
+ * 0.2.2-rc.1 的翻车点（内嵌视图整页 401，插件仍报 embedRelax=true）。
+ */
+function probeEmbedIndex(conn, launchToken) {
+	if (typeof conn.authorizeIndex !== "function") return false;
+	if (typeof launchToken !== "string" || launchToken.length === 0) return false;
+	let request;
+	try {
+		request = new Request(`http://${EMBED_PROBE_AUTHORITY}/?token=${encodeURIComponent(launchToken)}`, {
+			method: "GET",
+			headers: new Headers({
+				host: EMBED_PROBE_AUTHORITY,
+				"sec-fetch-site": "cross-site",
+			}),
+		});
+	} catch {
+		return false; // 没有 Fetch 全局（老 Node）：按判负处理，内嵌入口置灰
+	}
+	const shim = { writeHead() {}, end() {} };
+	// 标一下：放行分支不要为这次探测刷「真请求」的日志（启动日志只留真痕迹）。
+	request.__dshLauncherPluginProbe = true;
+	try {
+		return conn.authorizeIndex(request, shim) === true;
+	} catch {
+		return false;
+	}
+}
+
+/**
  * 放宽 DSH 的浏览器会话校验，让启动器能把界面嵌进自己的跨源 iframe。
  *
  * 为什么必须放宽：DSH 的会话 cookie 是 `SameSite=Strict`（见 client-connection 的
@@ -1143,6 +1192,10 @@ function probeEmbedRelax(conn) {
  * （web boot 读不到 Cordis 清单 → 报 `1 entry did not activate`）。
  * 证据见 0.2.1-rc.1 `dsh-client-connection/lib/index.js` 的 `requestRejection` / `admit`
  * 以及 `register()` 里的 `const admission = this.admit(req)`。
+ *
+ * ⚠️ 第 1 处 0.2.2-rc.1 又变了**参数字形**：index 不再是 node `req/res`，而是 Fetch
+ * `Request` + `{ writeHead, end }` 响应壳（`frontend-static` 的 `serveResource` 包出来的）。
+ * 头必须用 `Headers.get()` 读，否则补丁静默失效、整页 401（见 `headerValue` 的注释）。
  *
  * 放宽只解决**认证**这一步：Host/Origin 门的结果、以及不命中判据的来源一律原样透传。
  * 结论写进能力（embedRelax）随握手上报：内嵌入口按它置灰，而不是让用户撞 401。
@@ -1173,7 +1226,9 @@ function relaxEmbedAuth(ctx) {
 		// 只在**真的跨站 iframe** 里走直出：普通浏览器仍走原来的 303+cookie，
 		// 否则它拿不到 cookie，后续 /api 会 401。
 		if (site === "cross-site" && hasValidLaunchToken(req, auth.launchToken)) {
-			ctx.logger.info("[dsh-launcher-plugin] embed: 跨站 iframe 携带有效 token → 直接渲染 index（跳过 cookie 往返）");
+			if (req?.__dshLauncherPluginProbe !== true) {
+				ctx.logger.info("[dsh-launcher-plugin] embed: 跨站 iframe 携带有效 token → 直接渲染 index（跳过 cookie 往返）");
+			}
 			return true;
 		}
 		return originalAuthorizeIndex(req, res);
@@ -1216,6 +1271,14 @@ function relaxEmbedAuth(ctx) {
 		const why = "DSH 的 /api 准入没有采纳放宽（上游改了内部实现？）";
 		ctx.logger.warn(`[dsh-launcher-plugin] embed: 行为探测未通过（${why}）`);
 		setCapability("embedRelax", false, `${why}：内嵌视图会一直 401 / 自动重连中`);
+		return;
+	}
+	// index 也要探：0.2.2-rc.1 起它是 Fetch `Request` 形状，头读不到时补丁会静默失效 ——
+	// 症状正是「整页 401 / dsh web authentication required」，与 /api 是否放宽无关。
+	if (!probeEmbedIndex(conn, auth.launchToken)) {
+		const why = "DSH 的 index 准入没有采纳放宽（上游改了请求形状？）";
+		ctx.logger.warn(`[dsh-launcher-plugin] embed: index 行为探测未通过（${why}）`);
+		setCapability("embedRelax", false, `${why}：内嵌视图会整页 401 / dsh web authentication required`);
 		return;
 	}
 	setCapability("embedRelax", true);

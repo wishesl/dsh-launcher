@@ -8,7 +8,7 @@
 0.2.6 起同一条线多接一个角色：**网页端即时通道**（见下），让"点启动器换主题"从
 "等 DSH 写完配置再采纳（约 300ms）"变成**页面当场变色（毫秒级）**。
 
-## 版本速览（当前 0.2.17）
+## 版本速览（当前 0.2.18）
 
 | 版本 | 变更 | 提交 |
 |---|---|---|
@@ -28,6 +28,7 @@
 | 0.2.15 | **网页端面板的功能清单补上会话通知**（0.2.14 只改了服务端半边，DSH 设置里的「功能展示」看不到这项） | 本次 |
 | 0.2.16 | **修内嵌视图在 0.2.1-alpha.5+ 上的全员 401**：上游把 `/api` 准入从 `admit → requestRejection` 反成 `requestRejection → admit`，只覆盖后者成了死代码；补 `admit` 包装，并把 `embedRelax` 从形状探测改成**行为探测**（见「内嵌授权放宽」） | 本次 |
 | 0.2.17 | **启动日志收敛为三类痕迹**（去掉会话开始 / 已取得 appExit / 已取得 timer / 重复的"尝试交付"），见「启动日志只留三类痕迹」 | 本次 |
+| 0.2.18 | **修内嵌视图在 0.2.2-rc.1 上的整页 401**：上游把 index 请求改成 Fetch `Request`（头是 `Headers` 实例），插件按普通对象取 `sec-fetch-site` 恒为 undefined → 放宽补丁静默失效；`headerValue` 认 `Headers`，并补 index 行为探测（见「内嵌授权放宽」） | 本次 |
 
 > 能力或行为变更**必须** bump `package.json` 版本（启动器用「内置 vs 已装」版本比对分诊，见文末开发须知）。
 
@@ -208,15 +209,25 @@ cookie 是 `SameSite=Strict`：跨站 iframe 里的请求**永远不带它**。�
 | ≤ 0.2.1-alpha.2（那时推荐 0.2.0-rc.2） | `admit()` 内部调 `requestRejection()` | 生效 |
 | ≥ 0.2.1-alpha.5（含 0.2.1-rc.1 / rc.2） | `admit()` 自带逻辑，`requestRejection()` 只是它的包装 | **死代码** |
 
+⚠️ **index 的请求形状也换过一次（0.2.2-rc.1）**：`frontend-static` 不再把 node `req/res`
+交给 `authorizeIndex`，而是包成 Fetch `Request`（`headers` 是 `Headers` 实例）+ `{ writeHead, end }`
+响应壳（`serveResource` 里 `resource(new Request(target, { headers }))`）。按普通对象
+`headers["sec-fetch-site"]` 取恒为 `undefined` → 放宽判据不成立 → 跨站 iframe 的
+`/?token=…` 走 303+cookie（cookie 带不上）→ **整页** 401 `dsh web authentication required`。
+`headerValue` 现在两种载体都认（`Headers` 走 `.get()`）；「/api 401」与「整页 401」是两个
+不同形状的翻车点，探测各测一条。
+
 失效时的症状很好认：**网页端（顶层标签页）一切正常，只有内嵌视图**每条 `/api` 401，web boot
 读不到 Cordis 清单 → 界面弹「Failed to load plugins / `web boot: 1 entry did not activate`」
-（激活时要调 Host API 的那个客户端插件会被标 `failed`）。
+（激活时要调 Host API 的那个客户端插件会被标 `failed`）；index 形状变了则是内嵌视图
+**整页**只有一行 `dsh web authentication required; reopen the URL printed by dsh web.`。
 
 **纪律**：这一项的能力结论必须是**行为探测**（拿一个"不带 cookie、Origin 与 Host 同源"的合成
-请求真跑一遍 `admit`），不能是"`authorizeIndex` / `requestRejection` 在不在"——上游改动方向时
-方法两个都还在，形状探测会报 `true`，入口不置灰，用户只能撞 401。回归测试：
-`testdata/plugin-embed-harness.mjs`（三种形状）+ `TestEmbedRelaxCapabilityAcrossUpstreamShapes`
-（连真桥接断言能力上报）。
+请求真跑一遍 `admit`；index 则按上游真实形状——Fetch `Request` + 响应壳——真跑一遍
+`authorizeIndex`），不能是"`authorizeIndex` / `requestRejection` 在不在"——上游改动方向或
+请求形状时，方法两个都还在，形状探测会报 `true`，入口不置灰，用户只能撞 401。回归测试：
+`testdata/plugin-embed-harness.mjs`（四种形状 `new` / `old` / `fetch` / `nopeer`）+
+`TestEmbedRelaxCapabilityAcrossUpstreamShapes`（连真桥接断言能力上报）。
 
 ## 会话通知（0.2.14+）
 

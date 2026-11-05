@@ -108,11 +108,12 @@ func TestBridgeEndToEndWithRealPlugin(t *testing.T) {
 //
 //	新形状（0.2.1-alpha.5 起：`requestRejection` 只是 `admit` 的包装、/api 直接调 admit）→ true；
 //	老形状（≤0.2.1-alpha.2：`admit` 委托 `requestRejection`，覆盖后者即生效）→ 也必须 true；
+//	0.2.2-rc.1 形状（index 请求是 Fetch `Request`，头是 `Headers` 实例）→ 必须 true；
 //	翻车形状（`admit` 自带逻辑、又拿不到 browserPeer）→ 必须 false。
 //
 // 为什么要连真桥接：能力是随握手上报的，而**假阳性**（形状在、语义变）会让内嵌入口不置灰，
-// 用户只能撞 401 —— 0.2.1-rc.1 就是这么翻的（内嵌视图每条 /api 401，web boot 报
-// `1 entry did not activate`）。所以这里不只断言值，还断言这一项**必须存在**：
+// 用户只能撞 401 —— 0.2.1-rc.1 与 0.2.2-rc.1 就是这么翻的（前者每条 /api 401、后者整页
+// `dsh web authentication required`）。所以这里不只断言值，还断言这一项**必须存在**：
 // 缺席等于 fail-open，前端同样不会置灰。
 func TestEmbedRelaxCapabilityAcrossUpstreamShapes(t *testing.T) {
 	node, err := exec.LookPath("node")
@@ -130,6 +131,7 @@ func TestEmbedRelaxCapabilityAcrossUpstreamShapes(t *testing.T) {
 	}{
 		{mode: "new", want: true},     // 0.2.1-rc.1 的调用方向
 		{mode: "old", want: true},     // 0.2.0-rc.2 的调用方向（向后兼容）
+		{mode: "fetch", want: true},   // 0.2.2-rc.1：index 请求变 Fetch Request
 		{mode: "nopeer", want: false}, // 再改一次 → 必须判负
 	} {
 		t.Run(tc.mode, func(t *testing.T) {
